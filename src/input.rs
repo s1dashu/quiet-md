@@ -4,7 +4,7 @@
 use crate::editor::text::{LayoutCache, RichTextElement, TextSpec};
 use crate::model::{Align, BlockId, RichText};
 use crate::theme::Theme;
-use gpui::*;
+use gpui::{prelude::FluentBuilder, *};
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use unicode_segmentation::UnicodeSegmentation;
@@ -140,6 +140,7 @@ impl TextField {
             pointer_hidden: false,
         }
     }
+
 
     pub fn set_placeholder(&mut self, s: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.placeholder = s.into();
@@ -549,6 +550,7 @@ impl Render for TextField {
             .relative()
             .flex_1()
             .min_w_0()
+            .when(self.source,|d|d.w_full())
             .overflow_hidden()
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))

@@ -79,7 +79,7 @@ impl Editor {
             }
             return;
         }
-        if k.key == "e" && !m.shift && !m.alt && !self.source_preview {
+        if k.key == "e" && !m.shift && !m.alt {
             cx.stop_propagation();
             cx.emit(EditorEvent::Mode(false));
             return;

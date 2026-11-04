@@ -322,7 +322,7 @@ impl R<'_> {
         let content: AnyElement = match &b.kind {
             BlockKind::Text | BlockKind::Heading { .. } => self.text_block(b, env, cx),
             BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. } => self.list_item(b, siblings, idx, env, cx),
-            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, cx),
+            BlockKind::Code { lang, wrap, .. } => self.code_or_diagram(b, lang, *wrap, cx),
             // The focus decoration: a 4pt bar at the column edge, the text
             // 12pt after it and unchanged.
             BlockKind::Quote => {
@@ -694,7 +694,6 @@ impl R<'_> {
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
                             window.focus(&e.focus);
-                            if e.source_preview { cx.emit(super::view::EditorEvent::SourceTask(id)); return; }
                             e.core.toggle_todo(id);
                             e.changed(window, cx);
                         }),
@@ -730,6 +729,40 @@ impl R<'_> {
                     .child(div().flex_1().min_w_0().child(el)),
             )
             .child(self.children_of(b, env, cx))
+            .into_any_element()
+    }
+
+    /// In a folder document a Mermaid block shows its diagram. The block's text
+    /// stays the source: with the caret inside, or on request, it shows too.
+    fn code_or_diagram(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<Editor>) -> AnyElement {
+        if !self.ed.source_doc || !lang.eq_ignore_ascii_case("mermaid") { return self.code_block(b, lang, wrap, cx); }
+        let id = b.id;
+        let width = self.ed.layout.content.max(200.);
+        let (diagram, queued) = self.ed.diagrams.borrow_mut().request(&b.text.text, width, &crate::pele::Palette::current());
+        if queued { let e = cx.entity(); cx.defer(move |cx| e.update(cx, |e, cx| e.pump_diagrams(cx))); }
+        let editing = self.focused && self.ed.core.sel.head.block == id;
+        let forced = self.ed.diagram_source.contains(&id);
+        let show_source = editing || forced || matches!(diagram, crate::pele::Diagram::Failed(_));
+        let toggle = !editing && !matches!(diagram, crate::pele::Diagram::Failed(_));
+        let group = SharedString::from(format!("diagram-{}", id.0));
+        let picture = match diagram {
+            crate::pele::Diagram::Ready { image, width: w, height: h } => {
+                let scale = (width / w).min(1.);
+                div().w_full().flex().justify_center().py(px(8.)).child(img(ImageSource::Render(image)).w(px(w * scale)).h(px(h * scale)).flex_none()).into_any_element()
+            }
+            crate::pele::Diagram::Pending => div().h(px(96.)).flex().items_center().justify_center().text_size(px(12.)).text_color(Theme::text_caption()).child(crate::settings::tr("正在绘制图表…", "Rendering diagram…")).into_any_element(),
+            crate::pele::Diagram::Failed(e) => div().pt(px(6.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).child(crate::localized_format!("无法绘制图表：{}", "Could not render this diagram: {}", e)).into_any_element(),
+        };
+        div().id(("diagram", id.0)).relative().w_full().group(group.clone())
+            .when(show_source, |d| d.child(self.code_block(b, lang, wrap, cx)))
+            .child(picture)
+            .when(toggle, |d| d.child(
+                div().id(("diagram-toggle", id.0)).absolute().top(px(4.)).right(px(4.)).px(px(8.)).h(px(24.)).flex().items_center().rounded(px(6.)).cursor_pointer()
+                    .bg(crate::theme::raised(Theme::bg_body())).border_1().border_color(Theme::line_border()).text_size(px(12.)).text_color(Theme::text_caption())
+                    .invisible().group_hover(group, |s| s.visible())
+                    .child(if forced { crate::settings::tr("隐藏源码", "Hide source") } else { crate::settings::tr("显示源码", "Show source") })
+                    .on_click(cx.listener(move |e, _, _, cx| { cx.stop_propagation(); if !e.diagram_source.remove(&id) { e.diagram_source.insert(id); } cx.notify(); })),
+            ))
             .into_any_element()
     }
 
@@ -1166,6 +1199,7 @@ impl Editor {
                             .children(self.doc_icon_el(cx))
                             .child(div().flex_1().min_w_0().child(r.text_el(TITLE, &self.core.doc.title, spec, Align::Left, Some(crate::settings::text("请输入标题").into())))),
                     )
+                    .children(self.source_meta_el(cx))
                     .into_any_element()
             }
             Item::Block { path, gap } => {
@@ -1594,9 +1628,36 @@ fn code_rows(cache: &HashMap<BlockId, super::text::TextLayout>) -> HashMap<Block
     cache.iter().filter(|(_, l)| l.mono).map(|(id, l)| (*id, l.rows_per_line())).collect()
 }
 
+impl Editor {
+    pub fn toggle_source_meta(&mut self, cx: &mut Context<Self>) { self.meta_open = !self.meta_open; cx.notify(); }
+
+    /// Frontmatter and imports under the title: one quiet line, open on request.
+    fn source_meta_el(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let meta = &self.source_meta;
+        if meta.is_empty() { return None; }
+        let open = self.meta_open;
+        let count = meta.fields.len() + meta.imports.len();
+        let preview = meta.fields.iter().map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{k}: {v}") }).chain(meta.imports.iter().cloned()).collect::<Vec<_>>().join("  ·  ");
+        let head = div().id("source-meta").h(px(24.)).w_full().min_w_0().flex().items_center().gap(px(4.)).rounded(px(6.)).cursor_pointer().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption())
+            .child(crate::ui::icon("tree-triangle", 10., Theme::text_caption()).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+            .child(div().flex_none().child(if count == 1 { crate::settings::tr("1 项属性", "1 property").to_string() } else { crate::localized_format!("{} 项属性", "{} properties", count) }))
+            .when(!open, |d| d.child(div().flex_1().min_w_0().pl(px(8.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(Theme::text_placeholder()).child(preview)))
+            .on_click(cx.listener(|e, _, _, cx| { cx.stop_propagation(); e.meta_open = !e.meta_open; cx.notify(); }));
+        let row = |k: String, v: String| div().w_full().min_w_0().flex().gap(px(12.)).py(px(2.)).text_size(px(12.)).line_height(px(18.))
+            .child(div().w(px(96.)).flex_none().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(Theme::text_caption()).child(k))
+            .child(div().flex_1().min_w_0().text_color(Theme::text_code()).child(v));
+        Some(div().pt(px(8.)).w_full().min_w_0().child(head)
+            .when(open, |d| d.child(div().pt(px(4.)).pl(px(14.)).w_full().min_w_0()
+                .children(meta.fields.iter().map(|(k, v)| row(k.clone(), v.clone())))
+                .children(meta.imports.iter().map(|v| row("import".into(), v.clone())))))
+            .into_any_element())
+    }
+}
+
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t0 = std::time::Instant::now();
+        if self.source_doc { self.diagrams.borrow_mut().density = window.scale_factor(); }
         let el = self.render_editor(window, cx);
         crate::devtools::RENDER_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         el
@@ -1679,7 +1740,7 @@ pub(super) fn block_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env
         let content: AnyElement = match &b.kind {
             BlockKind::Text | BlockKind::Heading { .. } => self.text_block(b, env, cx),
             BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. } => self.list_item(b, siblings, idx, env, cx),
-            BlockKind::Code { lang, wrap, .. } => self.code_block(b, lang, *wrap, cx),
+            BlockKind::Code { lang, wrap, .. } => self.code_or_diagram(b, lang, *wrap, cx),
             BlockKind::Quote => div()
                 .relative()
                 .pl(px(14.))
@@ -1942,7 +2003,6 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
                             window.focus(&e.focus);
-                            if e.source_preview { cx.emit(super::view::EditorEvent::SourceTask(id)); return; }
                             e.core.toggle_todo(id);
                             e.changed(window, cx);
                         }),

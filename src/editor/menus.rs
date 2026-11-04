@@ -48,6 +48,11 @@ pub const GROUPS: [SlashGroup; 4] = [
     SlashGroup { title: "小应用", keywords: &["小应用", "miniapp", "xiaoyingyong", "xyy"] },
 ];
 
+/// What a Markdown file can actually say; the rest has no source form.
+pub fn in_markdown(kind: SlashKind) -> bool {
+    matches!(kind, SlashKind::Text | SlashKind::Heading(1..=6) | SlashKind::Ordered | SlashKind::Bullet | SlashKind::Code | SlashKind::Quote | SlashKind::Divider | SlashKind::Link | SlashKind::Todo | SlashKind::Table | SlashKind::Formula)
+}
+
 pub const BLUE: u32 = 0x336df4;
 pub const INDIGO: u32 = 0x5b65f5;
 pub const GREEN: u32 = 0x35bd4b;

@@ -83,10 +83,22 @@ pub fn start(window: &mut Window, cx: &mut App) {
         // Only leading whitespace is insignificant: `type ab ` types a trailing space.
         for line in script.lines().map(str::trim_start).filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
             let (cmd, rest) = line.split_once(' ').unwrap_or((line, ""));
+            if cmd == "fswrite" {
+                if let Some((path, text)) = rest.split_once(" :: ") { let _ = std::fs::write(path, text.replace("\\n", "\n")); }
+                continue;
+            }
+            if cmd == "fsrm" { let _ = std::fs::remove_file(rest); continue; }
+            if cmd == "abort" { std::process::abort(); }
+            if cmd.starts_with("folder-") && cmd != "folder-state" {
+                if let Some(typed) = handle.downcast::<crate::app::Workspace>() {
+                    let _ = typed.update(cx, |ws, window, cx| { if let Some(f) = ws.folder.clone() { f.update(cx, |f, cx| f.test_command(cmd, rest, window, cx)); } });
+                }
+                continue;
+            }
             if cmd == "folder-state" {
                 if let Some(typed) = handle.downcast::<crate::app::Workspace>() {
                     let _ = typed.update(cx, |ws, _, cx| {
-                        eprintln!("devtools: folder-state {}", ws.folder.as_ref().map(|f| f.read(cx).test_state()).unwrap_or_else(|| "closed".into()));
+                        eprintln!("devtools: folder-state {}", ws.folder.as_ref().map(|f| f.read(cx).test_state(cx)).unwrap_or_else(|| "closed".into()));
                     });
                 }
                 continue;

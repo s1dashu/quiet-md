@@ -19,8 +19,11 @@ use std::rc::Rc;
 use std::time::Duration;
 
 pub enum EditorEvent {
-    SourceTask(BlockId),
+    /// A link in a folder document: the folder resolves it.
     SourceLink(String),
+    /// Undo (false) or redo (true) past this document's history: earlier
+    /// source edits, which only the folder's buffer remembers.
+    SourceUndo(bool),
     Changed,
     /// ⌘S: write to disk now instead of waiting for the autosave debounce.
     Save,
@@ -230,7 +233,15 @@ pub struct Editor {
     pub created: u64,
     /// 阅读模式 (`reading.rs`), and the document as it was when it began.
     pub read_only: bool,
-    pub source_preview: bool,
+    /// A Markdown / MDX file from an open folder (`source_doc.rs`): edits are
+    /// written back as source patches, so what Markdown cannot say is not offered.
+    pub source_doc: bool,
+    pub source_meta: crate::source_doc::Meta,
+    pub(super) meta_open: bool,
+    pub(super) diagrams: Rc<RefCell<crate::pele::Diagrams>>,
+    pub(super) diagram_task: Option<Task<()>>,
+    /// Mermaid blocks showing their source next to the diagram.
+    pub(super) diagram_source: HashSet<BlockId>,
     pub(super) ro_doc: Option<crate::model::Document>,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
@@ -432,7 +443,12 @@ impl Editor {
             modified,
             created: modified,
             read_only: false,
-            source_preview: false,
+            source_doc: false,
+            source_meta: Default::default(),
+            meta_open: false,
+            diagrams: Default::default(),
+            diagram_task: None,
+            diagram_source: Default::default(),
             ro_doc: None,
             info: Default::default(),
             cd,
@@ -494,6 +510,32 @@ impl Editor {
         self.ro_doc = self.read_only.then(|| self.core.doc.clone());
         self.refresh_find(false, cx);
         cx.notify();
+    }
+
+    /// The file changed underneath (external edit, Source mode): new base document.
+    pub fn rebase_source(&mut self, doc: crate::model::Document, meta: crate::source_doc::Meta, cx: &mut Context<Self>) {
+        self.source_meta = meta;
+        self.diagram_source.clear();
+        let core = core::Core::new(doc);
+        self.receive_document(&core, cx);
+    }
+
+    /// Render the newest diagram waiting for a paint, one at a time, off the UI thread.
+    pub(super) fn pump_diagrams(&mut self, cx: &mut Context<Self>) {
+        let mut d = self.diagrams.borrow_mut();
+        if d.running { return; }
+        let Some(job) = d.next_job() else { return };
+        d.running = true; drop(d);
+        self.diagram_task = Some(cx.spawn(async move |this, cx| {
+            let key = job.key;
+            let result = cx.background_executor().spawn(async move { crate::pele::render(&job.source, job.width, &job.palette, job.density) }).await;
+            let _ = this.update(cx, |e, cx| {
+                let evicted = { let mut d = e.diagrams.borrow_mut(); d.running = false; d.finish(key, result) };
+                for image in evicted { cx.drop_image(image, None); }
+                e.pump_diagrams(cx);
+                cx.notify();
+            });
+        }));
     }
 
     pub fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -616,7 +658,7 @@ impl Editor {
         };
         let (grid, with_text) = (self.slash_grid(), self.slash_grid_text());
         let ranked: Vec<usize> =
-            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).collect();
+            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).filter(|i| !self.source_doc || menus::in_markdown(menus::SLASH_ITEMS[*i].kind)).collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;
@@ -933,6 +975,8 @@ impl Editor {
     }
 
     fn insert_image_bytes(&mut self, bytes: &[u8], ext: &str, window: &mut Window, cx: &mut Context<Self>) {
+        // Nothing is copied into a folder behind the user's back.
+        if self.source_doc { return self.toast(crate::settings::tr("文件夹文档不接受粘贴图片：请在源码中写入图片的相对路径", "Images can't be pasted into a folder document: add a relative image path in Source mode"), cx); }
         let b = match super::image::image_block_from(bytes, ext) {
             Ok(b) => b,
             Err(msg) => return self.toast(msg, cx),
@@ -1866,6 +1910,7 @@ impl Editor {
         self.cancel_crop(cx);
         self.slash = None;
         self.marked = None;
+        if self.source_doc && !self.core.can_undo() { cx.emit(EditorEvent::SourceUndo(false)); return; }
         self.core.undo();
         self.changed(window, cx);
     }
@@ -1877,6 +1922,7 @@ impl Editor {
         self.cancel_crop(cx);
         self.slash = None;
         self.marked = None;
+        if self.source_doc && !self.core.can_redo() { cx.emit(EditorEvent::SourceUndo(true)); return; }
         self.core.redo();
         self.changed(window, cx);
     }

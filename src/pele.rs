@@ -1,6 +1,9 @@
-//! Pele runs locally in QuickJS with no host functions or project imports.
+//! Pele runs locally in QuickJS with no host functions or project imports. The
+//! code block stays the document's truth; a rendered diagram is a disposable
+//! image in a bounded per-editor cache, keyed by everything that shapes it.
 use anyhow::{Result, ensure};
-use std::{collections::HashMap, sync::{Arc, LazyLock, Mutex}, time::{Duration, Instant}};
+use gpui::RenderImage;
+use std::{collections::{HashMap, hash_map::DefaultHasher}, hash::{Hash, Hasher}, sync::{Arc, LazyLock, Mutex}, time::{Duration, Instant}};
 
 const BUNDLE: &str = include_str!("../assets/pele/pele.global.js");
 const FONT: &str = if cfg!(target_os = "windows") { "Segoe UI" } else { "Helvetica Neue" };
@@ -9,13 +12,16 @@ static SERIAL: Mutex<()> = Mutex::new(());
 #[derive(Clone)]
 pub struct Palette { pub background: String, pub text: String, pub muted: String, pub surface: String, pub border: String, pub accent: String }
 impl Palette {
+    fn key(&self) -> String { format!("{}{}{}{}{}{}", self.background, self.text, self.muted, self.surface, self.border, self.accent) }
     pub fn current() -> Self {
         fn hex(c: gpui::Hsla) -> String { let c = c.to_rgb(); let bg = crate::theme::Theme::bg_body().to_rgb(); let mix = |v: f32, b: f32| ((v * c.a + b * (1. - c.a)) * 255.).round() as u8; format!("#{:02x}{:02x}{:02x}", mix(c.r, bg.r), mix(c.g, bg.g), mix(c.b, bg.b)) }
         use crate::theme::Theme;
         Self { background: hex(Theme::bg_body()), text: hex(Theme::text()), muted: hex(Theme::text_caption()), surface: hex(Theme::window()), border: hex(Theme::line_border()), accent: hex(Theme::primary()) }
     }
 }
-pub fn render(source: &str, width: f32, palette: &Palette) -> Result<Vec<u8>> {
+/// A rasterized diagram. `width`/`height` are logical pixels.
+pub struct Raster { pub bgra: image::RgbaImage, pub width: f32, pub height: f32 }
+pub fn render(source: &str, width: f32, palette: &Palette, density: f32) -> Result<Raster> {
     ensure!(source.len() <= 16 * 1024 && source.lines().count() <= 256, "Diagram exceeds preview limits; source is available");
     let _guard = SERIAL.lock().map_err(|_| anyhow::anyhow!("Diagram worker unavailable"))?;
     let runtime = rquickjs::Runtime::new()?;
@@ -47,10 +53,64 @@ pub fn render(source: &str, width: f32, palette: &Palette) -> Result<Vec<u8>> {
     };
     let tree = resvg::usvg::Tree::from_str(&svg, &options)?;
     let size = tree.size();
-    let scale = 2f32.min(1600. / size.width().max(size.height())).min((1_048_576. / (size.width() * size.height())).sqrt());
+    // Sharp on this display, and bounded: 16 MB of pixels at most.
+    let scale = density.clamp(1., 3.).min(4096. / size.width().max(size.height())).min((4_194_304. / (size.width() * size.height())).sqrt());
     let mut pixmap = resvg::tiny_skia::Pixmap::new((size.width() * scale).ceil().max(1.) as u32, (size.height() * scale).ceil().max(1.) as u32).ok_or_else(|| anyhow::anyhow!("Diagram too large"))?;
     resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
-    Ok(pixmap.encode_png()?)
+    let (w, h) = (pixmap.width(), pixmap.height());
+    let mut bgra = pixmap.take();
+    // GPUI wants premultiplied BGRA, which tiny-skia already is apart from the order.
+    for [r, _, b, _] in bgra.as_chunks_mut::<4>().0 { std::mem::swap(r, b); }
+    let bgra = image::RgbaImage::from_raw(w, h, bgra).ok_or_else(|| anyhow::anyhow!("Diagram buffer"))?;
+    Ok(Raster { bgra, width: size.width(), height: size.height() })
+}
+
+#[derive(Clone)]
+pub enum Diagram { Pending, Ready { image: Arc<RenderImage>, width: f32, height: f32 }, Failed(String) }
+struct Slot { diagram: Diagram, used: u64, bytes: usize }
+pub struct Job { pub key: u64, pub source: String, pub width: f32, pub palette: Palette, pub density: f32 }
+const MAX_BYTES: usize = 64 * 1024 * 1024;
+const MAX_ENTRIES: usize = 64;
+/// Diagrams render only when painted, one at a time, newest request first; a
+/// request whose row scrolled away before its turn simply never runs.
+#[derive(Default)]
+pub struct Diagrams { slots: HashMap<u64, Slot>, queue: Vec<u64>, jobs: HashMap<u64, Job>, tick: u64, pub running: bool, pub density: f32 }
+impl Diagrams {
+    /// What to show for `source`, requesting it if needed; the bool says a new job was queued.
+    pub fn request(&mut self, source: &str, width: f32, palette: &Palette) -> (Diagram, bool) {
+        let density = self.density.max(1.);
+        let mut h = DefaultHasher::new();
+        source.hash(&mut h); (width as u32).hash(&mut h); palette.key().hash(&mut h); ((density * 4.) as u32).hash(&mut h);
+        let key = h.finish();
+        self.tick += 1;
+        if let Some(slot) = self.slots.get_mut(&key) { slot.used = self.tick; return (slot.diagram.clone(), false); }
+        let queued = !self.jobs.contains_key(&key);
+        if queued { self.jobs.insert(key, Job { key, source: source.to_string(), width, palette: palette.clone(), density }); }
+        self.queue.retain(|k| *k != key); self.queue.push(key);
+        (Diagram::Pending, queued)
+    }
+    pub fn next_job(&mut self) -> Option<Job> {
+        let key = self.queue.pop()?;
+        // Older requests lost the race for the viewport: they ask again if painted.
+        let job = self.jobs.remove(&key);
+        if self.queue.len() > 8 { let stale = self.queue.drain(..self.queue.len() - 8).collect::<Vec<_>>(); for k in stale { self.jobs.remove(&k); } }
+        job
+    }
+    /// Store a result; returns images evicted to stay within the budget.
+    pub fn finish(&mut self, key: u64, result: Result<Raster>) -> Vec<Arc<RenderImage>> {
+        self.tick += 1;
+        let (diagram, bytes) = match result {
+            Ok(r) => { let bytes = r.bgra.as_raw().len(); (Diagram::Ready { image: Arc::new(RenderImage::new(vec![image::Frame::new(r.bgra)])), width: r.width, height: r.height }, bytes) }
+            Err(e) => (Diagram::Failed(e.to_string()), 0),
+        };
+        self.slots.insert(key, Slot { diagram, used: self.tick, bytes });
+        let mut evicted = vec![];
+        while self.slots.len() > 1 && (self.slots.len() > MAX_ENTRIES || self.slots.values().map(|s| s.bytes).sum::<usize>() > MAX_BYTES) {
+            let Some(oldest) = self.slots.iter().min_by_key(|(_, s)| s.used).map(|(k, _)| *k) else { break };
+            if let Some(Slot { diagram: Diagram::Ready { image, .. }, .. }) = self.slots.remove(&oldest) { evicted.push(image); }
+        }
+        evicted
+    }
 }
 fn resolve_variables(svg: &str, palette: &Palette) -> String {
     let mut variables = HashMap::<String, String>::new();
@@ -70,48 +130,6 @@ fn resolve_variables(svg: &str, palette: &Palette) -> String {
     output
 }
 
-// Decode into bounded temporary PNGs before the editor's image loader sees them.
-pub fn prepare_images(doc: &mut crate::model::Document) -> Vec<std::path::PathBuf> {
-    use std::io::Read;
-    fn visit(blocks: &mut [crate::model::Block], files: &mut Vec<std::path::PathBuf>, pixels: &mut u64) {
-        use crate::model::{BlockKind, RichText};
-        for block in blocks {
-            if let BlockKind::Image { src, .. } = &block.kind {
-                let original = src.clone();
-                let converted = (|| -> Result<std::path::PathBuf> {
-                    ensure!(files.len() < 32, "Too many images");
-                    let path = std::path::Path::new(&original);
-                    ensure!(path.is_absolute() && path.canonicalize()? == path, "Invalid image path");
-                    let mut bytes = Vec::new();
-                    std::fs::File::open(path)?.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
-                    ensure!(bytes.len() <= 8 * 1024 * 1024, "Image too large");
-                    let reader = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()?;
-                    ensure!(matches!(reader.format(), Some(image::ImageFormat::Png | image::ImageFormat::Jpeg)), "Unsupported image");
-                    let (w, h) = reader.into_dimensions()?;
-                    let n = u64::from(w) * u64::from(h);
-                    ensure!(w > 0 && h > 0 && w <= 8192 && h <= 8192 && *pixels + n <= 8_000_000, "Image dimensions exceed limit");
-                    let mut reader = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format()?;
-                    let mut limits = image::Limits::default(); limits.max_image_width = Some(8192); limits.max_image_height = Some(8192); limits.max_alloc = Some(64 * 1024 * 1024);
-                    reader.limits(limits);
-                    let image = reader.decode()?;
-                    let mut png = std::io::Cursor::new(Vec::new()); image.write_to(&mut png, image::ImageFormat::Png)?;
-                    let temp = std::env::temp_dir().join(format!("quiet-image-{}.png", uuid::Uuid::new_v4()));
-                    use std::io::Write;
-                    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
-                    if let Err(e) = f.write_all(&png.into_inner()) { let _ = std::fs::remove_file(&temp); return Err(e.into()); }
-                    *pixels += n; Ok(temp)
-                })();
-                match converted {
-                    Ok(path) => { if let BlockKind::Image { src, .. } = &mut block.kind { *src = path.to_string_lossy().into(); } files.push(path); }
-                    Err(_) => { block.kind = BlockKind::Text; block.text = RichText::plain(format!("Image unavailable: {original}")); }
-                }
-            }
-            if let BlockKind::Table(table) = &mut block.kind { for row in &mut table.rows { for cell in row { visit(&mut cell.blocks, files, pixels); } } }
-            visit(&mut block.children, files, pixels);
-        }
-    }
-    let mut files = vec![]; visit(&mut doc.blocks, &mut files, &mut 0); files
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,24 +137,23 @@ mod tests {
     fn workspace_preview_pele_offline() {
         let p = Palette { background: "white".into(), text: "black".into(), muted: "gray".into(), surface: "white".into(), border: "black".into(), accent: "blue".into() };
         for source in ["flowchart LR\nA[Start]-->B[Finish]", "sequenceDiagram\nAlice->>Bob: Hello", "classDiagram\nAnimal <|-- Duck"] {
-            let bytes = render(source, 700., &p).unwrap();
-            let image = image::load_from_memory(&bytes).unwrap().into_rgba8();
-            assert!(image.width() > 30 && image.height() > 20);
-            assert!(image.pixels().filter(|p| p.0[3] > 0 && p.0[0] < 200).count() > 50);
+            let raster = render(source, 700., &p, 2.).unwrap();
+            assert!(raster.width > 30. && raster.height > 20. && raster.bgra.width() as f32 >= raster.width);
+            assert!(raster.bgra.pixels().filter(|p| p.0[3] > 0 && p.0[0] < 200).count() > 50);
         }
-        assert!(render("not a diagram", 700., &p).is_err());
-        assert!(render(&"x".repeat(17_000), 700., &p).is_err());
-    }
-    #[test]
-    fn workspace_preview_media_copy() {
-        let dir = std::env::temp_dir().join(format!("quiet-preview-media-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir(&dir).unwrap(); let dir = dir.canonicalize().unwrap();
-        let path = dir.join("image.png"); image::save_buffer(&path, &[255, 0, 0, 255], 1, 1, image::ColorType::Rgba8).unwrap();
-        let source = "![image](image.png)\n\n![missing](no.png)";
-        let mut doc = fdl_core::workspace_preview::parse(source, &dir.join("note.md"), &dir).doc;
-        let paths = prepare_images(&mut doc); assert_eq!(paths.len(), 1);
-        assert_ne!(paths[0], path); assert_eq!(image::open(&paths[0]).unwrap().width(), 1);
-        assert!(path.exists()); for path in paths { std::fs::remove_file(path).unwrap(); }
-        std::fs::remove_dir_all(dir).unwrap();
+        assert!(render("not a diagram", 700., &p, 2.).is_err());
+        assert!(render(&"x".repeat(17_000), 700., &p, 2.).is_err());
+        // A malformed diagram is a visible failure in the cache, and the budget holds.
+        let mut d = Diagrams::default();
+        let (first, queued) = d.request("flowchart LR\nA-->B", 500., &p); assert!(matches!(first, Diagram::Pending) && queued);
+        let (_, again) = d.request("flowchart LR\nA-->B", 500., &p); assert!(!again);
+        let job = d.next_job().unwrap();
+        d.finish(job.key, render(&job.source, job.width, &job.palette, 1.));
+        assert!(matches!(d.request("flowchart LR\nA-->B", 500., &p).0, Diagram::Ready { .. }));
+        d.request("nonsense", 500., &p); let job = d.next_job().unwrap();
+        d.finish(job.key, render(&job.source, job.width, &job.palette, 1.));
+        assert!(matches!(d.request("nonsense", 500., &p).0, Diagram::Failed(_)));
+        for i in 0..80 { let k = i as u64; d.finish(k, Err(anyhow::anyhow!("x"))); }
+        assert!(d.slots.len() <= MAX_ENTRIES);
     }
 }

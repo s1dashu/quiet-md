@@ -891,6 +891,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "阅读模式切回编辑" => "Switch from reading to editing",
         "复制 / 剪切 / 粘贴" => "Copy / Cut / Paste",
         "逐字扩选" => "Extend selection by character",
+        "后退 / 前进" => "Back / Forward",
+        "按文件名查找…" => "Find a file by name…",
         "逐行扩选" => "Extend selection by line",
         "选到行首 / 行尾" => "Select to start / end of line",
         "选到文档开头 / 结尾" => "Select to start / end of document",

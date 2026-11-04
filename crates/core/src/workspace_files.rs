@@ -3,8 +3,16 @@ use anyhow::{Context, Result, bail, ensure};
 use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
 
 pub const MAX_SOURCE: u64 = 2 * 1024 * 1024;
-#[derive(Clone, Debug)]
-pub struct Entry { pub path: PathBuf, pub directory: bool }
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    pub path: PathBuf, pub directory: bool,
+    /// A symlink. Inside the folder it can be opened; pointing outside it stays listed but closed.
+    pub link: bool, pub outside: bool,
+}
+/// One directory's rows, and what was left out so the tree can say so.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Listing { pub entries: Vec<Entry>, pub other_files: usize, pub truncated: bool }
+const MAX_ROWS: usize = 5_000;
 
 pub fn root(path: &Path) -> Result<PathBuf> {
     let path = path.canonicalize()?;
@@ -20,24 +28,43 @@ pub fn contained(root: &Path, path: &Path) -> Result<PathBuf> {
 pub fn supported(path: &Path) -> bool {
     path.extension().and_then(|s| s.to_str()).is_some_and(|s| matches!(s.to_ascii_lowercase().as_str(), "md" | "markdown" | "mdx" | "txt"))
 }
-pub fn list(root: &Path, path: &Path, show_hidden: bool) -> Result<Vec<Entry>> {
-    let path = contained(root, path)?;
-    let mut entries = vec![];
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name == ".git" || (!show_hidden && (name.starts_with('.') || matches!(name.as_ref(), "node_modules" | "target" | "dist"))) { continue; }
-        let kind = entry.file_type()?;
-        // Do not recurse through symlinks (cycles and paths outside the workspace).
-        if kind.is_symlink() { continue; }
-        if kind.is_dir() || (kind.is_file() && supported(&entry.path())) {
-            entries.push(Entry { path: entry.path(), directory: kind.is_dir() });
-        }
-        ensure!(entries.len() <= 20_000, "Directory has too many entries; open a smaller folder");
+/// A real directory listing: `.git` never; dotfiles and whatever Git ignores only
+/// when asked; no recursion, so a huge tree costs nothing until it is expanded.
+pub fn list(root: &Path, path: &Path, show_hidden: bool) -> Result<Listing> {
+    let dir = contained(root, path)?;
+    let mut out = Listing::default();
+    let walk = ignore::WalkBuilder::new(&dir).max_depth(Some(1)).hidden(!show_hidden).git_ignore(!show_hidden).git_global(!show_hidden).git_exclude(!show_hidden).ignore(!show_hidden).parents(!show_hidden).require_git(true).follow_links(false).build();
+    for entry in walk {
+        let Ok(entry) = entry else { continue };
+        if entry.depth() == 0 || entry.file_name() == ".git" { continue; }
+        let Some(kind) = entry.file_type() else { continue };
+        let path = entry.path().to_path_buf();
+        let row = if kind.is_symlink() {
+            let target = fs::canonicalize(&path);
+            let outside = target.as_ref().map_or(true, |t| !t.starts_with(root));
+            let directory = target.as_ref().is_ok_and(|t| t.is_dir());
+            if !directory && !supported(&path) { out.other_files += 1; continue; }
+            Entry { path, directory, link: true, outside }
+        } else if kind.is_dir() { Entry { path, directory: true, link: false, outside: false } }
+        else if kind.is_file() && supported(&path) { Entry { path, directory: false, link: false, outside: false } }
+        else { out.other_files += 1; continue; };
+        if out.entries.len() >= MAX_ROWS { out.truncated = true; continue; }
+        out.entries.push(row);
     }
-    entries.sort_by(|a, b| b.directory.cmp(&a.directory).then_with(|| a.path.cmp(&b.path)));
-    Ok(entries)
+    out.entries.sort_by(|a, b| b.directory.cmp(&a.directory).then_with(|| a.path.to_string_lossy().to_lowercase().cmp(&b.path.to_string_lossy().to_lowercase())));
+    Ok(out)
+}
+/// Every document under `root` for quick open, on a background thread.
+pub fn index(root: &Path, limit: usize) -> (Vec<PathBuf>, bool) {
+    let (mut out, mut truncated) = (vec![], false);
+    for entry in ignore::WalkBuilder::new(root).follow_links(false).require_git(true).build().flatten() {
+        if entry.file_type().is_some_and(|t| t.is_file()) && supported(entry.path()) {
+            if out.len() >= limit { truncated = true; break; }
+            out.push(entry.into_path());
+        }
+    }
+    out.sort();
+    (out, truncated)
 }
 pub fn read(path: &Path) -> Result<String> {
     ensure!(fs::metadata(path)?.is_file(), "Not a regular file");
@@ -102,6 +129,15 @@ impl Source {
         if result.is_err() { let _ = fs::remove_file(&temp); }
         result?; self.baseline = self.text.clone(); Ok(())
     }
+    /// Write the retained text back to a path that no longer exists.
+    pub fn restore(&mut self) -> Result<()> {
+        if let Some(parent) = self.path.parent() { fs::create_dir_all(parent)?; }
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&self.path)?;
+        f.write_all(self.text.as_bytes())?; f.sync_all()?;
+        self.baseline = self.text.clone(); Ok(())
+    }
+    /// Replace the content from disk: one undoable step back to what was here.
+    pub fn replace(&mut self, disk: String) { self.edit(disk.clone()); self.baseline = disk; }
     pub fn recover(&self, directory: &Path) -> Result<PathBuf> {
         fs::create_dir_all(directory)?;
         let path = directory.join(recovery_name(&self.path));
@@ -201,6 +237,23 @@ mod tests {
         let mut nested_source = Source::open(&root, &nested_path).unwrap(); nested_source.edit("retained".into()); nested_source.recover(&recovery).unwrap();
         fs::remove_dir_all(root.join("removed")).unwrap();
         assert_eq!(Source::recovery(&root, &nested_path, &recovery).unwrap().unwrap().text, "retained");
+        let listed = root.join("tree"); fs::create_dir(&listed).unwrap();
+        for name in ["b.md", "A.mdx", "photo.png", ".dot.md"] { fs::write(listed.join(name), "x").unwrap(); }
+        fs::create_dir(listed.join("sub")).unwrap();
+        let listing = list(&root.canonicalize().unwrap(), &listed, false).unwrap();
+        let names = listing.entries.iter().map(|e| e.path.file_name().unwrap().to_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(names, ["sub", "A.mdx", "b.md"]); assert_eq!(listing.other_files, 1);
+        assert!(list(&root.canonicalize().unwrap(), &listed, true).unwrap().entries.iter().any(|e| e.path.ends_with(".dot.md")));
+        assert_eq!(index(&listed, 10).0.len(), 2);
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(std::env::temp_dir(), listed.join("away")).unwrap();
+            std::os::unix::fs::symlink("b.md", listed.join("near.md")).unwrap();
+            let rows = list(&root.canonicalize().unwrap(), &listed, false).unwrap().entries;
+            assert!(rows.iter().find(|e| e.path.ends_with("away")).unwrap().outside);
+            let near = rows.iter().find(|e| e.path.ends_with("near.md")).unwrap(); assert!(near.link && !near.outside);
+        }
+        let gone = listed.join("restored/x.md"); let mut lost = Source { path: gone.clone(), text: "kept".into(), baseline: "old".into(), revision: 0, undo: vec![], redo: vec![] };
+        lost.restore().unwrap(); assert_eq!(read(&gone).unwrap(), "kept"); assert!(!lost.dirty()); assert!(lost.restore().is_err());
         assert!(!root.join("docs").exists()); assert!(!root.join("format.json").exists());
         fs::remove_dir_all(root).unwrap();
     }

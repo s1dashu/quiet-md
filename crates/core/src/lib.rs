@@ -15,5 +15,5 @@ pub mod time;
 
 pub mod workspace_files;
 pub mod workspace_git;
-pub mod workspace_preview;
+pub mod source_doc;
 pub mod workspace_navigation;

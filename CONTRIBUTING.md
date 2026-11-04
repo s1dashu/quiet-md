@@ -7,7 +7,7 @@
 macOS 需要 Xcode Command Line Tools；Windows 需要 Visual Studio 2022 C++ Build Tools 和 Windows SDK。Rust 版本见 `rust-toolchain.toml`，rustup 会自动选择。
 
 ```sh
-cargo build --release --locked
+cargo build --release --locked   # 日常开发用 cargo build --profile iter：增量编译，结果在 target/iter
 ./target/release/quiet_md                          # 默认用 ~/Documents/Quiet.md
 QUIET_MD_HOME=/tmp/lib ./target/release/quiet_md   # 换一个文档库
 ```

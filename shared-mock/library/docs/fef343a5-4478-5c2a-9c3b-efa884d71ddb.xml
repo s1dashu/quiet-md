@@ -31,7 +31,7 @@
 <ul><li>Click the date to edit it. Add a time or use an all-day event.</li><li>Choose a notification at the event time or in advance. All-day reminders use 9:00 a.m.</li><li>Upcoming dates within a week appear orange, overdue dates red, and later dates blue.</li></ul>
 <callout emoji="🔔" background-color="light-yellow" border-color="yellow"><p>quiet.md must be running to send a reminder notification. Quitting the app stops reminders until it is running again.</p></callout>
 <h2>Countdowns</h2><p>Insert a countdown, then use its pencil control to set a duration or a date. Use the palette to change its color. This example counts down to New Year's Day:</p>
-<countdown duration="4915727" start-time="1793826074000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
+<countdown duration="4911503" start-time="1793830298000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
 <p>You can enable an in-app notification when the countdown finishes.</p>
 <h2>Buttons</h2><p>A button can open a URL or duplicate the current document. A duplicate button is useful on a reusable meeting or journal template.</p>
 <p><button action="OpenLink" src="https://www.apple.com/macos/" background-color="light-blue">Explore macOS</button> <button action="DuplicatePage" background-color="light-green">Make a copy of this guide</button></p><p>Hover over a button and edit it to change its label, color or action.</p>

@@ -1,0 +1,3 @@
+# Leave cores free on the machine the app is being developed on.
+[build]
+jobs = 6

@@ -140,7 +140,14 @@ impl Workspace {
         // icon column (x 17) is shared with 搜索 and the doc rows.
         let home_on = self.view == View::Home;
         let nav = div().flex_none().pt(px(8.)).pb(px(4.)).px(px(SB_X))
-            .child(footer_row("nav-open-folder", "folder", crate::settings::tr("打开文件夹…", "Open Folder...")).on_click(cx.listener(|w,_,window,cx| w.open_folder(window,cx))))
+            .child(footer_row("nav-open-folder", "folder", crate::settings::tr("打开文件夹…", "Open Folder…")).on_click(cx.listener(|w,_,window,cx| w.open_folder(window,cx))))
+            .children(crate::folder::recent().into_iter().take(3).enumerate().map(|(i, path)| {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                let full = path.display().to_string();
+                div().id(("nav-recent-folder", i)).h(px(ROW_H)).pl(px(35.)).pr(px(4.)).flex().items_center().rounded(px(ROW_R)).cursor_pointer().text_size(px(13.)).line_height(px(20.)).text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name)).tip(&full, None)
+                    .on_click(cx.listener(move |w, _, window, cx| w.enter_folder(path.clone(), None, window, cx)))
+            }))
             .child(
             div()
                 .id("nav-home")

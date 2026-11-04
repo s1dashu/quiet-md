@@ -201,9 +201,14 @@ pub struct Rename {
     _subs: Vec<Subscription>,
 }
 
+/// One place in the window's history: a page of the notebook or a file of a folder.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Nav { Note(View, Option<String>), File(std::path::PathBuf, std::path::PathBuf, Option<String>) }
+
 pub struct Workspace {
     pub folder: Option<Entity<crate::folder::Folder>>,
-    pub navigation: fdl_core::workspace_navigation::History<(View, Option<String>)>,
+    pub folder_subs: Vec<Subscription>,
+    pub navigation: fdl_core::workspace_navigation::History<Nav>,
     pub navigating: bool,
     pub swipe: fdl_core::workspace_navigation::Swipe,
     pub quick_note: bool,
@@ -384,6 +389,7 @@ impl Workspace {
         let sidebar_width = store.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
         let mut ws = Workspace {
             folder: None,
+            folder_subs: vec![],
             navigation: Default::default(),
             navigating: false,
             swipe: Default::default(),
@@ -475,7 +481,7 @@ impl Workspace {
     pub fn try_open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.current.as_deref() == Some(id) && self.folder.is_none() {
             self.view = View::Doc;
-            if !self.navigating { self.navigation.push((View::Doc,Some(id.to_string()))); }
+            if !self.navigating { self.navigation.push(Nav::Note(View::Doc,Some(id.to_string()))); }
             cx.notify(); return true;
         }
         let target = id.to_string();
@@ -513,7 +519,7 @@ impl Workspace {
             editor.update(cx, |e, cx| e.receive_document(&core, cx));
         }
         self.editor_sub = Some(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {
-            EditorEvent::SourceTask(_) | EditorEvent::SourceLink(_) => {},
+            EditorEvent::SourceLink(_) | EditorEvent::SourceUndo(_) => {},
             EditorEvent::Changed => {
                 // 阅读模式 put the document back: nothing to save.
                 let rejected = this.editor.clone().is_some_and(|ed| ed.update(cx, |e, cx| e.reject_read_only_edit(cx)));
@@ -561,11 +567,11 @@ impl Workspace {
             && let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
                 e.meta.opened = m.opened;
             }
-        self.folder = None;
+        self.folder = None; self.folder_subs.clear();
         self.view = View::Doc;
         self.editor = Some(editor);
         self.current = Some(id.to_string());
-        if !self.navigating { self.navigation.push((View::Doc, self.current.clone())); }
+        if !self.navigating { self.navigation.push(Nav::Note(View::Doc, self.current.clone())); }
         crate::quick_note::used(id, cx);
         self.reveal_in_tree(id);
         self.sync_sub_pages(cx);
@@ -723,7 +729,7 @@ impl Workspace {
             self.trash = self.store.list_trash();
         }
         self.view = view;
-        if !self.navigating { self.navigation.push((view,self.current.clone())); }
+        if !self.navigating { self.navigation.push(Nav::Note(view,self.current.clone())); }
         self.row_menu = None;
         self.trash_menu = None;
         self.theme_menu = None;
@@ -1154,6 +1160,7 @@ impl Workspace {
                 )
                 .child(div().mx(px(12.)).child(divider()))
             })
+            .child(div().mr(px(8.)).child(self.navigation_buttons(cx)))
             .child(
                 div()
                     .min_w_0()
@@ -1229,10 +1236,16 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.native_sidebar.sync(if let Some(folder)=self.folder.as_ref().filter(|_|self.view==View::Doc) { if folder.read(cx).sidebar_open {260.} else {0.} } else if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
-        let sidebar = if self.folder.is_some() && self.view == View::Doc { None } else if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
+        // A folder uses the same window: its tree in the sidebar, its file in the note.
+        let folder = self.folder.clone().filter(|_| self.view == View::Doc);
+        let vw = f32::from(window.viewport_size().width);
+        // Below this the document needs the window: the tree comes in over it.
+        let folder_narrow = folder.is_some() && vw < crate::folder::NARROW;
+        let docked = self.sidebar_open && !folder_narrow;
+        self.native_sidebar.sync(if docked { self.sidebar_w(window) } else { 0. }, window);
+        let sidebar = if !docked { None } else if let Some(folder) = &folder { let w = self.sidebar_w(window); let pill = crate::settings::update_pill(cx).map(IntoElement::into_any_element); Some(folder.update(cx, |f, cx| f.sidebar_el(w, pill, cx))) } else { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) };
         let row_menu = self.render_row_menu(window, cx);
-        let resize = (self.folder.is_none() && self.sidebar_open).then(|| self.render_resize_handle(window, cx));
+        let resize = docked.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
         let search = self.render_search(window, cx);
         let doc_menu = self.render_doc_menu(window, cx);
@@ -1243,14 +1256,21 @@ impl Render for Workspace {
         let theme_menu = self.render_theme_menu(cx);
         let toast = self.render_toast(window);
         let mode_menu = self.render_mode_menu(cx);
-        let main = if let Some(folder) = self.folder.as_ref().filter(|_| self.view == View::Doc) { div().size_full().child(folder.clone()).into_any_element() } else { match self.view {
+        let folder_menu = folder.as_ref().and_then(|f| f.update(cx, |f, cx| f.menu_el(window, cx)));
+        let folder_overlay = folder.as_ref().filter(|f| folder_narrow && f.read(cx).overlay_open()).map(|f| { let w = self.sidebar_w(window); f.update(cx, |f, cx| f.sidebar_el(w, None, cx)) });
+        let main = if let Some(folder) = &folder {
+            let (back, forward) = (self.navigation.target(false).is_some(), self.navigation.target(true).is_some());
+            let width = vw - if docked { self.sidebar_w(window) } else { 0. };
+            let (top, pane) = folder.update(cx, |f, cx| (f.top_bar_el(docked, back, forward, cx), f.pane_el(width, cx)));
+            div().flex_1().min_w_0().h_full().flex().flex_col().child(top).child(div().flex_1().min_h_0().min_w_0().flex().child(pane).children(self.render_shortcuts(cx))).into_any_element()
+        } else { match self.view {
             View::Doc => div()
                 .flex_1()
                 .min_w_0()
                 .h_full()
                 .flex()
                 .flex_col()
-                .child(div().flex().items_center().child(self.navigation_buttons(cx)).child(div().flex_1().min_w_0().child(self.top_bar(cx))))
+                .child(self.top_bar(cx))
                 .child(
                     div()
                         .flex_1()
@@ -1305,19 +1325,25 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &GoHome, _, cx| w.show_view(View::Home, cx)))
             .on_action(cx.listener(|w, _: &crate::folder::OpenFolder, window, cx| w.open_folder(window,cx)))
             .on_action(cx.listener(|w, _: &crate::folder::CloseFolder, _, cx| w.close_folder(cx)))
+            .on_action(cx.listener(|w, _: &crate::folder::SaveSource, _, cx| { w.flush(cx); }))
+            .on_action(cx.listener(|w, _: &crate::folder::EditingMode, window, cx| w.folder_mode(crate::folder::Mode::Edit, window, cx)))
+            .on_action(cx.listener(|w, _: &crate::folder::ReadingMode, window, cx| w.folder_mode(crate::folder::Mode::Read, window, cx)))
+            .on_action(cx.listener(|w, _: &crate::folder::SourceMode, window, cx| w.folder_mode(crate::folder::Mode::Source, window, cx)))
+            .on_action(cx.listener(|w, _: &crate::folder::SplitMode, window, cx| w.folder_mode(crate::folder::Mode::Split, window, cx)))
             .on_action(cx.listener(|w, _: &crate::folder::Back, window, cx| w.navigate(false,window,cx)))
             .on_action(cx.listener(|w, _: &crate::folder::Forward, window, cx| w.navigate(true,window,cx)))
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back),cx.listener(|w,_,window,cx| w.navigate(false,window,cx)))
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward),cx.listener(|w,_,window,cx| w.navigate(true,window,cx)))
             .on_scroll_wheel(cx.listener(|w,ev: &ScrollWheelEvent,window,cx| {
-                if w.folder.is_some() || ev.modifiers != Modifiers::default() { return; }
+                if ev.modifiers != Modifiers::default() { return; }
                 if matches!(ev.touch_phase, TouchPhase::Started) { w.swipe.start(); }
                 if matches!(ev.touch_phase, TouchPhase::Ended) { w.swipe.end(); }
                 if let ScrollDelta::Pixels(delta) = ev.delta && let Some(forward) = w.swipe.update(delta.x.into(),delta.y.into()) { w.navigate(forward,window,cx); cx.stop_propagation(); }
             }))
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
-            .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
+            .on_action(cx.listener(|w, _: &ToggleSidebar, window, cx| {
+                if let Some(folder) = w.folder.clone().filter(|_| w.view == View::Doc && f32::from(window.viewport_size().width) < crate::folder::NARROW) { folder.update(cx, |f, cx| f.toggle_overlay(cx)); return; }
                 w.sidebar_open = !w.sidebar_open;
                 cx.notify();
             }))
@@ -1377,12 +1403,19 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_action(cx.listener(|w, _: &FocusSearch, window, cx| {
+                if let Some(folder) = w.folder.clone().filter(|_| w.view == View::Doc) { folder.update(cx, |f, cx| f.open_palette(window, cx)); cx.stop_propagation(); return; }
                 if w.search_open { w.close_search(window, cx); } else { w.open_search(window, cx); }
                 cx.stop_propagation();
             }))
             .children(sidebar)
             .child(note)
             .children(resize)
+            .children(folder_overlay.map(|el| deferred(
+                // Click away to close. The window colour is translucent over the native sidebar, so not that.
+                div().absolute().inset_0().on_mouse_down(MouseButton::Left, |_, window, cx| window.dispatch_action(Box::new(ToggleSidebar), cx))
+                    .child(div().absolute().top_0().left_0().bottom_0().occlude().bg(Theme::bg_body()).shadow(theme::shadow_menu()).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(el))
+            ).with_priority(2)))
+            .children(folder_menu)
             .children(crate::ui::window_controls(window))
             .children(row_menu)
             .children(doc_menu)

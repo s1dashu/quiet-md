@@ -42,7 +42,7 @@ mod tree;
 mod ui;
 mod update;
 
-use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time};
+use fdl_core::{docxml, lang, markdown, model, palette, paste, source_doc, store, time};
 
 use gpui::*;
 

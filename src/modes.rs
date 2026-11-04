@@ -27,7 +27,7 @@ type Row = Option<(&'static str, &'static str, &'static str)>;
 
 const STANDARD: &[Row] = &[
     Some(("keyboard", "阅读模式切回编辑", "E")), Some(("keyboard", "复制 / 剪切 / 粘贴", "⌘C / ⌘X / ⌘V")),
-    Some(("keyboard", "全选", "⌘A")), Some(("keyboard", "逐字扩选", "⇧← / ⇧→")), Some(("keyboard", "逐行扩选", "⇧↑ / ⇧↓")),
+    Some(("keyboard", "全选", "⌘A")), Some(("keyboard", "后退 / 前进", "⌘⌥← / ⌘⌥→")), Some(("keyboard", "逐字扩选", "⇧← / ⇧→")), Some(("keyboard", "逐行扩选", "⇧↑ / ⇧↓")),
     Some(("keyboard", "选到行首 / 行尾", "⌘⇧← / ⌘⇧→")), Some(("keyboard", "选到文档开头 / 结尾", "⌘⇧↑ / ⌘⇧↓")),
 ];
 const MARKDOWN: &[Row] = &[

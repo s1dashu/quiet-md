@@ -32,6 +32,9 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 
 | 命令 | 作用 |
 |---|---|
+| `folder-state` | 输出文件夹的状态，供回归断言使用 |
+| `folder-open <路径>` / `folder-link <链接>` / `folder-caret <块> <偏移>` / `folder-action keep\|reload\|close` / `folder-diff <路径> staged\|worktree` / `folder-git` / `folder-menu` / `folder-meta` | 操作文件夹中无法用坐标定位的部分 |
+| `fswrite <路径> :: <文字>` / `fsrm <路径>` / `abort` | 模拟外部改动、删除和进程崩溃。只用于临时目录 |
 | `wait <ms>` | 等待，期间自己绘制帧（锁屏时也能出图） |
 | `key <按键>` | 发送按键，如 `key cmd-b`、`key escape` |
 | `type <文字>` | 输入文字（行尾空格有效） |
@@ -74,3 +77,5 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 - 不用 `open` 命令。
 - 需要选文件时，用 `pick a|b` 代替系统对话框。
 - 不要拿用户的真实文档库当 `lib_dir`。确实需要时只读复制一份，产物里也不要提交用户的内容。
+
+文件夹端到端回归：`python3 tools/harness/folder_smoke.py [场景…]`。全部在临时文件夹和临时仓库上进行，断言文件字节和应用状态：不改文件、最小补丁、撤销、外部改动、崩溃恢复、导航、Git 和 LFS、窄窗口；截图保留在输出的目录里。
