@@ -128,6 +128,28 @@ pub fn project(source: &str, file: &Path, root: &Path) -> Projection {
     if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
     Projection { doc, source: source.to_string(), meta, anchors, diagnostic, spans, title, body_start, eol, file: file.to_path_buf(), root: root.to_path_buf(), mdx, raws, code_links }
 }
+/// Column widths for a Markdown table, which stores none: each column as wide as
+/// its longest cell wants (long text capped, since it can wrap). A table with real
+/// content takes the page, in those proportions; a tiny one stays compact; one too
+/// wide shrinks toward a readable minimum and only then scrolls.
+pub fn fit_columns(t: &Table, available: f32) -> Vec<f32> {
+    const MIN: f32 = 100.;
+    const MAX: f32 = 520.;
+    let cols = t.ncols().max(1);
+    let mut want = vec![MIN; cols];
+    for (_, c, cell) in t.cells() {
+        if c >= cols || cell.colspan > 1 { continue; }
+        let units: usize = cell.blocks.iter().map(|b| b.text.text.chars().map(|ch| if ch.is_ascii() { 1 } else { 2 }).sum::<usize>()).max().unwrap_or(0);
+        want[c] = want[c].max(units as f32 * 7.5 + 28.);
+    }
+    want.iter_mut().for_each(|w| *w = w.min(MAX));
+    let total: f32 = want.iter().sum();
+    let floor = MIN * cols as f32;
+    let fitted: Vec<f32> = if total >= available {
+        if available <= floor { vec![MIN; cols] } else { want.iter().map(|w| MIN + (w - MIN) * (available - floor) / (total - floor).max(1.)).collect() }
+    } else if total >= available * 0.5 { want.iter().map(|w| w * available / total).collect() } else { want };
+    fitted.into_iter().map(|w| w.floor()).collect()
+}
 /// GitHub's alert types: (marker, callout emoji, palette tint).
 const ALERTS: [(&str, &str, &str); 5] = [("NOTE", "💡", "blue"), ("TIP", "✅", "green"), ("IMPORTANT", "❗", "purple"), ("WARNING", "⚠️", "yellow"), ("CAUTION", "🚫", "red")];
 fn callout(emoji: &str, tint: &str) -> BlockKind {
@@ -1116,6 +1138,25 @@ mod tests {
         let cell = if let BlockKind::Table(t) = &pr.doc.blocks[1].kind { t.rows[1][0].blocks[0].id } else { panic!() };
         let out = edit(&pr, |c| { c.sel = Selection::caret(Pos::new(cell, 1)); c.insert_text("|9"); });
         assert_eq!(out, source.replace("| 1 |", "| 1\\|9 |"));
+    }
+    #[test]
+    fn table_columns_fit_their_content_and_the_page() {
+        let table = |rows: &[&[&str]]| Table { col_widths: vec![100.; rows[0].len()], header_rows: 1, header_col: false, rows: rows.iter().map(|r| r.iter().map(|t| TableCell { blocks: vec![Block::text(t)], ..TableCell::empty() }).collect()).collect() };
+        let sum = |w: &[f32]| w.iter().sum::<f32>();
+        // Two columns of prose fill the page, the longer one wider. This was 200 + 200.
+        let prose = table(&[&["Run", "Detailed account"], &["Dec 30, 2025 reader group order", "Six X4s, four covers, six protectors, and matching card transaction"]]);
+        let w = fit_columns(&prose, 800.);
+        assert!(sum(&w) > 790. && sum(&w) <= 800. && w[1] > w[0], "{w:?}");
+        // A tiny table stays tiny instead of stretching a letter across the page.
+        assert_eq!(fit_columns(&table(&[&["a", "b"], &["1", "2"]]), 800.), [100., 100.]);
+        // Narrow pages shrink it, and it never goes under a readable minimum.
+        let w = fit_columns(&prose, 320.);
+        assert!(sum(&w) <= 320. && w.iter().all(|x| *x >= 100.), "{w:?}");
+        let wide: Vec<&str> = vec!["a long column heading here"; 12];
+        let w = fit_columns(&table(&[&wide]), 800.);
+        assert!(w.iter().all(|x| *x == 100.) && sum(&w) > 800., "{w:?}");
+        // Wide characters count double.
+        assert!(fit_columns(&table(&[&["中文内容中文内容中文内容中文内容", "x"]]), 800.)[0] > 200.);
     }
     #[test]
     fn changing_a_code_block_language_writes_the_fence() {

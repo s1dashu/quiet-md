@@ -354,6 +354,8 @@ impl Folder {
         if text != b.source.text { b.source.edit(text); b.field_stale = true; }
         Self::write_recovery(b);
         if split { self.refresh_field(path, cx); }
+        // Whoever got here first took over the debounce that would have saved this.
+        self.schedule_save(path, cx);
         cx.notify();
     }
     fn write_recovery(b: &mut Buffer) {
@@ -1093,6 +1095,7 @@ impl Folder {
             }
             "folder-dark" => { crate::settings::apply_appearance(if arg == "on" { "dark" } else { "light" }); crate::theme::set_dark(arg == "on"); crate::themes::touch(); window.refresh(); }
             "folder-select" => if let Some(b) = self.current.as_ref().and_then(|p| self.buffers.get(p)) { Self::select_text(&b.editor.clone(), arg, cx); },
+            "folder-check" => self.check_buffers(None, cx),
             "folder-git" => { self.git_open = !self.git_open; cx.notify(); }
             "folder-menu" => { self.menu = !self.menu; cx.notify(); }
             "folder-meta" => if let Some(b) = self.current.as_ref().and_then(|p| self.buffers.get(p)) { b.editor.update(cx, |e, cx| e.toggle_source_meta(cx)); },

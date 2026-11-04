@@ -70,6 +70,10 @@ def typing():
     root3 = folder("task", {"README.md": MESSY}); pixel(root3); f3 = root3 / "README.md"
     run("task", root3, "folder-caret 1 2\nkey cmd-enter\nwait 1200")
     check("task", "task toggle changes only its marker", f3.read_text() == MESSY.replace("* [ ] star", "* [x] star"), f3.read_text()[100:300])
+    # A disk check landing inside the edit debounce must not cancel the autosave.
+    rootc = folder("autosave", {"a.md": "# T\n\nbody\n"}); fc = rootc / "a.md"
+    run("autosave", rootc, "folder-caret 0 4\ntype Y\nfolder-check\nwait 1500")
+    check("autosave", "a disk check during typing doesn't lose the autosave", fc.read_text() == "# T\n\nbodyY\n", repr(fc.read_text()))
     root4 = folder("cmds", {"a.md": "# T\n\nkeep *this*\n\nlast\n"}); f4 = root4 / "a.md"
     run("cmds", root4, "folder-caret 1 4\nkey enter\ntype new block\nkey enter\ntype - item\nwait 1200\nshot blocks")
     check("cmds", "new blocks become Markdown beside untouched text", f4.read_text() == "# T\n\nkeep *this*\n\nlast\n\nnew block\n\n- item\n", repr(f4.read_text()))
@@ -267,6 +271,13 @@ folder-state
     check("closing", "closing with a conflict keeps the window and the edits", states and field(states[0], "dirty") == "true", str(states))
     check("closing", "the other version is untouched", ca.read_text() == "# Theirs\n", ca.read_text())
 
+def tables():
+    "A table's cells and bytes survive automatic column widths, at every window size."
+    source = "# T\n\n| Run | Detailed account |\n|:--|--:|\n| Dec 30, 2025 reader group order | [Six X4s, four covers, six protectors, and matching card transaction](a.md) |\n| Jan 2-16, 2026 reader lots | Three added readers and the two-lot quantity |\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| " + " | ".join(f"Heading number {i}" for i in range(12)) + " |\n|" + "---|" * 12 + "\n| " + " | ".join("cell" for _ in range(12)) + " |\n"
+    root = folder("tables", {"a.md": source}); a = root / "a.md"
+    run("tables", root, "shot t-1280\nresize 800 800\nwait 500\nshot t-800\nresize 480 800\nwait 500\nshot t-480\nresize 1280 800\nwait 300")
+    check("tables", "file untouched", a.read_text() == source)
+
 def markdown():
     "What real documents contain: alerts, code-span links, math, images, every theme."
     root = folder("md", {"README.md": "# Rich\n\n> [!WARNING]\n> Check `sub/other.md` and the `sub/` folder.\n\n> [!TIP]\n> Energy $E=mc^2$ costs $5 and $10, see https://example.com/x.\n\n![pixel](pixel.png)\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nneedle in the body text\n\n## Deep Heading\n",
@@ -408,7 +419,7 @@ def typing_diagrams():
     run("mm-source", root, "key cmd-alt-3\nwait 400\nkey cmd-down\ntype end\nwait 1200")
     check("mm-source", "cmd-down reaches the end of the file in Source", a.read_text() == "# T\n\nbody\nend", repr(a.read_text()))
 
-all_ = dict(typing_diagrams=typing_diagrams, noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
+all_ = dict(tables=tables, typing_diagrams=typing_diagrams, noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
 for name in sys.argv[1:] or all_:
     print(name); all_[name]()
 print(f"work: {work}")

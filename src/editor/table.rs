@@ -72,6 +72,8 @@ impl Drag {
 impl Editor {
     /// Column widths a table is drawn with (live while one is dragged).
     pub(super) fn table_widths(&self, id: BlockId, t: &Table) -> Vec<f32> {
+        // Markdown keeps no widths: a folder document's table fits its content and page.
+        if self.source_doc { return crate::source_doc::fit_columns(t, self.layout.content - BAR); }
         let mut w = t.col_widths.clone();
         if let Some(Drag::Resize { table, col, live, .. }) = &self.tables.drag
             && *table == id
@@ -717,7 +719,8 @@ impl R<'_> {
             Some(Drag::Resize { table, col, .. }) if *table == id => Some(*col),
             _ => None,
         };
-        for c in 0..n {
+        // Widths are automatic in a folder document, so there is nothing to drag.
+        for c in 0..if ed.source_doc { 0 } else { n } {
             let bx = BAR + x_of(c + 1);
             let group = SharedString::from(format!("tres-{}", key(5, c)));
             let w0 = widths[c];
