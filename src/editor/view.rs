@@ -242,6 +242,9 @@ pub struct Editor {
     pub(super) diagram_task: Option<Task<()>>,
     /// Mermaid blocks showing their source next to the diagram.
     pub(super) diagram_source: HashSet<BlockId>,
+    /// Scroll to restore once the list has its items: before that, inserting
+    /// them would push the offset down by the whole document.
+    pub restore_top: Option<ListOffset>,
     pub(super) ro_doc: Option<crate::model::Document>,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
@@ -449,6 +452,7 @@ impl Editor {
             diagrams: Default::default(),
             diagram_task: None,
             diagram_source: Default::default(),
+            restore_top: None,
             ro_doc: None,
             info: Default::default(),
             cd,

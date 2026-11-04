@@ -174,6 +174,50 @@ fn diff_with_path(root: &Path, file: &FileStatus, staged: bool, command_path: Op
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     Ok(String::from_utf8_lossy(&run_with_path(root, &args, command_path)?).into_owned())
 }
+/// A patch as rows to draw: real line numbers, counts, and plain-language notices
+/// in place of Git's header lines. Pure, so it can run off the UI thread.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Patch { pub rows: Vec<PatchRow>, pub added: usize, pub removed: usize }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineKind { Added, Removed, Context }
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatchRow { Notice(PatchNotice), Hunk(String), Line { kind: LineKind, old: Option<u32>, new: Option<u32>, text: String }, NoNewline }
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatchNotice { NewFile, Deleted, Renamed(String), Binary, LfsPointer, ModeChanged }
+pub fn parse_patch(patch: &str) -> Patch {
+    let mut out = Patch::default();
+    let (mut in_hunk, mut old, mut new, mut lfs) = (false, 0u32, 0u32, false);
+    for raw in patch.lines() {
+        if !in_hunk {
+            if let Some(from) = raw.strip_prefix("rename from ") { out.rows.push(PatchRow::Notice(PatchNotice::Renamed(from.to_string()))); continue; }
+            if raw.starts_with("new file mode") { out.rows.push(PatchRow::Notice(PatchNotice::NewFile)); continue; }
+            if raw.starts_with("deleted file mode") { out.rows.push(PatchRow::Notice(PatchNotice::Deleted)); continue; }
+            if raw.starts_with("new mode") { out.rows.push(PatchRow::Notice(PatchNotice::ModeChanged)); continue; }
+            if raw.starts_with("Binary files") || raw.starts_with("GIT binary patch") { out.rows.push(PatchRow::Notice(PatchNotice::Binary)); continue; }
+            // Our own pseudo-diff of an untracked file has no hunk header.
+            if raw == "--- /dev/null" && !out.rows.iter().any(|r| matches!(r, PatchRow::Notice(PatchNotice::NewFile))) { out.rows.push(PatchRow::Notice(PatchNotice::NewFile)); }
+            if raw.starts_with("+++ ") { in_hunk = true; new = 1; }
+            if !raw.starts_with("@@") { continue; }
+        }
+        if raw.starts_with("diff --git ") { in_hunk = false; continue; }
+        if raw.starts_with("@@") {
+            let mut parts = raw.split_whitespace().skip(1);
+            let start = |p: Option<&str>| p.and_then(|t| t[1..].split(',').next()).and_then(|n| n.parse().ok()).unwrap_or(1);
+            old = start(parts.next()); new = start(parts.next());
+            out.rows.push(PatchRow::Hunk(raw.splitn(3, "@@").nth(2).unwrap_or("").trim().to_string()));
+            continue;
+        }
+        let (marker, text) = raw.split_at(raw.char_indices().nth(1).map_or(raw.len(), |(i, _)| i));
+        match marker {
+            "+" => { if text.starts_with("version https://git-lfs") { lfs = true; } out.rows.push(PatchRow::Line { kind: LineKind::Added, old: None, new: Some(new), text: text.to_string() }); new += 1; out.added += 1; }
+            "-" => { if text.starts_with("version https://git-lfs") { lfs = true; } out.rows.push(PatchRow::Line { kind: LineKind::Removed, old: Some(old), new: None, text: text.to_string() }); old += 1; out.removed += 1; }
+            "\\" => out.rows.push(PatchRow::NoNewline),
+            _ => { out.rows.push(PatchRow::Line { kind: LineKind::Context, old: Some(old), new: Some(new), text: text.to_string() }); old += 1; new += 1; }
+        }
+    }
+    if lfs { out.rows.insert(0, PatchRow::Notice(PatchNotice::LfsPointer)); }
+    out
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +255,25 @@ mod tests {
         assert!(parse(b" M missing-null").is_err());
         let rows = parse(b"R  new name\0old\nname\0?? -literal.md\0").unwrap(); assert_eq!(rows[1].old_path.as_deref(), Some(Path::new("old\nname")));
         std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn workspace_git_patch_rows() {
+        let p = parse_patch("diff --git a/a b/a\nindex 1..2 100644\n--- a/a\n+++ b/a\n@@ -10,3 +20,3 @@ fn main\n ctx\n-old\n+new\n\\ No newline at end of file\n");
+        assert_eq!((p.added, p.removed), (1, 1));
+        assert_eq!(p.rows[0], PatchRow::Hunk("fn main".into()));
+        assert_eq!(p.rows[1], PatchRow::Line { kind: LineKind::Context, old: Some(10), new: Some(20), text: "ctx".into() });
+        assert_eq!(p.rows[2], PatchRow::Line { kind: LineKind::Removed, old: Some(11), new: None, text: "old".into() });
+        assert_eq!(p.rows[3], PatchRow::Line { kind: LineKind::Added, old: None, new: Some(21), text: "new".into() });
+        assert_eq!(p.rows[4], PatchRow::NoNewline);
+        let renamed = parse_patch("diff --git a/o b/n\nsimilarity index 100%\nrename from o\nrename to n\n");
+        assert_eq!(renamed.rows, [PatchRow::Notice(PatchNotice::Renamed("o".into()))]);
+        assert_eq!(parse_patch("diff --git a/b b/b\nindex 1..2\nBinary files a/b and b/b differ\n").rows, [PatchRow::Notice(PatchNotice::Binary)]);
+        let untracked = parse_patch("--- /dev/null\n+++ b/x\n+one\n+two\n");
+        assert_eq!(untracked.rows[0], PatchRow::Notice(PatchNotice::NewFile));
+        assert_eq!(untracked.rows[2], PatchRow::Line { kind: LineKind::Added, old: None, new: Some(2), text: "two".into() });
+        assert!(parse_patch("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-version https://git-lfs.github.com/spec/v1\n+version https://git-lfs.github.com/spec/v1\n").rows.contains(&PatchRow::Notice(PatchNotice::LfsPointer)));
+        // A multi-byte first character must not split inside a code point.
+        assert_eq!(parse_patch("--- a/x\n+++ b/x\n@@ -1 +1 @@\n+你好\n").rows[1], PatchRow::Line { kind: LineKind::Added, old: None, new: Some(1), text: "你好".into() });
     }
     #[cfg(target_os = "macos")]
     #[test]

@@ -87,6 +87,8 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 if let Some((path, text)) = rest.split_once(" :: ") { let _ = std::fs::write(path, text.replace("\\n", "\n")); }
                 continue;
             }
+            if cmd == "fsmv" { if let Some((a, b)) = rest.split_once(" :: ") { let _ = std::fs::rename(a, b); } continue; }
+            if cmd == "appquit" { let _ = cx.update(crate::app::quit); continue; }
             if cmd == "fsrm" { let _ = std::fs::remove_file(rest); continue; }
             if cmd == "abort" { std::process::abort(); }
             if cmd.starts_with("folder-") && cmd != "folder-state" {

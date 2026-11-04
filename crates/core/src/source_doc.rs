@@ -50,6 +50,8 @@ pub struct Projection {
     mdx: bool,
     /// Inline source shown as code: if rewritten, it goes back without backticks.
     raws: HashSet<String>,
+    /// Links this view added to code spans naming a file: never written back.
+    code_links: HashSet<String>,
 }
 
 fn options(mdx: bool) -> ParseOptions {
@@ -57,6 +59,7 @@ fn options(mdx: bool) -> ParseOptions {
     let c = &mut o.constructs;
     c.frontmatter = true; c.gfm_table = true; c.gfm_task_list_item = true; c.gfm_strikethrough = true; c.gfm_footnote_definition = true; c.gfm_label_start_footnote = true;
     // `$5 and $10` is prose: only `$$` opens math.
+    c.gfm_autolink_literal = true;
     c.math_flow = true; c.math_text = true;
     o.math_text_single_dollar = false;
     // Imports are never evaluated: this only tells the parser where one ends.
@@ -86,7 +89,7 @@ pub fn project(source: &str, file: &Path, root: &Path) -> Projection {
         }
     };
     let stem = file.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    let mut b = Builder { src: source, offset, root, file, mdx, spans: HashMap::new(), anchors: HashMap::new(), slugs: HashSet::new(), defs: HashMap::new(), meta: Meta::default(), opaque: false, frontmatter_title: None, raws: HashSet::new() };
+    let mut b = Builder { src: source, offset, root, file, mdx, spans: HashMap::new(), anchors: HashMap::new(), slugs: HashSet::new(), defs: HashMap::new(), meta: Meta::default(), opaque: false, frontmatter_title: None, raws: HashSet::new(), code_links: HashMap::new() };
     let mut doc = Document { title: RichText::default(), icon: None, cover: None, blocks: vec![] };
     let mut title = None;
     let mut body_start = offset;
@@ -118,12 +121,37 @@ pub fn project(source: &str, file: &Path, root: &Path) -> Projection {
         doc.blocks = b.blocks(&children[first..], 0);
     } else { doc.blocks = if body.is_empty() { vec![] } else { b.plain(body) }; }
     if title.is_none() { doc.title = RichText::plain(b.frontmatter_title.clone().unwrap_or(stem)); }
-    let (spans, anchors, meta, opaque, raws) = (b.spans, b.anchors, b.meta, b.opaque, b.raws);
+    let (spans, anchors, meta, opaque, raws, code_links) = (b.spans, b.anchors, b.meta, b.opaque, b.raws, b.code_links.into_values().flatten().collect());
     if diagnostic.is_none() && wants_mdx && (opaque || !meta.imports.is_empty()) {
         diagnostic = Some("MDX components, imports and expressions are shown as source; project code does not run.".into());
     }
     if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
-    Projection { doc, source: source.to_string(), meta, anchors, diagnostic, spans, title, body_start, eol, file: file.to_path_buf(), root: root.to_path_buf(), mdx, raws }
+    Projection { doc, source: source.to_string(), meta, anchors, diagnostic, spans, title, body_start, eol, file: file.to_path_buf(), root: root.to_path_buf(), mdx, raws, code_links }
+}
+/// GitHub's alert types: (marker, callout emoji, palette tint).
+const ALERTS: [(&str, &str, &str); 5] = [("NOTE", "💡", "blue"), ("TIP", "✅", "green"), ("IMPORTANT", "❗", "purple"), ("WARNING", "⚠️", "yellow"), ("CAUTION", "🚫", "red")];
+fn callout(emoji: &str, tint: &str) -> BlockKind {
+    BlockKind::Callout { emoji: emoji.into(), bg: Some(ColorName(format!("light-{tint}"))), border: Some(ColorName(tint.into())), text_color: None }
+}
+/// `$x$` as math, without reading prose as formulas: an opener before a space or
+/// digit is a price or a variable, and a closer needs text right before it and
+/// none right after (`$5 and $10`, `$HOME/$PATH` stay text).
+fn dollar_math(text: &str) -> Vec<Range<usize>> {
+    let bytes = text.as_bytes();
+    let (mut out, mut i) = (vec![], 0);
+    while i < bytes.len() {
+        if bytes[i] != b'$' { i += 1; continue; }
+        let next = text[i + 1..].chars().next();
+        let opens = next.is_some_and(|c| !c.is_whitespace() && !c.is_ascii_digit() && c != '$') && (i == 0 || !matches!(bytes[i - 1], b'$' | b'\\') && !(bytes[i - 1] as char).is_alphanumeric());
+        if !opens { i += 1; continue; }
+        let line_end = text[i..].find(['\n', '\r']).map_or(text.len(), |n| i + n);
+        let close = text[i + 1..line_end].char_indices().find(|(n, c)| {
+            let at = i + 1 + n;
+            *c == '$' && *n > 0 && *n <= 200 && !bytes[at - 1].is_ascii_whitespace() && bytes[at - 1] != b'\\' && text[at + 1..].chars().next().is_none_or(|a| !a.is_alphanumeric() && a != '$')
+        });
+        match close { Some((n, _)) => { let end = i + 1 + n + 1; out.push(i..end); i = end; } None => i += 1 }
+    }
+    out
 }
 fn parse_fields(yaml: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = vec![];
@@ -148,7 +176,7 @@ pub fn slug(text: &str) -> Option<String> {
 }
 fn prefixify(s: &str) -> String { s.chars().map(|c| if c == '>' || c == '\t' { c } else { ' ' }).collect() }
 
-struct Builder<'a> { src: &'a str, offset: usize, root: &'a Path, file: &'a Path, mdx: bool, spans: HashMap<BlockId, Span>, anchors: HashMap<String, BlockId>, slugs: HashSet<String>, defs: HashMap<String, String>, meta: Meta, opaque: bool, frontmatter_title: Option<String>, raws: HashSet<String> }
+struct Builder<'a> { src: &'a str, offset: usize, root: &'a Path, file: &'a Path, mdx: bool, spans: HashMap<BlockId, Span>, anchors: HashMap<String, BlockId>, slugs: HashSet<String>, defs: HashMap<String, String>, meta: Meta, opaque: bool, frontmatter_title: Option<String>, raws: HashSet<String>, code_links: HashMap<String, Option<String>> }
 impl Builder<'_> {
     fn range(&self, n: &Node) -> Range<usize> { n.position().map_or(0..0, |p| p.start.offset + self.offset..p.end.offset + self.offset) }
     fn raw(&self, n: &Node) -> &str { self.src.get(self.range(n)).unwrap_or("") }
@@ -211,8 +239,9 @@ impl Builder<'_> {
                     for item in &list.children { if let Node::ListItem(i) = item { out.push(self.item(item, i, seq, depth)); seq = seq.map(|n| n + 1); } }
                 }
                 Node::Blockquote(q) => {
-                    let mut b = Block::new(BlockKind::Quote, RichText::default());
-                    b.children = self.blocks(&q.children, depth + 1);
+                    let (kind, children) = self.alert(&q.children);
+                    let mut b = Block::new(kind, RichText::default());
+                    b.children = self.blocks(&children, depth + 1);
                     let child_prefix = q.children.first().map(|c| self.line_prefix(self.range(c).start)).unwrap_or_else(|| format!("{}> ", self.line_prefix(outer.start)));
                     self.spans.insert(b.id, Span { head: outer.start..outer.start, content: outer.start..outer.start, outer, marker: None, segs: vec![], shape: Shape::Quote, child_prefix });
                     out.push(b);
@@ -273,6 +302,32 @@ impl Builder<'_> {
             }
         }
         out
+    }
+    /// A GitHub alert (`> [!NOTE]`) is a callout. The marker stays in the source,
+    /// outside every block's span, so it is never rewritten.
+    fn alert(&self, children: &[Node]) -> (BlockKind, Vec<Node>) {
+        let plain = || (BlockKind::Quote, children.to_vec());
+        let Some(Node::Paragraph(p)) = children.first() else { return plain() };
+        let Some(Node::Text(first)) = p.children.first() else { return plain() };
+        let Some((name, kind)) = ALERTS.iter().find_map(|(name, emoji, tint)| first.value.starts_with(&format!("[!{name}]")).then(|| (name, callout(emoji, tint)))) else { return plain() };
+        let marker = name.len() + 3;
+        let rest = first.value[marker..].trim_start_matches([' ', '\t']);
+        if !rest.is_empty() && !rest.starts_with(['\n', '\r']) { return plain(); }
+        let value = rest.trim_start_matches(['\r', '\n']).to_string();
+        let mut out = children.to_vec();
+        if value.is_empty() && p.children.len() == 1 { out.remove(0); return (kind, out); }
+        // The paragraph now starts after the marker's line and its `> ` prefix.
+        let Some(start) = first.position.as_ref().map(|pos| pos.start.offset + self.offset + marker) else { return plain() };
+        let tail = &self.src[start..];
+        let skip = tail.len() - tail.trim_start_matches([' ', '\t', '\r', '\n', '>']).len();
+        let offset = start + skip - self.offset;
+        let Some(Node::Paragraph(para)) = out.first_mut() else { return plain() };
+        if let Some(Node::Text(text)) = para.children.first_mut() {
+            text.value = value;
+            if let Some(pos) = text.position.as_mut() { pos.start.offset = offset; }
+        }
+        if let Some(pos) = para.position.as_mut() { pos.start.offset = offset; }
+        (kind, out)
     }
     fn opaque_block(&mut self, node: &Node, lang: &str) -> Block {
         let outer = self.range(node);
@@ -367,6 +422,16 @@ impl Builder<'_> {
         for n in nodes {
             let r = self.range(n);
             match n {
+                Node::Text(x) if x.value.contains('$') && self.src[r.clone()] == x.value => {
+                    let mut at = 0;
+                    for span in dollar_math(&x.value) {
+                        self.text_node(&x.value[at..span.start], r.start + at..r.start + span.start, marks, t, segs);
+                        let eq = crate::docxml::to_inline(InlineKind::Equation(x.value[span.start + 1..span.end - 1].to_string()));
+                        self.object(eq, r.start + span.start..r.start + span.end, marks, t, segs);
+                        at = span.end;
+                    }
+                    self.text_node(&x.value[at..], r.start + at..r.end, marks, t, segs);
+                }
                 Node::Text(x) => self.text_node(&x.value, r, marks, t, segs),
                 Node::Emphasis(x) => self.inline(&x.children, &Marks { italic: true, ..marks.clone() }, t, segs),
                 Node::Strong(x) => self.inline(&x.children, &Marks { bold: true, ..marks.clone() }, t, segs),
@@ -377,7 +442,8 @@ impl Builder<'_> {
                     self.inline(&x.children, &Marks { link: url, ..marks.clone() }, t, segs);
                 }
                 Node::InlineCode(x) => {
-                    let m = Marks { code: true, ..marks.clone() };
+                    let link = if marks.link.is_none() { self.code_link(&x.value) } else { None };
+                    let m = Marks { code: true, link: link.or_else(|| marks.link.clone()), ..marks.clone() };
                     let at = t.len();
                     t.push(&x.value, m.clone());
                     let raw = &self.src[r.clone()];
@@ -397,6 +463,20 @@ impl Builder<'_> {
                 }
             }
         }
+    }
+    /// A code span that names a real file or folder here links to it. Probes
+    /// are memoized and bounded; a span with nothing behind it stays plain code.
+    fn code_link(&mut self, text: &str) -> Option<String> {
+        if let Some(known) = self.code_links.get(text) { return known.clone(); }
+        if self.code_links.len() >= 2000 || text.len() > 240 || text.starts_with('-') || text.contains(|c: char| c.is_whitespace() || matches!(c, '*' | '?' | '<' | '>' | '|' | '"' | '\'' | ':' | '$' | '(' | ')')) || !(text.contains('/') || text.contains('.')) { return None; }
+        let name = text.trim_end_matches('/');
+        let found = [self.file.parent().map(|d| d.join(name)), Some(self.root.join(name.trim_start_matches('/')))].into_iter().flatten().find_map(|candidate| {
+            let path = crate::workspace_files::contained(self.root, &candidate).ok()?;
+            (path.is_dir() || crate::workspace_files::supported(&path)).then_some(path)
+        });
+        let url = found.and_then(|p| p.strip_prefix(self.root).ok().map(|r| format!("/{}", r.display())));
+        self.code_links.insert(text.to_string(), url.clone());
+        url
     }
     fn raw_run(&mut self, raw: &str, src: Range<usize>, marks: &Marks, t: &mut RichText, segs: &mut Vec<Seg>) {
         let m = Marks { code: true, ..marks.clone() };
@@ -626,7 +706,7 @@ impl Projection {
             }
             Shape::Image | Shape::Math | Shape::Divider => { if old.kind != new.kind || old.text != new.text { regenerate(edits); } }
             Shape::Quote => {
-                if !matches!(new.kind, BlockKind::Quote) { return regenerate(edits); }
+                if std::mem::discriminant(&old.kind) != std::mem::discriminant(&new.kind) { return regenerate(edits); }
                 self.diff_siblings(&old.children, &new.children, &span.child_prefix, span.outer.end, edits);
             }
             Shape::Table => self.patch_table(old, new, span, edits),
@@ -702,6 +782,8 @@ impl Projection {
             let map = |g: &Seg, at: usize| if at == g.text.start { Some(g.src.start) } else if at == g.text.end { Some(g.src.end) } else if g.literal { Some(g.src.start + at - g.text.start) } else { None };
             (map(f, old_mid.start)?, map(l, old_mid.end)?)
         };
+        // Leading space that would turn a paragraph into a code block.
+        if span.shape == Shape::Para && (b.starts_with("    ") || b.starts_with('\t')) { return None; }
         // `word_it_` is not emphasis: `_` only opens at a word boundary.
         let wordy = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
         let left = inserted.chars().last().or_else(|| self.source[..from].chars().last());
@@ -765,8 +847,12 @@ impl Projection {
             BlockKind::Divider => "---".into(),
             BlockKind::Quote | BlockKind::Callout { .. } => {
                 let inner = format!("{prefix}> ");
-                let blocks: Vec<&Block> = b.children.iter().collect();
+                let blocks: Vec<&Block> = b.children.iter().filter(|c| !self.is_blank(c)).collect();
                 let body = self.join(&blocks, &inner);
+                if let BlockKind::Callout { emoji, .. } = &b.kind {
+                    let name = ALERTS.iter().find(|(_, e, _)| e == emoji).map_or("NOTE", |(n, _, _)| n);
+                    return if body.is_empty() { format!("> [!{name}]") } else { format!("> [!{name}]{}{inner}{body}", self.eol) };
+                }
                 format!("> {body}")
             }
             BlockKind::Image { src, caption, .. } => match self.spans.get(&b.id).filter(|_| self.original(b.id).is_some_and(|o| o.kind == b.kind)) {
@@ -839,7 +925,7 @@ impl Projection {
             if strike { x = format!("~~{x}~~"); }
             if italic { x = format!("*{x}*"); }
             if bold { x = format!("**{x}**"); }
-            if let Some(url) = link { x = format!("[{x}]({})", url.replace(' ', "%20").replace(')', "%29")); }
+            if let Some(url) = link.filter(|u| !self.code_links.contains(u)) { x = format!("[{x}]({})", url.replace(' ', "%20").replace(')', "%29")); }
             out.push_str(lead); out.push_str(&x); out.push_str(trail);
         }
         out.replace('\n', &format!("  {}{prefix}", self.eol))
@@ -871,6 +957,8 @@ fn escape_inline(s: &str, mdx: bool) -> String {
 /// A paragraph that would otherwise read as a heading, list or quote.
 fn escape_line_start(s: &str) -> String {
     let t = s.trim_start();
+    // Four spaces would make it a code block; Markdown ignores leading space anyway.
+    let s = if s.starts_with('\t') || s.len() - t.len() >= 4 { t } else { s };
     let digits = t.chars().take_while(char::is_ascii_digit).count();
     let list_number = digits > 0 && digits < 10 && t[digits..].starts_with(['.', ')']) && (t.len() == digits + 1 || t[digits + 1..].starts_with(' '));
     let marker = t.starts_with('>') || t.starts_with('#') && t.trim_start_matches('#').starts_with(' ') || (t.starts_with(['-', '+', '*']) && t[1..].starts_with(' ')) || t.starts_with("---") || t.starts_with("===");
@@ -1036,13 +1124,73 @@ mod tests {
         assert_eq!(out, "a snake_case 2\\*3 \\*x\\* \\<div> \\[y\\]\n");
         assert_eq!(visible(&p(&out).doc)[1], "a snake_case 2*3 *x* <div> [y]");
     }
+    #[test]
+    fn single_dollar_math_leaves_prices_and_variables_alone() {
+        let d = |s: &str| dollar_math(s).into_iter().map(|r| s[r].to_string()).collect::<Vec<_>>();
+        assert_eq!(d("area $x^2$ here and $y$."), ["$x^2$", "$y$"]);
+        for prose in ["$5 and $10", "costs $5", "$HOME/$PATH", "$HOME and $PATH", "a$b$c", "\\\\$x", "$ x$", "$x $", "$$"] { assert!(d(prose).is_empty(), "{prose}"); }
+        let source = "Energy $E=mc^2$ costs $5 and $10.\n";
+        let pr = p(source);
+        assert_eq!(pr.render(&pr.doc), source);
+        assert!(pr.doc.blocks[0].text.spans().any(|(_, m)| m.inline.as_ref().and_then(Inline::equation) == Some("E=mc^2")));
+        assert!(pr.doc.blocks[0].text.text.contains("costs $5 and $10."));
+        let out = edit(&pr, |c| { let at = c.doc.blocks[0].text.len() - 1; caret(c, 0, at); c.insert_text("!"); });
+        assert_eq!(out, source.replace("$10.", "$10!."));
+    }
+    #[test]
+    fn github_alerts_are_callouts_and_keep_their_marker() {
+        let source = "# T\n\n> [!WARNING]\n> Careful *here*.\n>\n> Second.\n\n> [!NOTE]\n>\n> Spaced.\n\n> plain quote\n\n> [!NOPE] not an alert\n";
+        let pr = p(source);
+        assert_eq!(pr.render(&pr.doc), source);
+        assert!(matches!(&pr.doc.blocks[0].kind, BlockKind::Callout { emoji, .. } if emoji == "⚠️"));
+        assert_eq!(pr.doc.blocks[0].children[0].text.text, "Careful here.");
+        assert!(matches!(pr.doc.blocks[1].kind, BlockKind::Callout { .. }));
+        assert!(matches!(pr.doc.blocks[2].kind, BlockKind::Quote));
+        assert!(matches!(pr.doc.blocks[3].kind, BlockKind::Quote));
+        let id = pr.doc.blocks[0].children[0].id;
+        let out = edit(&pr, |c| { c.sel = Selection::caret(Pos::new(id, 7)); c.insert_text("ly"); });
+        assert_eq!(out, source.replace("Careful *here*", "Carefully *here*"));
+        let second = pr.doc.blocks[0].children[1].id;
+        let out = edit(&pr, |c| { c.sel = Selection::caret(Pos::new(second, 7)); c.enter(); c.insert_text("Third."); });
+        assert_eq!(out, source.replace("> Second.\n", "> Second.\n>\n> Third.\n"));
+        // A callout made here is an alert when read back.
+        let plain = p("a\n"); let mut c = Core::new(plain.doc.clone());
+        let mut made = Block::new(callout("💡", "blue"), RichText::default()); made.children = vec![Block::text("hi")];
+        c.doc.blocks.push(made);
+        let out = plain.render(&c.doc);
+        assert_eq!(out, "a\n\n> [!NOTE]\n> hi\n");
+        assert!(matches!(p(&out).doc.blocks[1].kind, BlockKind::Callout { .. }));
+    }
+    #[test]
+    fn code_spans_naming_files_link_without_changing_the_source() {
+        let dir = std::env::temp_dir().join(format!("quiet-code-{}", uuid::Uuid::new_v4())); std::fs::create_dir_all(dir.join("people")).unwrap();
+        let root = dir.canonicalize().unwrap();
+        std::fs::write(root.join("people/a.md"), "x").unwrap();
+        let source = "See `people/`, `people/a.md`, `nope.md`, `git status` and __bold__.\n";
+        let pr = project(source, &root.join("r.md"), &root);
+        let links: Vec<_> = pr.doc.blocks[0].text.spans().filter_map(|(r, m)| m.link.clone().map(|l| (pr.doc.blocks[0].text.text[r].to_string(), l))).collect();
+        assert_eq!(links, [("people/".to_string(), "/people".to_string()), ("people/a.md".to_string(), "/people/a.md".to_string())]);
+        assert_eq!(pr.render(&pr.doc), source);
+        // Rewriting the paragraph must not bake the link into the file.
+        let id = pr.doc.blocks[0].id;
+        let out = edit(&pr, |c| { c.sel = Selection { anchor: Pos::new(id, 0), head: Pos::new(id, 3) }; c.apply_marks(|m| m.bold = true); });
+        assert!(out.contains("`people/a.md`") && !out.contains("](/people"), "{out}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn bare_urls_link_in_markdown_and_mdx() {
+        for pr in [p("see https://example.com/a now\n"), mdx("see https://example.com/a now\n")] {
+            assert!(pr.doc.blocks[0].text.spans().any(|(_, m)| m.link.as_deref() == Some("https://example.com/a")), "{:?}", pr.doc.blocks[0].text);
+            assert_eq!(pr.render(&pr.doc), "see https://example.com/a now\n");
+        }
+    }
     /// Random edits must leave a file that parses back to what the editor shows,
     /// and undoing them must restore every byte.
     #[test]
     fn random_edits_round_trip() {
         fn walk_ids(bs: &[Block], out: &mut Vec<BlockId>) { for b in bs { if b.kind.has_text() { out.push(b.id); } walk_ids(&b.children, out); } }
         let seeds: u64 = std::env::var("FDL_FUZZ_SEEDS").ok().and_then(|s| s.parse().ok()).unwrap_or(200);
-        let corpus = [MESSY, "# T\n\n- a\n  - b\n\n  para in item\n- [ ] c\n\n> q\n\n1. x\n2. y\n", "plain\n\n**bold** _it_ ~~st~~ `co`\n\n| h |\n|---|\n| v |\n"];
+        let corpus = [MESSY, "# T\n\n- a\n  - b\n\n  para in item\n- [ ] c\n\n> q\n\n1. x\n2. y\n", "plain\n\n**bold** _it_ ~~st~~ `co`\n\n| h |\n|---|\n| v |\n", "> [!TIP]\n> first\n>\n> second\n\nmath $x^2$ and $5\n"];
         for seed in 0..seeds {
             let mut r = seed.wrapping_mul(0x9E3779B97F4A7C15) | 1;
             let mut next = |n: usize| { r ^= r << 13; r ^= r >> 7; r ^= r << 17; (r as usize) % n.max(1) };

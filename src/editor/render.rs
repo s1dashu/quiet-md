@@ -1373,6 +1373,7 @@ impl Editor {
         }
         let focused = self.focus.is_focused(window);
         self.sync_items(focused, super::cover::cover_height(window));
+        if let Some(top) = self.restore_top.take() { self.list.scroll_to(top); }
         let generation = self.core.generation;
         let (units, eqnos) = match self.frame.generation == Some(generation) {
             true => (self.frame.units.clone(), self.frame.eqnos.clone()),

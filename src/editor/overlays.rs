@@ -1380,8 +1380,8 @@ impl Editor {
                     .on_hover(hover(Menu::TurnInto))
                     .on_mouse_down(MouseButton::Left, open(Menu::TurnInto)),
             )
-            .child(sep())
-            .child(
+            // Markdown has no alignment.
+            .when(!self.source_doc, |d| d.child(sep()).child(
                 btn("tb-align")
                     .w(px(44.))
                     .gap(px(6.))
@@ -1390,7 +1390,7 @@ impl Editor {
                     .child(chevron(Menu::Align))
                     .on_hover(hover(Menu::Align))
                     .on_mouse_down(MouseButton::Left, open(Menu::Align)),
-            )
+            ))
             .child(sep())
             .child(mark_btn("tb-b", "bold", crate::settings::text("粗体"), crate::shortcuts::hint("editor::Bold", "⌘ + B"), Some(crate::settings::text("**文本** 空格")), Mark::Bold, |m| m.bold))
             .child(mark_btn("tb-s", "strikethrough", crate::settings::text("删除线"), crate::shortcuts::hint("editor::Strike", "⌘ + Shift + X"), Some(crate::settings::text("~~文本~~ 空格")), Mark::Strike, |m| m.strike))
@@ -1755,8 +1755,8 @@ impl Editor {
                     .on_hover(hover(Menu::TurnInto))
                     .on_mouse_down(MouseButton::Left, open(Menu::TurnInto)),
             )
-            .child(sep())
-            .child(
+            // Markdown has no alignment.
+            .when(!self.source_doc, |d| d.child(sep()).child(
                 btn("ttb-align")
                     .w(px(44.))
                     .gap(px(6.))
@@ -1765,14 +1765,14 @@ impl Editor {
                     .child(chevron(Menu::Align))
                     .on_hover(hover(Menu::Align))
                     .on_mouse_down(MouseButton::Left, open(Menu::Align)),
-            )
+            ))
             .child(sep())
             .child(mark_btn("ttb-b", "bold", crate::settings::text("粗体"), crate::shortcuts::hint("editor::Bold", "⌘ + B"), Some(crate::settings::text("**文本** 空格")), Mark::Bold, |m| m.bold))
             .child(mark_btn("ttb-s", "strikethrough", crate::settings::text("删除线"), crate::shortcuts::hint("editor::Strike", "⌘ + Shift + X"), Some(crate::settings::text("~~文本~~ 空格")), Mark::Strike, |m| m.strike))
             .child(mark_btn("ttb-i", "italic", crate::settings::text("斜体"), crate::shortcuts::hint("editor::Italic", "⌘ + I"), Some(crate::settings::text("*文本* 空格")), Mark::Italic, |m| m.italic))
-            .child(mark_btn("ttb-u", "underline", crate::settings::text("下划线"), crate::shortcuts::hint("editor::Underline", "⌘ + U"), Some(crate::settings::text("~文本~ 空格")), Mark::Underline, |m| m.underline))
+            .when(!self.source_doc, |d| d.child(mark_btn("ttb-u", "underline", crate::settings::text("下划线"), crate::shortcuts::hint("editor::Underline", "⌘ + U"), Some(crate::settings::text("~文本~ 空格")), Mark::Underline, |m| m.underline)))
             .child(mark_btn("ttb-code", "code", crate::settings::text("代码"), crate::shortcuts::hint("editor::InlineCode", "⌘ + Control + C"), Some(crate::settings::text("`代码`")), Mark::Code, |m| m.code))
-            .child(self.color_split("ttb-color", matches!(dropdown, Some(Menu::Color)), cx));
+            .when(!self.source_doc, |d| d.child(self.color_split("ttb-color", matches!(dropdown, Some(Menu::Color)), cx)));
         if whole {
             let label = if s.kind == CellSelKind::Cols { crate::settings::text("删除列") } else { crate::settings::text("删除行") };
             bar = bar.child(sep()).child(

@@ -54,6 +54,20 @@ pub fn list(root: &Path, path: &Path, show_hidden: bool) -> Result<Listing> {
     out.entries.sort_by(|a, b| b.directory.cmp(&a.directory).then_with(|| a.path.to_string_lossy().to_lowercase().cmp(&b.path.to_string_lossy().to_lowercase())));
     Ok(out)
 }
+/// How well a path matches a quick-open query; lower sorts first. An exact file
+/// name beats everything, then a name that starts or contains it, then the path,
+/// then the letters in order; shallower and shorter break ties.
+pub fn rank(relative: &str, query: &str) -> Option<(u8, usize, usize)> {
+    let (rel, q) = (relative.to_lowercase(), query.to_lowercase());
+    let name = rel.rsplit('/').next().unwrap_or(&rel);
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    let class = if name == q { 0 } else if stem == q { 1 } else if name.starts_with(&q) { 2 } else if name.contains(&q) { 3 } else if rel.contains(&q) { 4 } else {
+        let mut letters = rel.chars();
+        if !q.chars().all(|c| c == ' ' || letters.any(|r| r == c)) { return None; }
+        5
+    };
+    Some((class, rel.matches('/').count(), rel.len()))
+}
 /// Every document under `root` for quick open, on a background thread.
 pub fn index(root: &Path, limit: usize) -> (Vec<PathBuf>, bool) {
     let (mut out, mut truncated) = (vec![], false);
@@ -182,12 +196,59 @@ fn recovery_name(path: &Path) -> String {
     let hash = bytes.into_iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
     format!("{hash:016x}.json")
 }
+/// Where a link in `file` points inside the folder: relative, root-relative
+/// (`/docs/a`, as MDX sites write them), absolute or `file://`, with or without
+/// its extension. Other schemes are not file links.
 pub fn relative_link(root: &Path, file: &Path, link: &str) -> Result<(PathBuf, Option<String>)> {
+    let link = link.trim();
     let (path, anchor) = link.split_once('#').map_or((link, None), |(p, a)| (p, Some(a.to_string())));
-    ensure!(!path.contains(':') && !path.starts_with('/') && !path.starts_with('\\'), "Not a relative file link");
-    let decoded = percent_decode(path)?;
-    let path = if decoded.is_empty() { file.to_path_buf() } else { file.parent().unwrap_or(root).join(decoded) };
-    Ok((contained(root, &path)?, anchor))
+    let path = path.split_once('?').map_or(path, |(p, _)| p);
+    let local = path.strip_prefix("file://").map_or(path, |rest| rest);
+    let scheme = local.find(':').is_some_and(|i| i > 0 && local[..i].chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')));
+    ensure!(!scheme && !local.starts_with('\\'), "Not a relative file link");
+    let decoded = percent_decode(local)?;
+    if decoded.is_empty() { return Ok((contained(root, file)?, anchor)); }
+    let mut candidates: Vec<PathBuf> = vec![];
+    if decoded.starts_with('/') {
+        candidates.push(PathBuf::from(&decoded));
+        candidates.push(root.join(decoded.trim_start_matches('/')));
+    } else { candidates.push(file.parent().unwrap_or(root).join(&decoded)); }
+    let mut first_error = None;
+    for candidate in &candidates {
+        let with_extension = ["md", "mdx"].iter().map(|e| { let mut p = candidate.clone().into_os_string(); p.push("."); p.push(e); PathBuf::from(p) });
+        for option in std::iter::once(candidate.clone()).chain(with_extension) {
+            match contained(root, &option) { Ok(found) => return Ok((found, anchor)), Err(e) => { first_error.get_or_insert(e); } }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| anyhow::anyhow!("Not a relative file link")))
+}
+/// Case-insensitive text search over the folder's documents, off the UI thread.
+/// Ends early when `cancel` is set, at `limit` hits or when `budget` runs out.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hit { pub path: PathBuf, pub line: usize, pub text: String, pub column: usize }
+pub fn search_content(root: &Path, query: &str, limit: usize, budget: std::time::Duration, cancel: &std::sync::atomic::AtomicBool) -> (Vec<Hit>, bool) {
+    use std::sync::atomic::Ordering;
+    let needle = query.to_lowercase();
+    let (started, mut hits) = (std::time::Instant::now(), vec![]);
+    if needle.is_empty() { return (hits, false); }
+    for entry in ignore::WalkBuilder::new(root).follow_links(false).require_git(true).build().flatten() {
+        if cancel.load(Ordering::Relaxed) || started.elapsed() > budget { return (hits, true); }
+        if !entry.file_type().is_some_and(|t| t.is_file()) || !supported(entry.path()) { continue; }
+        let Ok(text) = read(entry.path()) else { continue };
+        if !text.to_lowercase().contains(&needle) { continue; }
+        let mut in_file = 0;
+        for (n, line) in text.lines().enumerate() {
+            let Some(at) = line.to_lowercase().find(&needle) else { continue };
+            // A window around the match, so a very long line still shows it.
+            let from = (0..=at.min(line.len())).rev().find(|i| line.is_char_boundary(*i) && at - i >= at.min(40)).unwrap_or(0);
+            let shown: String = line[from..].chars().take(160).collect();
+            hits.push(Hit { path: entry.path().to_path_buf(), line: n + 1, text: shown.trim().to_string(), column: at });
+            in_file += 1;
+            if hits.len() >= limit { return (hits, true); }
+            if in_file >= 3 { break; }
+        }
+    }
+    (hits, false)
 }
 fn percent_decode(s: &str) -> Result<String> {
     let mut bytes = vec![]; let mut iter = s.bytes();
@@ -223,6 +284,23 @@ mod tests {
         let (target, anchor) = relative_link(&root, &path, "a%20space.md#heading").unwrap();
         assert_eq!(target, root.join("a space.md").canonicalize().unwrap()); assert_eq!(anchor.as_deref(), Some("heading"));
         assert!(relative_link(&root, &path, "https://example.com").is_err());
+        assert!(relative_link(&root, &path, "mailto:a@b.c").is_err());
+        // The spellings real documents use for the same file.
+        let canon = root.canonicalize().unwrap(); let want = canon.join("a space.md");
+        for link in ["a space", "/a space", "/a%20space.md", want.to_str().unwrap(), &format!("file://{}", want.display()), "a%20space.md?x=1#h"] { assert_eq!(relative_link(&canon, &canon.join("a.mdx"), link).unwrap().0, want, "{link}"); }
+        assert_eq!(relative_link(&canon, &canon.join("a.mdx"), "#h").unwrap(), (canon.join("a.mdx"), Some("h".to_string())));
+        assert!(relative_link(&canon, &canon.join("a.mdx"), "/etc/hosts").is_err());
+        assert!(relative_link(&root, &path, "missing.md").unwrap_err().downcast_ref::<std::io::Error>().is_some());
+        assert!(rank("deep/er/config.md", "config.md") < rank("configuration.md", "config.md"));
+        assert!(rank("configuration.md", "config") < rank("deep/config-notes.md", "config"));
+        assert!(rank("a/config.md", "config") < rank("b/c/config.md", "config"));
+        assert!(rank("people/umang.md", "people") < rank("pxexoxpxlxe.md", "people"));
+        assert_eq!(rank("readme.md", "zzz"), None);
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let (found, cut) = search_content(&canon, "HEADING", 10, std::time::Duration::from_secs(5), &cancel);
+        assert!(!cut && found.iter().any(|h| h.path == want && h.line == 1 && h.text == "# Heading"), "{found:?}");
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(search_content(&canon, "heading", 10, std::time::Duration::from_secs(5), &cancel).1);
         #[cfg(unix)] {
             std::os::unix::fs::symlink(std::env::temp_dir(), root.join("escape")).unwrap();
             assert!(contained(&root, &root.join("escape")).is_err());

@@ -10,6 +10,8 @@ impl<T: Clone + PartialEq> History<T> {
         if self.entries.len() > 200 { self.entries.remove(0); }
         self.cursor = self.entries.len() - 1;
     }
+    /// A destination moved: every entry for it follows.
+    pub fn rewrite(&mut self, f: impl Fn(&T) -> Option<T>) { for entry in &mut self.entries { if let Some(new) = f(entry) { *entry = new; } } }
     pub fn target(&self, forward: bool) -> Option<T> {
         let i = if forward { self.cursor.checked_add(1)? } else { self.cursor.checked_sub(1)? };
         self.entries.get(i).cloned()
@@ -43,6 +45,7 @@ mod tests {
         let mut h = History::default(); h.push("a"); h.push("b"); h.push("c");
         assert_eq!(h.travel(false), Some("b")); assert_eq!(h.travel(true), Some("c"));
         h.travel(false); h.push("d"); assert_eq!(h.target(true), None); assert_eq!(h.travel(false), Some("b"));
+        let mut moved = History::default(); moved.push("a"); moved.push("b"); moved.rewrite(|e| (*e == "a").then_some("z")); assert_eq!(moved.target(false), Some("z"));
         let mut s = Swipe::default(); assert_eq!(s.update(200., 0.), None);
         s.start(); assert_eq!(s.update(60., 1.), None); assert_eq!(s.update(60., 1.), Some(false)); assert_eq!(s.update(200., 0.), None);
         s.end(); assert_eq!(s.update(-200., 0.), None);

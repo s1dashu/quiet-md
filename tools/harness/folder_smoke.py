@@ -198,6 +198,122 @@ folder-state
     check("nav", "vertical scroll is not navigation", paths[8] == "b.md", str(paths))
     check("nav", "alt-left still moves by word", paths[9] == "b.md", str(paths))
 
+def renames():
+    "A rename takes the open file along, unsaved edits and history included."
+    root = folder("rename", {"a.md": "# A\\n\\none\\n".replace("\\\\n", "\\n"), "b.md": "# B\n\nb\n", "c.md": "# C\n\nc\n", "other.md": "# O\n"})
+    (root / "a.md").write_text("# A\n\none\n")
+    states = run("rename", root, f"""folder-open {root/'a.md'}
+wait 400
+folder-open {root/'other.md'}
+wait 400
+folder-open {root/'b.md'}
+wait 500
+fsmv {root/'b.md'} :: {root/'b2.md'}
+wait 1200
+folder-state
+folder-open {root/'c.md'}
+wait 500
+folder-caret 0 1
+type !
+fsmv {root/'c.md'} :: {root/'c2.md'}
+wait 2000
+folder-state
+shot moved
+fsmv {root/'a.md'} :: {root/'a2.md'}
+wait 800
+key cmd-alt-left
+wait 500
+key cmd-alt-left
+wait 500
+key cmd-alt-left
+wait 700
+folder-state
+""")
+    check("rename", "clean file follows", field(states[0], "path") == "b2.md" and field(states[0], "conflict") == "None", states[0])
+    check("rename", "unsaved edits follow and save", field(states[1], "path") == "c2.md" and (root / "c2.md").read_text() == "# C\n\nc!\n", repr((root / "c2.md").read_text()) + states[1])
+    check("rename", "nothing is recreated at the old path", not (root / "c.md").exists() and not (root / "b.md").exists())
+    check("rename", "history follows a moved file", field(states[2], "path") in ("a2.md",), states[2])
+
+def views():
+    "Scroll comes back with history; quitting saves; conflicts ask; themes redraw."
+    long = "# Long\n\n" + "\n\n".join(f"Paragraph {i}" for i in range(400)) + "\n"
+    root = folder("views", {"long.md": long, "short.md": "# S\n", **{f"n{i}.md": f"# N{i}\n" for i in range(26)}})
+    steps = "".join(f"folder-open {root / f'n{i}.md'}\nwait 120\n" for i in range(26))
+    states = run("views", root, f"""folder-open {root/'long.md'}
+wait 500
+wheel 800 400 3000
+wait 400
+wheel 800 400 3000
+wait 400
+folder-state
+folder-open {root/'short.md'}
+wait 400
+key cmd-alt-left
+wait 500
+folder-state
+{steps}folder-state
+folder-open {root/'long.md'}
+wait 800
+folder-state
+""")
+    check("views", "scroll position restored going back", int(field(states[0], "top")) > 0 and field(states[0], "top") == field(states[1], "top"), states[1])
+    check("views", "buffers stay bounded", int(field(states[2], "buffers")) <= 24, states[2])
+    check("views", "scroll survives eviction", field(states[3], "top") == field(states[0], "top"), states[3])
+    q = folder("quit", {"a.md": "# A\n\nbody\n"}); a = q / "a.md"
+    run("quit", q, "folder-caret 0 4\ntype Q\nappquit\nwait 500", expect_crash=True)
+    check("quit", "quitting (the update path too) saves pending edits", a.read_text() == "# A\n\nbodyQ\n", repr(a.read_text()))
+    c = folder("closing", {"a.md": "# A\n\nbody\n"}); ca = c / "a.md"
+    states = run("closing", c, f"folder-caret 0 4\ntype Z\nfswrite {ca} :: # Theirs\\n\nwait 1300\nkey cmd-w\nwait 500\nshot save-failed\nfolder-state")
+    check("closing", "closing with a conflict keeps the window and the edits", states and field(states[0], "dirty") == "true", str(states))
+    check("closing", "the other version is untouched", ca.read_text() == "# Theirs\n", ca.read_text())
+
+def markdown():
+    "What real documents contain: alerts, code-span links, math, images, every theme."
+    root = folder("md", {"README.md": "# Rich\n\n> [!WARNING]\n> Check `sub/other.md` and the `sub/` folder.\n\n> [!TIP]\n> Energy $E=mc^2$ costs $5 and $10, see https://example.com/x.\n\n![pixel](pixel.png)\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nneedle in the body text\n\n## Deep Heading\n",
+        "sub/other.md": "# Other\n\nThe needle lives here too.\n", "sub/README.md": "# Sub readme\n", "guide.mdx": "# Guide\n\n[home](/README) and [other](/sub/other.md#x)\n"})
+    image = bytearray()
+    import struct, zlib
+    raw = b"".join(b"\x00" + bytes([40, 120, 220, 255]) * 120 for _ in range(60))
+    chunk = lambda t, d: struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+    (root / "pixel.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 120, 60, 8, 6, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+    before = (root / "README.md").read_bytes()
+    states = run("md", root, f"""wait 1500
+shot rich-dark
+folder-dark off
+wait 1800
+shot rich-light
+folder-dark on
+wait 800
+folder-link /sub/
+wait 500
+folder-state
+folder-open {root/'guide.mdx'}
+wait 500
+folder-link /README
+wait 500
+folder-state
+folder-link guide
+wait 500
+folder-state
+key cmd-j
+wait 500
+shot palette-recent
+type needle
+wait 1000
+shot palette-content
+key down
+key down
+key enter
+wait 800
+folder-state
+shot found
+""")
+    check("md", "file untouched", (root / "README.md").read_bytes() == before)
+    check("md", "folder link opens its README", field(states[0], "path") == "sub/README.md", states[0])
+    check("md", "root-relative link without extension", field(states[1], "path") == "README.md", states[1])
+    check("md", "relative link without extension", field(states[2], "path") == "guide.mdx", states[2])
+    check("md", "a content hit opens its file", field(states[3], "path") in ("README.md", "sub/other.md"), states[3])
+
 def repository():
     "Staged, unstaged, untracked, deleted, renamed, conflicted; nothing is mutated."
     root = folder("git", {"a.md": "# A\n\none\n", "b.md": "# B\n\nb\n", "gone.md": "# Gone\n", "old name.md": "# Rename me\n\nsame body here\n", "c.md": "base\n"})
@@ -278,7 +394,7 @@ def diagrams():
     run("mermaid", root, "wait 2500\nshot diagrams\nfolder-caret 0 0\nkey right\nwait 800\nshot source-shown")
     check("mermaid", "file untouched", (root / "a.md").read_bytes() == before)
 
-all_ = dict(noop=noop, typing=typing, source_mode=source_mode, external=external, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
+all_ = dict(noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
 for name in sys.argv[1:] or all_:
     print(name); all_[name]()
 print(f"work: {work}")

@@ -293,7 +293,11 @@ impl Workspace {
             Confirm::Refs { show: true, .. } => (crate::settings::text("是否显示引用列表？").to_string(), crate::settings::text("选择显示后，协作者可再次查看本文的引用列表。").to_string(), crate::settings::text("显示"), false),
             Confirm::SaveFailed => (
                 crate::settings::text("文档保存失败").to_string(),
-                crate::localized_format!("{}。可以重试，或先取消并通过右上角“...”→“下载为”导出一份副本；放弃修改将丢失本次未保存的内容。", "{}. Retry, or cancel and export a copy using More → Download as. Discarding changes will lose your unsaved work.", self.save_error()),
+                if self.folder.is_some() {
+                    crate::localized_format!("{}。可以重试，或先取消并在页面顶部选择保留修改或保存副本；放弃修改将丢失本次未保存的内容。", "{}. Retry, or cancel and choose Keep My Edits or Save a Copy at the top of the page. Discarding changes will lose your unsaved work.", self.save_error())
+                } else {
+                    crate::localized_format!("{}。可以重试，或先取消并通过右上角“...”→“下载为”导出一份副本；放弃修改将丢失本次未保存的内容。", "{}. Retry, or cancel and export a copy using More → Download as. Discarding changes will lose your unsaved work.", self.save_error())
+                },
                 crate::settings::text("重试"),
                 false,
             ),

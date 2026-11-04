@@ -10,7 +10,7 @@ use crate::{app::{Workspace, View}, editor::view::{Editor, EditorEvent}, input::
 use fdl_core::{source_doc::{self, Projection}, workspace_files::{self as files, Entry, Source}, workspace_git::{self as git, FileStatus, Repository, Snapshot}};
 use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
-use std::{collections::{HashMap, HashSet}, path::{Path, PathBuf}, rc::Rc, sync::Arc, time::{Duration, Instant}};
+use std::{collections::{HashMap, HashSet, VecDeque}, path::{Path, PathBuf}, rc::Rc, sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 
 actions!(folder, [OpenFolder, CloseFolder, Back, Forward, SaveSource, SourceMode, EditingMode, SplitMode, ReadingMode]);
 pub fn bind_keys(cx: &mut App) {
@@ -28,11 +28,12 @@ pub enum Mode { Edit, Read, Source, Split }
 /// What a successful open does to the window's history. A failed open does nothing.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum How { Record, Travel(bool) }
-pub enum FolderEvent { Opened { path: PathBuf, anchor: Option<String>, how: How }, Toast(ToastKind, String) }
+pub enum FolderEvent { Opened { path: PathBuf, anchor: Option<String>, how: How }, Moved(PathBuf, PathBuf), Toast(ToastKind, String) }
 impl EventEmitter<FolderEvent> for Folder {}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Conflict { Changed, Deleted }
+enum Disk { Text(String), Missing, Moved(PathBuf) }
 struct Buffer {
     source: Source, projection: Arc<Projection>, editor: Entity<Editor>, field: Entity<TextField>, scroll: ScrollHandle,
     _subs: [Subscription; 2], used: u64,
@@ -48,9 +49,14 @@ enum TreeRow { Entry(Entry, usize), Note(SharedString, usize) }
 #[derive(Clone)]
 enum GitRow { Group(&'static str, usize), File(FileStatus, bool), More(usize) }
 enum GitState { Detecting, None, Failed(Option<Repository>, String), Ready(Repository, Snapshot) }
-struct Diff { file: FileStatus, staged: bool, lines: Option<Rc<Vec<SharedString>>>, list: ListState }
+struct Diff { file: FileStatus, staged: bool, patch: Option<Rc<git::Patch>>, error: Option<String>, list: ListState }
 #[derive(Default)]
-struct Palette { open: bool, index: Option<Rc<Vec<PathBuf>>>, truncated: bool, results: Vec<PathBuf>, selected: usize }
+struct Palette { open: bool, index: Option<Rc<Vec<PathBuf>>>, truncated: bool, files: Vec<PathBuf>, hits: Vec<files::Hit>, searching: bool, cut: bool, selected: usize, task: Option<Task<()>>, cancel: Option<Arc<AtomicBool>> }
+/// Sets its flag when the search that owns it is replaced or the palette closes.
+impl Palette {
+    fn stop(&mut self) { if let Some(c) = self.cancel.take() { c.store(true, Ordering::Relaxed); } self.task = None; self.searching = false; }
+    fn rows(&self) -> usize { self.files.len() + self.hits.len() }
+}
 
 pub struct Folder {
     pub root: PathBuf, pub current: Option<PathBuf>, buffers: HashMap<PathBuf, Buffer>, directories: HashMap<PathBuf, files::Listing>, expanded: HashSet<PathBuf>,
@@ -58,6 +64,9 @@ pub struct Folder {
     mode: Mode, diff: Option<Diff>, menu: bool, folders_menu: bool, overlay: bool, recoveries: Vec<PathBuf>, tick: u64, open_request: u64, open_task: Option<Task<()>>, opening: Option<PathBuf>,
     watcher: Option<notify::RecommendedWatcher>, watched_git: Option<PathBuf>, watcher_error: Option<String>, tasks: Vec<Task<()>>, more_bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     palette: Palette, palette_field: Entity<TextField>, _palette_sub: Subscription, scroll_memo: HashMap<PathBuf, ListOffset>,
+    window: AnyWindowHandle, recent_files: VecDeque<PathBuf>,
+    /// A search hit being opened: select this text once the file is showing.
+    pending_find: Option<String>,
 }
 /// Beside a throwaway `QUIET_MD_HOME`, or in app data: never in the user's library.
 fn recovery_dir() -> PathBuf {
@@ -89,17 +98,17 @@ impl Folder {
         remember(&root);
         let palette_field = cx.new(|cx| TextField::new("按文件名查找…", cx));
         let palette_sub = cx.subscribe_in(&palette_field, window, |f, field, ev: &TextFieldEvent, window, cx| match ev {
-            TextFieldEvent::Changed => { let q = field.read(cx).text.clone(); f.filter_palette(&q); cx.notify(); }
-            TextFieldEvent::Submit => { if let Some(path) = f.palette.results.get(f.palette.selected).cloned() { f.close_palette(window, cx); f.open(path, None, How::Record, window, cx); } }
+            TextFieldEvent::Changed => { let q = field.read(cx).text.clone(); f.filter_palette(&q); f.search_contents(&q, cx); cx.notify(); }
+            TextFieldEvent::Submit => f.palette_choose(f.palette.selected, window, cx),
             TextFieldEvent::Cancel => f.close_palette(window, cx),
             TextFieldEvent::Up => { f.palette.selected = f.palette.selected.saturating_sub(1); cx.notify(); }
-            TextFieldEvent::Down => { f.palette.selected = (f.palette.selected + 1).min(f.palette.results.len().saturating_sub(1)); cx.notify(); }
+            TextFieldEvent::Down => { f.palette.selected = (f.palette.selected + 1).min(f.palette.rows().saturating_sub(1)); cx.notify(); }
             _ => {}
         });
         let mut this = Self {
             root: root.clone(), current: None, buffers: HashMap::new(), directories: HashMap::new(), expanded: HashSet::from([root.clone()]), show_hidden: false, tree: Rc::default(), tree_scroll: Default::default(),
             git: GitState::Detecting, git_rows: Rc::default(), git_open: false, git_task: None, git_again: false, git_scroll: Default::default(), mode: Mode::Edit, diff: None, menu: false, folders_menu: false, overlay: false, recoveries: vec![], tick: 0, open_request: 0, open_task: None, opening: None,
-            watcher: None, watched_git: None, watcher_error: None, tasks: vec![], more_bounds: Default::default(), palette: Palette::default(), palette_field, _palette_sub: palette_sub, scroll_memo: HashMap::new(),
+            watcher: None, watched_git: None, watcher_error: None, tasks: vec![], more_bounds: Default::default(), palette: Palette::default(), palette_field, _palette_sub: palette_sub, scroll_memo: HashMap::new(), window: window.window_handle(), recent_files: VecDeque::new(), pending_find: None,
         };
         this.start_watching(cx);
         this.refresh_git(cx);
@@ -112,6 +121,7 @@ impl Folder {
                     Ok(listing) => {
                         let pick = listing.entries.iter().find(|e| !e.directory && e.path.file_name().is_some_and(|s| s.eq_ignore_ascii_case("readme.md"))).or_else(|| listing.entries.iter().find(|e| !e.directory)).map(|e| e.path.clone());
                         f.directories.insert(f.root.clone(), listing); f.recoveries = result.1; f.rebuild_tree();
+                        if f.watcher_error.is_some() { cx.emit(FolderEvent::Toast(ToastKind::Info, crate::settings::tr("无法实时监听此文件夹，外部改动每 30 秒检查一次", "Can't watch this folder live; outside changes are checked every 30 seconds").to_string())); }
                         match first { Some((path, anchor, how)) => f.open(path, anchor, how, window, cx), None => if let Some(path) = pick { f.open(path, None, How::Record, window, cx); } }
                     }
                     Err(e) => cx.emit(FolderEvent::Toast(ToastKind::Error, e.to_string())),
@@ -180,7 +190,7 @@ impl Folder {
                 if entry.directory && !entry.outside && f.expanded.contains(&entry.path) { walk(f, &entry.path, depth + 1, out); }
             }
             if listing.truncated { out.push(TreeRow::Note(crate::settings::tr("文件过多，仅显示前 5000 项", "Too many entries; showing the first 5,000").into(), depth)); }
-            if listing.other_files > 0 { out.push(TreeRow::Note(crate::localized_format!("另有 {} 个非文档文件", "{} other files not shown", listing.other_files).into(), depth)); }
+            if listing.other_files > 0 { out.push(TreeRow::Note(if listing.other_files == 1 { crate::settings::tr("另有 1 个非文档文件", "1 other file not shown").into() } else { crate::localized_format!("另有 {} 个非文档文件", "{} other files not shown", listing.other_files).into() }, depth)); }
         }
         let mut rows = vec![]; walk(self, &self.root, 0, &mut rows);
         self.tree = Rc::new(rows);
@@ -239,7 +249,7 @@ impl Folder {
         let meta = projection.meta.clone();
         let read_only = self.mode == Mode::Read;
         let memo = self.scroll_memo.get(&path).copied();
-        let editor = cx.new(|cx| { let mut e = Editor::new(projection.doc.clone(), 0, Default::default(), window, cx); e.source_doc = true; e.source_meta = meta; e.set_read_only(read_only, cx); if let Some(top) = memo { e.list.scroll_to(top); }
+        let editor = cx.new(|cx| { let mut e = Editor::new(projection.doc.clone(), 0, Default::default(), window, cx); e.source_doc = true; e.source_meta = meta; e.set_read_only(read_only, cx); e.restore_top = memo;
             // A diagram up front stays a diagram until the caret goes into it.
             if e.core.doc.blocks.first().is_some_and(|b| matches!(&b.kind, crate::model::BlockKind::Code { lang, .. } if lang.eq_ignore_ascii_case("mermaid"))) { e.core.sel = crate::editor::core::Selection::caret(crate::editor::core::Pos::new(crate::editor::core::TITLE, 0)); }
             e });
@@ -272,7 +282,9 @@ impl Folder {
         b.used = tick;
         b.editor.update(cx, |e, cx| e.set_read_only(read_only, cx));
         if let Some(id) = anchor.as_ref().and_then(|a| b.projection.anchors.get(a).copied()) { b.editor.update(cx, |e, cx| e.scroll_to_block(id, cx)); }
+        if let Some(find) = self.pending_find.take() { Self::select_text(&b.editor, &find, cx); }
         self.current = Some(path.clone()); self.diff = None; self.overlay = false;
+        self.recent_files.retain(|p| p != &path); self.recent_files.push_front(path.clone()); self.recent_files.truncate(20);
         self.reveal(&path, cx);
         self.refresh_field(&path, cx);
         self.focus_current(window, cx);
@@ -281,6 +293,19 @@ impl Folder {
         // It may have changed while it wasn't being looked at.
         self.check_buffers(Some(HashSet::from([path])), cx);
         cx.notify();
+    }
+    fn select_text(editor: &Entity<Editor>, text: &str, cx: &mut Context<Self>) {
+        let needle = text.to_lowercase();
+        editor.update(cx, |e, cx| {
+            let mut found = None;
+            e.core.doc.for_each_block(|b| { if found.is_none() && let Some(at) = b.text.text.to_lowercase().find(&needle) { found = Some((b.id, at)); } });
+            let Some((id, at)) = found else { return };
+            let end = (at + text.len()).min(e.core.block(id).map_or(at, |b| b.text.len()));
+            if e.core.block(id).is_some_and(|b| b.text.text.is_char_boundary(at) && b.text.text.is_char_boundary(end)) {
+                e.core.sel = crate::editor::core::Selection { anchor: crate::editor::core::Pos::new(id, at), head: crate::editor::core::Pos::new(id, end) };
+            }
+            e.scroll_to_block(id, cx);
+        });
     }
     /// Clean files beyond the limit go; their scroll position stays. Dirty ones are never evicted.
     fn evict(&mut self, keep: &Path, cx: &mut Context<Self>) {
@@ -444,32 +469,64 @@ impl Folder {
     // ---- what changed on disk
 
     fn check_buffers(&mut self, only: Option<HashSet<PathBuf>>, cx: &mut Context<Self>) {
-        let paths: Vec<PathBuf> = self.buffers.keys().filter(|p| only.as_ref().is_none_or(|s| s.contains(*p))).cloned().collect();
+        // A file already known gone stays a candidate: its new name may arrive later.
+        let paths: Vec<PathBuf> = self.buffers.iter().filter(|(p, b)| only.as_ref().is_none_or(|s| s.contains(*p)) || b.conflict == Some(Conflict::Deleted)).map(|(p, _)| p.clone()).collect();
         if paths.is_empty() { return; }
         for p in &paths { self.sync_from_editor(p, cx); }
-        let jobs: Vec<(PathBuf, u64)> = paths.iter().filter_map(|p| self.buffers.get(p).map(|b| (p.clone(), b.source.revision))).collect();
+        let jobs: Vec<(PathBuf, u64, String)> = paths.iter().filter_map(|p| self.buffers.get(p).map(|b| (p.clone(), b.source.revision, b.source.baseline.clone()))).collect();
+        let arrivals: Vec<PathBuf> = only.into_iter().flatten().filter(|p| !self.buffers.contains_key(p) && files::supported(p)).collect();
         cx.spawn(async move |this, cx| {
-            let results = cx.background_executor().spawn(async move { jobs.into_iter().map(|(p, rev)| { let disk = if p.exists() { files::read(&p).map(Some).map_err(|e| e.to_string()) } else { Ok(None) }; (p, rev, disk) }).collect::<Vec<_>>() }).await;
+            let results = cx.background_executor().spawn(async move { jobs.into_iter().map(|(p, rev, baseline)| {
+                if p.exists() { let disk = files::read(&p).map(Disk::Text).map_err(|e| e.to_string()); return (p, rev, disk); }
+                // Gone: a file that just appeared with the same bytes is the same file, renamed.
+                let moved = arrivals.iter().find(|new| files::read(new).is_ok_and(|t| t == baseline)).cloned();
+                (p, rev, Ok(moved.map_or(Disk::Missing, Disk::Moved)))
+            }).collect::<Vec<_>>() }).await;
             let _ = this.update(cx, |f, cx| { for (p, rev, disk) in results { f.reconcile(&p, rev, disk, cx); } cx.notify(); });
         }).detach();
     }
-    fn reconcile(&mut self, path: &Path, revision: u64, disk: Result<Option<String>, String>, cx: &mut Context<Self>) {
+    fn reconcile(&mut self, path: &Path, revision: u64, disk: Result<Disk, String>, cx: &mut Context<Self>) {
         let Some(b) = self.buffers.get_mut(path) else { return };
         // The buffer moved while this read was in flight: a late result must not win.
         if b.source.revision != revision || b.pending { self.retry_check(path, cx); return; }
         match disk {
             Err(e) => b.error = Some(crate::settings::diagnostic(&e)),
-            Ok(None) => b.conflict = Some(Conflict::Deleted),
-            Ok(Some(disk)) if disk == b.source.text => { b.source.baseline = disk; b.conflict = None; b.error = None; b.source.clear_recovery(&recovery_dir()); }
-            Ok(Some(disk)) if disk == b.source.baseline => { if b.conflict == Some(Conflict::Deleted) { b.conflict = None; } }
-            Ok(Some(_)) if b.source.dirty() => b.conflict = Some(Conflict::Changed),
-            Ok(Some(disk)) => {
+            Ok(Disk::Missing) => b.conflict = Some(Conflict::Deleted),
+            Ok(Disk::Moved(to)) => self.follow_move(path, to, cx),
+            Ok(Disk::Text(disk)) if disk == b.source.text => { b.source.baseline = disk; b.conflict = None; b.error = None; b.source.clear_recovery(&recovery_dir()); }
+            Ok(Disk::Text(disk)) if disk == b.source.baseline => { if b.conflict == Some(Conflict::Deleted) { b.conflict = None; } }
+            Ok(Disk::Text(_)) if b.source.dirty() => b.conflict = Some(Conflict::Changed),
+            Ok(Disk::Text(disk)) => {
                 // Clean: follow the file, keeping the scroll position.
                 b.source.replace(disk); b.conflict = None; b.error = None; b.projection_stale = true; b.field_stale = true;
                 self.refresh_field(path, cx);
                 self.reparse_now(path, cx);
             }
         }
+    }
+    /// The open file was renamed: same text, new home. Unsaved edits come along.
+    fn follow_move(&mut self, from: &Path, to: PathBuf, cx: &mut Context<Self>) {
+        let Some(mut source) = self.buffers.get(from).map(|b| b.source.clone()) else { return };
+        let (root, handle, was_current, old) = (self.root.clone(), self.window, self.current.as_deref() == Some(from), from.to_path_buf());
+        source.clear_recovery(&recovery_dir());
+        source.path = to.canonicalize().unwrap_or(to);
+        cx.spawn(async move |this, cx| {
+            let text = source.text.clone(); let file = source.path.clone();
+            let projection = cx.background_executor().spawn(async move { source_doc::project(&text, &file, &root) }).await;
+            let _ = cx.update_window(handle, |_, window, cx| { let _ = this.update(cx, |f, cx| {
+                if !f.buffers.contains_key(&old) { return; }
+                let new = source.path.clone();
+                let dirty = source.dirty();
+                f.buffers.remove(&old);
+                f.add_buffer(source, projection, false, window, cx);
+                if dirty && let Some(b) = f.buffers.get_mut(&new) { Self::write_recovery(b); }
+                cx.emit(FolderEvent::Moved(old.clone(), new.clone()));
+                cx.emit(FolderEvent::Toast(ToastKind::Info, crate::localized_format!("文件已移动到 {}", "File moved to {}", new.strip_prefix(&f.root).unwrap_or(&new).display())));
+                if was_current { f.current = Some(new.clone()); f.reveal(&new, cx); f.focus_current(window, cx); }
+                if dirty { f.schedule_save(&new, cx); }
+                cx.notify();
+            }); });
+        }).detach();
     }
     fn retry_check(&mut self, path: &Path, cx: &mut Context<Self>) {
         let p = path.to_path_buf();
@@ -574,16 +631,16 @@ impl Folder {
     fn show_diff(&mut self, file: FileStatus, staged: bool, cx: &mut Context<Self>) {
         let GitState::Ready(repo, _) = &self.git else { return };
         let root = repo.root.clone();
-        self.diff = Some(Diff { file: file.clone(), staged, lines: None, list: ListState::new(0, ListAlignment::Top, px(400.)) });
+        self.diff = Some(Diff { file: file.clone(), staged, patch: None, error: None, list: ListState::new(0, ListAlignment::Top, px(400.)) });
         cx.spawn(async move |this, cx| {
             let f = file.clone();
-            let text = cx.background_executor().spawn(async move { git::diff(&root, &f, staged).map(|s| s.lines().map(|l| SharedString::from(l.to_string())).collect::<Vec<_>>()) }).await;
+            let result = cx.background_executor().spawn(async move { git::diff(&root, &f, staged).map(|s| git::parse_patch(&s)) }).await;
             let _ = this.update(cx, |f, cx| {
                 let Some(d) = f.diff.as_mut().filter(|d| d.file == file && d.staged == staged) else { return };
-                let lines = text.unwrap_or_else(|e| vec![SharedString::from(e.to_string())]);
-                let lines = if lines.is_empty() { vec![SharedString::from(crate::settings::tr("没有差异", "No differences"))] } else { lines };
-                d.list = ListState::new(lines.len(), ListAlignment::Top, px(400.));
-                d.lines = Some(Rc::new(lines));
+                match result {
+                    Ok(patch) => { d.list = ListState::new(patch.rows.len(), ListAlignment::Top, px(400.)); d.patch = Some(Rc::new(patch)); }
+                    Err(e) => d.error = Some(e.to_string()),
+                }
                 cx.notify();
             });
         }).detach();
@@ -621,19 +678,48 @@ impl Folder {
         self.filter_palette("");
         cx.notify();
     }
-    fn close_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) { self.palette.open = false; self.focus_current(window, cx); cx.notify(); }
+    fn close_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) { self.palette.stop(); self.palette.open = false; self.focus_current(window, cx); cx.notify(); }
     fn filter_palette(&mut self, query: &str) {
         let Some(index) = self.palette.index.clone() else { return };
-        let q = query.to_lowercase();
-        let mut hits: Vec<(usize, &PathBuf)> = index.iter().filter_map(|p| {
-            let rel = p.strip_prefix(&self.root).unwrap_or(p).to_string_lossy().to_lowercase();
-            if q.is_empty() { return Some((rel.len(), p)); }
-            let name = p.file_name()?.to_string_lossy().to_lowercase();
-            if name.contains(&q) { Some((name.len(), p)) } else if rel.contains(&q) { Some((1000 + rel.len(), p)) } else { None }
-        }).collect();
-        hits.sort_by_key(|(score, _)| *score);
-        self.palette.results = hits.into_iter().take(40).map(|(_, p)| p.clone()).collect();
         self.palette.selected = 0;
+        if query.trim().is_empty() {
+            // Where you have just been, then the shallowest files.
+            let recent: Vec<PathBuf> = self.recent_files.iter().filter(|p| self.current.as_ref() != Some(*p)).cloned().collect();
+            let mut rest: Vec<&PathBuf> = index.iter().filter(|p| !recent.contains(p)).collect();
+            rest.sort_by_key(|p| p.components().count());
+            self.palette.files = recent.iter().cloned().chain(rest.into_iter().cloned()).take(40).collect();
+            self.palette.hits.clear();
+            return;
+        }
+        let mut hits: Vec<((u8, usize, usize), &PathBuf)> = index.iter().filter_map(|p| files::rank(&p.strip_prefix(&self.root).unwrap_or(p).to_string_lossy(), query).map(|r| (r, p))).collect();
+        hits.sort_by_key(|(r, _)| *r);
+        self.palette.files = hits.into_iter().take(20).map(|(_, p)| p.clone()).collect();
+    }
+    /// Inside the files, after a pause in typing: replaced by the next keystroke and
+    /// cancelled for real, because a walk of a big folder must not outlive its query.
+    fn search_contents(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.palette.stop();
+        self.palette.hits.clear(); self.palette.cut = false;
+        if query.trim().chars().count() < 2 { return; }
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.palette.cancel = Some(cancel.clone()); self.palette.searching = true;
+        let (root, q) = (self.root.clone(), query.trim().to_string());
+        self.palette.task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(200)).await;
+            let (hits, cut) = cx.background_executor().spawn(async move { files::search_content(&root, &q, 50, Duration::from_secs(3), &cancel) }).await;
+            let _ = this.update(cx, |f, cx| { f.palette.hits = hits; f.palette.cut = cut; f.palette.searching = false; f.palette.task = None; cx.notify(); });
+        }));
+    }
+    fn palette_choose(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let query = self.palette_field.read(cx).text.trim().to_string();
+        let target = match self.palette.files.get(i) {
+            Some(path) => Some((path.clone(), None)),
+            None => self.palette.hits.get(i - self.palette.files.len()).map(|h| (h.path.clone(), Some(query))),
+        };
+        let Some((path, find)) = target else { return };
+        self.close_palette(window, cx);
+        self.pending_find = find;
+        self.open(path, None, How::Record, window, cx);
     }
 
     // ---- what Workspace draws
@@ -887,22 +973,24 @@ impl Folder {
         let diagnostic = b.and_then(|b| b.projection.diagnostic.clone()).filter(|_| self.mode != Mode::Source && self.diff.is_none());
         let body: AnyElement = if let Some(d) = &self.diff {
             let title = if d.file.untracked() { tr("未跟踪文件的内容", "Untracked file contents") } else if d.staged { tr("已暂存的更改（索引与 HEAD）", "Staged changes (index vs HEAD)") } else { tr("未暂存的更改（工作区与索引）", "Unstaged changes (working tree vs index)") };
-            let lines = d.lines.clone();
+            let patch = d.patch.clone();
+            let error = d.error.clone();
             let list_state = d.list.clone();
+            let counts = patch.as_ref().filter(|p| p.added + p.removed > 0).map(|p| (p.added, p.removed));
             let target = self.git_root().map(|r| r.join(&d.file.path)).filter(|p| files::supported(p) && p.exists());
+            let action = |id: &'static str, label: &'static str| div().id(id).h(px(26.)).px(px(10.)).flex_none().flex().items_center().rounded(px(6.)).cursor_pointer().bg(Theme::fill_hover()).hover(|s| s.bg(Theme::fill_hover_strong())).text_color(Theme::text()).child(label);
+            let message = |text: SharedString| div().flex_1().px(px(18.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).child(text).into_any_element();
             div().flex_1().min_h_0().w_full().min_w_0().flex().flex_col()
-                .child(div().flex_none().h(px(36.)).px(px(18.)).flex().items_center().gap(px(8.)).text_size(px(12.)).text_color(Theme::text_caption()).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
-                    .when_some(target, |d, p| d.child(div().id("diff-open").h(px(26.)).px(px(10.)).flex_none().flex().items_center().rounded(px(6.)).cursor_pointer().bg(Theme::fill_hover()).hover(|s| s.bg(Theme::fill_hover_strong())).text_color(Theme::text()).child(tr("打开文件", "Open File")).on_click(cx.listener(move |f, _, window, cx| { f.diff = None; f.open(p.clone(), None, How::Record, window, cx); }))))
-                    .child(div().id("diff-close").h(px(26.)).px(px(10.)).flex_none().flex().items_center().rounded(px(6.)).cursor_pointer().bg(Theme::fill_hover()).hover(|s| s.bg(Theme::fill_hover_strong())).text_color(Theme::text()).child(tr("关闭", "Close")).on_click(cx.listener(|f, _, _, cx| { f.diff = None; cx.notify(); }))))
-                .child(match lines {
-                    None => div().flex_1().px(px(18.)).text_size(px(12.)).text_color(Theme::text_caption()).child(tr("正在读取差异…", "Reading the diff…")).into_any_element(),
-                    Some(lines) => list(list_state, move |i, _, _| {
-                        let line = lines.get(i).cloned().unwrap_or_default();
-                        let (bg, fg) = if line.starts_with("+++") || line.starts_with("---") || line.starts_with("diff ") || line.starts_with("index ") { (None, Theme::text_caption()) }
-                            else if line.starts_with('+') { (Some(theme::ca(craft::old::G500, 0.14)), Theme::text()) } else if line.starts_with('-') { (Some(theme::ca(craft::R400, 0.14)), Theme::text()) }
-                            else if line.starts_with("@@") { (None, Theme::primary()) } else { (None, Theme::text_code()) };
-                        div().w_full().min_w_0().px(px(18.)).py(px(1.)).font_family(theme::MONO_FONT).text_size(px(12.)).line_height(px(19.)).text_color(fg).when_some(bg, |d, c| d.bg(c)).child(line).into_any_element()
-                    }).flex_1().min_h_0().w_full().into_any_element(),
+                .child(div().flex_none().min_h(px(36.)).px(px(18.)).flex().items_center().gap(px(8.)).text_size(px(12.)).text_color(Theme::text_caption())
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    .when_some(counts, |d, (a, r)| d.child(div().flex_none().text_color(theme::c(craft::old::G500)).child(format!("+{a}"))).child(div().flex_none().text_color(theme::c(craft::R400)).child(format!("−{r}"))))
+                    .when_some(target, |d, p| d.child(action("diff-open", tr("打开文件", "Open File")).on_click(cx.listener(move |f, _, window, cx| { f.diff = None; f.open(p.clone(), None, How::Record, window, cx); }))))
+                    .child(action("diff-close", tr("关闭", "Close")).on_click(cx.listener(|f, _, _, cx| { f.diff = None; cx.notify(); }))))
+                .child(match (patch, error) {
+                    (_, Some(e)) => message(e.into()),
+                    (None, None) => message(tr("正在读取差异…", "Reading the diff…").into()),
+                    (Some(p), None) if p.rows.is_empty() => message(tr("没有差异", "No differences").into()),
+                    (Some(patch), None) => list(list_state, move |i, _, _| patch_row(patch.rows.get(i))).flex_1().min_h_0().w_full().into_any_element(),
                 }).into_any_element()
         } else if let Some(b) = b {
             let source = |available: f32| {
@@ -941,21 +1029,38 @@ impl Folder {
         if !self.palette.open { return None; }
         let root = self.root.clone();
         let selected = self.palette.selected;
-        let rows = self.palette.results.clone().into_iter().enumerate().map(|(i, p)| {
+        let files = self.palette.files.clone();
+        let offset = files.len();
+        let rows = files.into_iter().enumerate().map(|(i, p)| {
             let g = SharedString::from(format!("palette-{i}"));
             let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
             let dir = p.parent().and_then(|d| d.strip_prefix(&root).ok()).map(|d| d.display().to_string()).unwrap_or_default();
             menu_row(("palette-row", i), g).text_size(px(13.)).when(i == selected, |d| d.bg(Theme::fill_hover_strong()))
                 .child(div().flex_none().max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
                 .child(div().flex_1().min_w_0().pl(px(8.)).text_size(px(12.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(dir))
-                .on_click(cx.listener(move |f, _, window, cx| { f.close_palette(window, cx); f.open(p.clone(), None, How::Record, window, cx); }))
+                .on_click(cx.listener(move |f, _, window, cx| f.palette_choose(i, window, cx)))
         }).collect::<Vec<_>>();
+        let hits = self.palette.hits.clone().into_iter().enumerate().map(|(n, h)| {
+            let i = offset + n;
+            let g = SharedString::from(format!("palette-hit-{n}"));
+            let place = format!("{}:{}", h.path.strip_prefix(&root).unwrap_or(&h.path).display(), h.line);
+            menu_row(("palette-hit", n), g).text_size(px(12.)).when(i == selected, |d| d.bg(Theme::fill_hover_strong()))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(h.text))
+                .child(div().flex_none().max_w(px(200.)).pl(px(8.)).text_size(px(11.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(place))
+                .on_click(cx.listener(move |f, _, window, cx| f.palette_choose(i, window, cx)))
+        }).collect::<Vec<_>>();
+        let has_hits = !hits.is_empty();
+        let (searching, cut) = (self.palette.searching, self.palette.cut);
         let indexing = self.palette.index.is_none();
         let truncated = self.palette.truncated;
         Some(deferred(div().absolute().top(px(8.)).left_0().right_0().flex().justify_center().px(px(16.)).child(
             popover().occlude().w_full().max_w(px(520.)).flex().flex_col()
                 .child(div().h(px(40.)).px(px(12.)).flex().items_center().gap(px(8.)).border_b_1().border_color(Theme::line_border()).child(icon("search", 15., Theme::text_caption())).child(self.palette_field.clone()))
                 .child(div().id("palette-results").max_h(px(320.)).overflow_y_scroll().py(px(5.)).children(rows)
+                    .when(has_hits, |d| d.child(div().px(px(12.)).pt(px(8.)).pb(px(3.)).text_size(px(11.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text_caption()).child(tr("文件内容", "In files"))))
+                    .children(hits)
+                    .when(searching, |d| d.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(tr("正在搜索内容…", "Searching inside files…"))))
+                    .when(cut, |d| d.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(tr("结果过多或耗时过长，只显示部分结果", "Too many results or taking too long; showing some of them"))))
                     .when(indexing, |d| d.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(tr("正在索引文件夹…", "Indexing the folder…"))))
                     .when(truncated, |d| d.child(div().px(px(12.)).py(px(6.)).text_size(px(12.)).text_color(Theme::text_caption()).child(tr("文件过多，只索引了前 100000 个", "Too many files; indexed the first 100,000")))))
         )).with_priority(4).into_any_element())
@@ -964,10 +1069,10 @@ impl Folder {
         let b = self.current.as_ref().and_then(|p| self.buffers.get(p));
         let doc = b.map(|b| b.editor.read(cx).core.doc.clone());
         let git = match &self.git { GitState::Detecting => "detecting".to_string(), GitState::None => "none".into(), GitState::Failed(r, e) => format!("failed repo={} error={e}", r.as_ref().map_or("-", |r| r.branch.as_str())), GitState::Ready(r, s) => format!("ready branch={} detached={} worktree={} changes={}", r.branch, r.detached, r.worktree, s.files.len()) };
-        format!("path={} mode={:?} dirty={} revision={} conflict={:?} error={} title={:?} blocks={} meta={} editable={} buffers={} tree={} diff={:?} watcher={} undo={} text_sha={:x} git=[{git}]",
+        format!("path={} mode={:?} dirty={} revision={} conflict={:?} error={} title={:?} blocks={} meta={} editable={} buffers={} tree={} diff={:?} watcher={} undo={} text_sha={:x} top={} git=[{git}]",
             self.current.as_ref().map(|p| p.strip_prefix(&self.root).unwrap_or(p).display().to_string()).unwrap_or_default(), self.mode, b.is_some_and(|b| b.source.dirty()), b.map_or(0, |b| b.source.revision), b.and_then(|b| b.conflict), b.and_then(|b| b.error.as_deref()).unwrap_or(""),
             doc.as_ref().map(|d| d.title.text.clone()).unwrap_or_default(), doc.as_ref().map_or(0, |d| d.blocks.len()), b.map_or(0, |b| b.projection.meta.fields.len()), b.is_some_and(|b| !b.editor.read(cx).read_only), self.buffers.len(), self.tree.len(),
-            self.diff.as_ref().map(|d| (d.file.path.display().to_string(), d.staged, d.lines.as_ref().map_or(0, |l| l.len()))), self.watcher_error.as_deref().unwrap_or("ok"), b.is_some_and(|b| b.editor.read(cx).core.can_undo()), b.map_or(0, |b| { use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new(); b.source.text.hash(&mut h); h.finish() }))
+            self.diff.as_ref().map(|d| (d.file.path.display().to_string(), d.staged, d.patch.as_ref().map_or(0, |p| p.rows.len()))), self.watcher_error.as_deref().unwrap_or("ok"), b.is_some_and(|b| b.editor.read(cx).core.can_undo()), b.map_or(0, |b| { use std::hash::{Hash, Hasher}; let mut h = std::collections::hash_map::DefaultHasher::new(); b.source.text.hash(&mut h); h.finish() }), b.map_or(0, |b| b.editor.read(cx).list.logical_scroll_top().item_ix))
     }
     /// `FDL_SCRIPT` hooks: what a script can't reach by coordinates.
     pub fn test_command(&mut self, cmd: &str, arg: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -986,6 +1091,8 @@ impl Folder {
                 let file = if let GitState::Ready(_, s) = &self.git { s.files.iter().find(|f| f.path == Path::new(path)).cloned() } else { None };
                 if let Some(file) = file { self.show_diff(file, kind == "staged", cx); }
             }
+            "folder-dark" => { crate::settings::apply_appearance(if arg == "on" { "dark" } else { "light" }); crate::theme::set_dark(arg == "on"); crate::themes::touch(); window.refresh(); }
+            "folder-select" => if let Some(b) = self.current.as_ref().and_then(|p| self.buffers.get(p)) { Self::select_text(&b.editor.clone(), arg, cx); },
             "folder-git" => { self.git_open = !self.git_open; cx.notify(); }
             "folder-menu" => { self.menu = !self.menu; cx.notify(); }
             "folder-meta" => if let Some(b) = self.current.as_ref().and_then(|p| self.buffers.get(p)) { b.editor.update(cx, |e, cx| e.toggle_source_meta(cx)); },
@@ -995,6 +1102,34 @@ impl Folder {
     }
     pub fn toggle_overlay(&mut self, cx: &mut Context<Self>) { self.overlay = !self.overlay; cx.notify(); }
     pub fn overlay_open(&self) -> bool { self.overlay }
+}
+fn patch_row(row: Option<&git::PatchRow>) -> AnyElement {
+    use crate::settings::tr;
+    use git::{LineKind, PatchNotice, PatchRow};
+    let note = |text: String| div().w_full().min_w_0().px(px(18.)).py(px(4.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).child(text).into_any_element();
+    let number = |n: Option<u32>| div().w(px(44.)).flex_none().pr(px(10.)).flex().justify_end().text_color(Theme::text_placeholder()).child(n.map(|n| n.to_string()).unwrap_or_default());
+    match row {
+        Some(PatchRow::Notice(n)) => note(match n {
+            PatchNotice::NewFile => tr("新文件", "New file").into(),
+            PatchNotice::Deleted => tr("已删除的文件", "Deleted file").into(),
+            PatchNotice::Renamed(from) => crate::localized_format!("重命名自 {}", "Renamed from {}", from),
+            PatchNotice::Binary => tr("二进制文件，不显示内容", "Binary file; contents not shown").into(),
+            PatchNotice::LfsPointer => tr("Git LFS 指针：这里比较的是指针，不是文件内容", "Git LFS pointer: this compares the pointer, not the file's contents").into(),
+            PatchNotice::ModeChanged => tr("文件权限已更改", "File mode changed").into(),
+        }),
+        Some(PatchRow::Hunk(context)) => div().w_full().min_w_0().mt(px(6.)).px(px(18.)).py(px(3.)).bg(Theme::fill_hover()).font_family(theme::MONO_FONT).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).overflow_hidden().whitespace_nowrap().text_ellipsis().child(if context.is_empty() { "⋯".to_string() } else { format!("⋯ {context}") }).into_any_element(),
+        Some(PatchRow::NoNewline) => note(tr("文件末尾没有换行符", "No newline at end of file").into()),
+        Some(PatchRow::Line { kind, old, new, text }) => {
+            let (bg, mark) = match kind { LineKind::Added => (Some(theme::ca(craft::old::G500, 0.14)), "+"), LineKind::Removed => (Some(theme::ca(craft::R400, 0.14)), "−"), LineKind::Context => (None, " ") };
+            div().w_full().min_w_0().flex().pl(px(8.)).pr(px(18.)).font_family(theme::MONO_FONT).text_size(px(12.)).line_height(px(19.)).when_some(bg, |d, c| d.bg(c))
+                .child(number(*old)).child(number(*new))
+                .child(div().w(px(16.)).flex_none().text_color(Theme::text_caption()).child(mark))
+                // Wrapped, however long: documents are often one line per paragraph.
+                .child(div().flex_1().min_w_0().text_color(Theme::text()).child(text.clone()))
+                .into_any_element()
+        }
+        None => div().into_any_element(),
+    }
 }
 fn nav_button(id: &'static str, flip: bool, on: bool) -> Stateful<Div> {
     let glyph = icon("arrow-left", 16., if on { Theme::icon() } else { Theme::text_disabled() }).when(flip, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::PI))));
@@ -1047,6 +1182,10 @@ impl Workspace {
                     }
                     cx.notify();
                 }
+                FolderEvent::Moved(from, to) => w.navigation.rewrite(|n| match n {
+                    crate::app::Nav::File(root, path, anchor) if path == from => Some(crate::app::Nav::File(root.clone(), to.clone(), anchor.clone())),
+                    _ => None,
+                }),
                 FolderEvent::Toast(kind, text) => w.show_toast_kind(*kind, text, cx),
             }),
         ];
