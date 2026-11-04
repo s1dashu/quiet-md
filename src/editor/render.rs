@@ -694,6 +694,7 @@ impl R<'_> {
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
                             window.focus(&e.focus);
+                            if e.source_preview { cx.emit(super::view::EditorEvent::SourceTask(id)); return; }
                             e.core.toggle_todo(id);
                             e.changed(window, cx);
                         }),
@@ -1941,6 +1942,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
                             window.focus(&e.focus);
+                            if e.source_preview { cx.emit(super::view::EditorEvent::SourceTask(id)); return; }
                             e.core.toggle_todo(id);
                             e.changed(window, cx);
                         }),

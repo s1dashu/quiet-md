@@ -185,7 +185,7 @@ impl ImageUi {
             toast: None,
             toast_task: None,
             remote: RefCell::default(),
-            remote_dir: Store::assets_dir().join("remote"),
+            remote_dir: Store::root_dir().join("assets/remote"),
             generation: 0,
             retried: HashMap::new(),
             file_drop: None,

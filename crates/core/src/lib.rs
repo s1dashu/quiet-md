@@ -12,3 +12,8 @@ pub mod palette;
 pub mod paste;
 pub mod store;
 pub mod time;
+
+pub mod workspace_files;
+pub mod workspace_git;
+pub mod workspace_preview;
+pub mod workspace_navigation;

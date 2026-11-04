@@ -139,7 +139,9 @@ impl Workspace {
         // The nav is just 主页: 36px items, a blue tint when selected. Its
         // icon column (x 17) is shared with 搜索 and the doc rows.
         let home_on = self.view == View::Home;
-        let nav = div().flex_none().pt(px(8.)).pb(px(4.)).px(px(SB_X)).child(
+        let nav = div().flex_none().pt(px(8.)).pb(px(4.)).px(px(SB_X))
+            .child(footer_row("nav-open-folder", "folder", crate::settings::tr("打开文件夹…", "Open Folder...")).on_click(cx.listener(|w,_,window,cx| w.open_folder(window,cx))))
+            .child(
             div()
                 .id("nav-home")
                 .h(px(ROW_H))

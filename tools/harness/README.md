@@ -37,6 +37,8 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 | `type <文字>` | 输入文字（行尾空格有效） |
 | `move x y` / `click x y` / `dclick x y` / `rclick x y` / `drag x1 y1 x2 y2` | 鼠标操作（窗口坐标） |
 | `wheel x y dy` | 一次滚轮事件 |
+| `swipe x y dx dy` | 依次发送触摸开始、像素滚动和结束事件，测试横向手势 |
+| `nav back\|forward x y` | 发送鼠标后退或前进按钮事件 |
 | `shot <名字>` / `burst <名字> n` | 截图；连拍 n 张，间隔约 8ms |
 | `mark <文字>` / `commit <文字>` | 输入法组合文字 / 提交 |
 | `clip html|text <文件>` | 设置模拟剪贴板的内容，之后的 `key cmd-v` 粘贴它 |

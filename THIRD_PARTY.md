@@ -783,3 +783,11 @@ Windows 安装包随附未修改的 Microsoft Visual C++ Runtime `vcruntime140.d
 ## 内置文档
 
 `shared-mock/library/` 里的「开始指南」是本项目自己写的示例文档，随 MIT 分发。
+
+## Pele and QuickJS
+
+Folder previews bundle [Pele 1.13.0](https://github.com/obsidianmd/pele), MIT,
+with its upstream Lucide ISC notice. See `assets/pele/LICENSE` and
+`assets/pele/README.md` for the pinned artifact and checksum.
+Pele runs through `rquickjs` (MIT), which embeds QuickJS; its bundled upstream
+license notices ship through the dependency. No project JavaScript is executed.

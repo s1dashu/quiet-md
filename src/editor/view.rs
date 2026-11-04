@@ -19,6 +19,8 @@ use std::rc::Rc;
 use std::time::Duration;
 
 pub enum EditorEvent {
+    SourceTask(BlockId),
+    SourceLink(String),
     Changed,
     /// ⌘S: write to disk now instead of waiting for the autosave debounce.
     Save,
@@ -228,6 +230,7 @@ pub struct Editor {
     pub created: u64,
     /// 阅读模式 (`reading.rs`), and the document as it was when it began.
     pub read_only: bool,
+    pub source_preview: bool,
     pub(super) ro_doc: Option<crate::model::Document>,
     /// The 文档信息 row under the title.
     pub info: crate::store::InfoRow,
@@ -429,6 +432,7 @@ impl Editor {
             modified,
             created: modified,
             read_only: false,
+            source_preview: false,
             ro_doc: None,
             info: Default::default(),
             cd,

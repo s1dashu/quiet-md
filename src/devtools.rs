@@ -9,7 +9,8 @@
 //!   pick <path>[|<path>...] (answers the next file dialog instead of showing it)
 //! For profiling: bench <n> <step> (runs the step n times, drawing a frame
 //!   synchronously after each, and prints step / frame / editor-render times) |
-//!   wheel x y dy (one scroll-wheel event).
+//!   wheel x y dy (one scroll-wheel event) | swipe x y dx dy |
+//!   nav back|forward x y (mouse navigation button).
 //! For demo videos: glide x y ms (eased pointer move from the last position) |
 //!   scroll x y dy ms (eased wheel scroll) | record <file.mp4> | record stop |
 //!   caption <text> (a timed note in the pointer track, for titles).
@@ -82,6 +83,14 @@ pub fn start(window: &mut Window, cx: &mut App) {
         // Only leading whitespace is insignificant: `type ab ` types a trailing space.
         for line in script.lines().map(str::trim_start).filter(|l| !l.trim().is_empty() && !l.starts_with('#')) {
             let (cmd, rest) = line.split_once(' ').unwrap_or((line, ""));
+            if cmd == "folder-state" {
+                if let Some(typed) = handle.downcast::<crate::app::Workspace>() {
+                    let _ = typed.update(cx, |ws, _, cx| {
+                        eprintln!("devtools: folder-state {}", ws.folder.as_ref().map(|f| f.read(cx).test_state()).unwrap_or_else(|| "closed".into()));
+                    });
+                }
+                continue;
+            }
             if cmd == "wait" {
                 // Draw invalidated frames ourselves: the display link stops
                 // while the screen is locked, and nothing would render.
@@ -596,6 +605,27 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
                     ..Default::default()
                 };
                 window.dispatch_event(PlatformInput::ScrollWheel(event), cx);
+            }
+        }
+        "swipe" => {
+            let n = nums(rest);
+            if n.len() >= 4 {
+                for (phase, dx, dy) in [(TouchPhase::Started, 0., 0.), (TouchPhase::Moved, n[2], n[3]), (TouchPhase::Ended, 0., 0.)] {
+                    window.dispatch_event(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                        position: point(px(n[0]), px(n[1])), delta: ScrollDelta::Pixels(point(px(dx), px(dy))), touch_phase: phase, ..Default::default()
+                    }), cx);
+                }
+            }
+        }
+        "nav" => {
+            let (direction, coords) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
+            let n = nums(coords);
+            if n.len() >= 2 && matches!(direction, "back" | "forward") {
+                let position = point(px(n[0]), px(n[1]));
+                let button = MouseButton::Navigate(if direction == "back" { NavigationDirection::Back } else { NavigationDirection::Forward });
+                let modifiers = Modifiers::default();
+                window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent { button, position, modifiers, click_count: 1, first_mouse: false }), cx);
+                window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent { button, position, modifiers, click_count: 1 }), cx);
             }
         }
         "resize" => {

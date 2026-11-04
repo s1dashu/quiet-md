@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 actions!(
     field,
-    [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Swallow, Tab, ShiftTab]
+    [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Swallow, Undo, Redo, Tab, ShiftTab]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -40,14 +40,16 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-n", Down, c),
         KeyBinding::new("tab", Tab, c),
         KeyBinding::new("shift-tab", ShiftTab, c),
-        KeyBinding::new("cmd-z", Swallow, c),
-        KeyBinding::new("cmd-shift-z", Swallow, c),
+        KeyBinding::new("cmd-z", Undo, c),
+        KeyBinding::new("cmd-shift-z", Redo, c),
     ]);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextFieldEvent {
     Changed,
+    Undo,
+    Redo,
     Submit,
     /// Shift+Enter (查找: previous match).
     ShiftSubmit,
@@ -85,6 +87,8 @@ pub struct TextField {
     /// Enter and pasted newlines insert line breaks; Up/Down move by line.
     pub multiline: bool,
     pub mono: bool,
+    /// Keep source bytes, including pasted line endings.
+    pub source: bool,
     /// Longest text in chars (longer input is cut off).
     pub max_len: Option<usize>,
     /// Only ASCII digits get in (number inputs).
@@ -127,6 +131,7 @@ impl TextField {
             wrap: false,
             multiline: false,
             mono: false,
+            source: false,
             max_len: None,
             digits: false,
             tab_events: false,
@@ -143,7 +148,10 @@ impl TextField {
 
     pub fn set_text(&mut self, s: &str, cx: &mut Context<Self>) {
         self.text = s.to_string();
-        self.sel = self.text.len()..self.text.len();
+        self.sel = if self.source {
+            let boundary=|mut i: usize| { i=i.min(self.text.len()); while !self.text.is_char_boundary(i) { i-=1; } i };
+            boundary(self.sel.start)..boundary(self.sel.end)
+        } else { self.text.len()..self.text.len() };
         self.marked = None;
         cx.notify();
     }
@@ -190,7 +198,7 @@ impl TextField {
     }
 
     fn replace(&mut self, range: Range<usize>, s: &str, cx: &mut Context<Self>) {
-        let mut s = if self.multiline { s.replace("\r\n", "\n").replace('\r', "\n") } else { s.replace(['\n', '\r'], " ") };
+        let mut s = if self.source { s.to_string() } else if self.multiline { s.replace("\r\n", "\n").replace('\r', "\n") } else { s.replace(['\n', '\r'], " ") };
         if self.digits {
             s.retain(|c| c.is_ascii_digit());
         }
@@ -268,35 +276,49 @@ impl TextField {
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.sel.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.sel.clone()].to_string()));
+            let text=self.text[self.sel.clone()].to_string();
+            if std::env::var_os("FDL_SCRIPT").is_some() { *crate::clipboard::FAKE_CLIPBOARD.lock().unwrap()=Some((None,text)); } else { cx.write_to_clipboard(ClipboardItem::new_string(text)); }
         }
     }
 
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
         if !self.sel.is_empty() {
-            cx.write_to_clipboard(ClipboardItem::new_string(self.text[self.sel.clone()].to_string()));
+            let text=self.text[self.sel.clone()].to_string();
+            if std::env::var_os("FDL_SCRIPT").is_some() { *crate::clipboard::FAKE_CLIPBOARD.lock().unwrap()=Some((None,text)); } else { cx.write_to_clipboard(ClipboardItem::new_string(text)); }
             self.replace(self.sel.clone(), "", cx);
         }
     }
 
     fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(t) = cx.read_from_clipboard().and_then(|i| i.text()) {
+        let fake = crate::clipboard::FAKE_CLIPBOARD.lock().ok().and_then(|v| v.as_ref().map(|(_, text)| text.clone()));
+        let text = if std::env::var_os("FDL_SCRIPT").is_some() { fake } else { cx.read_from_clipboard().and_then(|i| i.text()) };
+        if let Some(t) = text {
             self.replace(self.sel.clone(), &t, cx);
         }
     }
 
     fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
         if self.multiline {
-            return self.replace(self.sel.clone(), "\n", cx);
+            let newline = if self.source && self.text.contains("\r\n") { "\r\n" } else { "\n" };
+            return self.replace(self.sel.clone(), newline, cx);
         }
         cx.emit(TextFieldEvent::Submit);
     }
 
     fn shift_submit(&mut self, _: &ShiftSubmit, _: &mut Window, cx: &mut Context<Self>) {
         if self.multiline {
-            return self.replace(self.sel.clone(), "\n", cx);
+            let newline = if self.source && self.text.contains("\r\n") { "\r\n" } else { "\n" };
+            return self.replace(self.sel.clone(), newline, cx);
         }
         cx.emit(TextFieldEvent::ShiftSubmit);
+    }
+
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.source { cx.emit(TextFieldEvent::Undo); } else if !self.multiline { cx.propagate(); }
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.source { cx.emit(TextFieldEvent::Redo); } else if !self.multiline { cx.propagate(); }
     }
 
     fn swallow(&mut self, _: &Swallow, _: &mut Window, cx: &mut Context<Self>) {
@@ -309,6 +331,7 @@ impl TextField {
         match (self.tab_events, self.multiline) {
             (true, _) => cx.emit(TextFieldEvent::Tab),
             (false, false) => cx.propagate(),
+            _ if self.source => self.replace(self.sel.clone(), "\t", cx),
             _ => {}
         }
     }
@@ -545,6 +568,14 @@ impl Render for TextField {
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
             .on_action(cx.listener(Self::swallow))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::Copy, window, cx| { if f.source { f.copy(&Copy,window,cx); } else { cx.propagate(); } }))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::Cut, window, cx| { if f.source { f.cut(&Cut,window,cx); } else { cx.propagate(); } }))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::Paste, window, cx| { if f.source { f.paste(&Paste,window,cx); } else { cx.propagate(); } }))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::SelectAll, window, cx| { if f.source { f.select_all(&SelectAll,window,cx); } else { cx.propagate(); } }))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::Undo, _, cx| { if f.source { cx.emit(TextFieldEvent::Undo); } else { cx.propagate(); } }))
+            .on_action(cx.listener(|f, _: &crate::editor::keymap::Redo, _, cx| { if f.source { cx.emit(TextFieldEvent::Redo); } else { cx.propagate(); } }))
             .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::shift_tab))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_down))

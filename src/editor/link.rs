@@ -438,6 +438,7 @@ impl Editor {
 
     /// The hover card: URL, 编辑链接, 移除链接 | 更多.
     pub(super) fn link_card(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.source_preview { return None; }
         let lr = self.link_ui.card.clone()?;
         if self.menu.is_some() {
             return None;
@@ -549,7 +550,7 @@ impl Editor {
         if let Some(url) = self.link_ui.click.take()
             && self.core.sel.is_collapsed()
         {
-            cx.open_url(&normalize(&url));
+            if self.source_preview { cx.emit(super::view::EditorEvent::SourceLink(url)); } else { cx.open_url(&normalize(&url)); }
         }
     }
 

@@ -775,6 +775,7 @@ impl R<'_> {
                     .mb(px(-12.))
                     .pb(px(12.))
                     .overflow_x_scroll()
+                    .on_scroll_wheel(|ev,_,cx| { if let ScrollDelta::Pixels(delta) = ev.delta && delta.x.abs() > delta.y.abs() { cx.stop_propagation(); } })
                     .child(grid),
             )
             .into_any_element()
