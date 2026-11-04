@@ -662,7 +662,7 @@ impl Editor {
         };
         let (grid, with_text) = (self.slash_grid(), self.slash_grid_text());
         let ranked: Vec<usize> =
-            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).filter(|i| !self.source_doc || menus::in_markdown(menus::SLASH_ITEMS[*i].kind)).collect();
+            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).filter(|i| { let kind = menus::SLASH_ITEMS[*i].kind; if self.source_doc { menus::in_markdown(kind) } else { kind != SlashKind::Mermaid } }).collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;
@@ -928,6 +928,14 @@ impl Editor {
                 let first = cols[0].children[0].id;
                 let g = Block::new(BlockKind::Grid, RichText::default()).with_children(cols);
                 let nid = self.core.insert_block(g);
+                self.core.ensure_paragraph_after(nid);
+                self.core.sel = Selection::caret(Pos::new(first, 0));
+            }
+            // Only folder documents draw diagrams, so only they offer this.
+            SlashKind::Mermaid => {
+                let b = Block::new(BlockKind::Code { lang: "Mermaid".into(), caption: None, wrap: true }, RichText::plain("flowchart LR\n  A[Start] --> B[Finish]"));
+                let first = b.id;
+                let nid = self.core.insert_block(b);
                 self.core.ensure_paragraph_after(nid);
                 self.core.sel = Selection::caret(Pos::new(first, 0));
             }

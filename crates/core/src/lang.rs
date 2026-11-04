@@ -44,6 +44,7 @@ pub const LANGS: &[(&str, &str, &[&str])] = &[
     ("MATLAB", "matlab", &[]),
     ("Makefile", "makefile", &["mak", "mk", "make"]),
     ("Markdown", "markdown", &["md"]),
+    ("Mermaid", "mermaid", &["mmd"]),
     ("Nginx", "nginx", &[]),
     ("Objective-C", "objectivec", &["oc", "objc", "mm"]),
     ("OpenGL Shading Language", "glsl", &[]),
@@ -151,6 +152,7 @@ mod tests {
         assert_eq!(resolve("C++"), "C++");
         assert_eq!(resolve("type"), "TypeScript");
         assert_eq!(resolve("objective-c"), "Objective-C");
+        assert_eq!((resolve("mermaid"), resolve("MMD"), from_token("mermaid").as_str(), to_token("Mermaid").as_str()), ("Mermaid", "Mermaid", "Mermaid", "mermaid"));
         assert_eq!(resolve("qqqq"), PLAIN);
     }
 }

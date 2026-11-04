@@ -19,6 +19,7 @@ pub enum SlashKind {
     Grid,
     Callout,
     Formula,
+    Mermaid,
     SubPageList,
     Countdown,
     Button,
@@ -50,7 +51,7 @@ pub const GROUPS: [SlashGroup; 4] = [
 
 /// What a Markdown file can actually say; the rest has no source form.
 pub fn in_markdown(kind: SlashKind) -> bool {
-    matches!(kind, SlashKind::Text | SlashKind::Heading(1..=6) | SlashKind::Ordered | SlashKind::Bullet | SlashKind::Code | SlashKind::Quote | SlashKind::Divider | SlashKind::Link | SlashKind::Todo | SlashKind::Table | SlashKind::Formula | SlashKind::Callout)
+    matches!(kind, SlashKind::Text | SlashKind::Heading(1..=6) | SlashKind::Ordered | SlashKind::Bullet | SlashKind::Code | SlashKind::Quote | SlashKind::Divider | SlashKind::Link | SlashKind::Todo | SlashKind::Table | SlashKind::Formula | SlashKind::Callout | SlashKind::Mermaid)
 }
 
 pub const BLUE: u32 = 0x336df4;
@@ -167,6 +168,7 @@ pub const SLASH_ITEMS: &[SlashItem] = &[
         group: 1,
         keywords: &["callout", "gaoliangkuai", "glk", "highlight"],
     },
+    SlashItem { kind: SlashKind::Mermaid, label: "Mermaid 图表", icon: "braces", color: GREEN, group: 1, keywords: &["mermaid", "diagram", "flowchart", "tubiao", "liuchengtu", "图表", "流程图"] },
     SlashItem {
         kind: SlashKind::Formula,
         label: "公式",
@@ -381,7 +383,7 @@ mod tests {
         assert_eq!(SLASH_ITEMS[r[0]].label, "表格");
         let r = filter_slash("cy");
         assert!(r.iter().all(|i| SLASH_ITEMS[*i].group == 1));
-        assert_eq!(r.len(), 9);
+        assert_eq!(r.len(), 10);
         assert!(filter_slash("zzz").is_empty());
         assert_eq!(SLASH_ITEMS[filter_slash("djs")[0]].label, "倒计时");
         let r = filter_slash("list");

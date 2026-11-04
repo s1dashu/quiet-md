@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 actions!(
     field,
-    [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Swallow, Undo, Redo, Tab, ShiftTab]
+    [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, DocStart, DocEnd, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Swallow, Undo, Redo, Tab, ShiftTab]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -25,6 +25,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, c),
         KeyBinding::new("cmd-left", Home, c),
         KeyBinding::new("cmd-right", End, c),
+        KeyBinding::new("cmd-up", DocStart, c),
+        KeyBinding::new("cmd-down", DocEnd, c),
         KeyBinding::new("home", Home, c),
         KeyBinding::new("end", End, c),
         KeyBinding::new("cmd-a", SelectAll, c),
@@ -270,6 +272,10 @@ impl TextField {
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         self.move_to(self.text.len(), cx);
     }
+
+    fn doc_start(&mut self, _: &DocStart, _: &mut Window, cx: &mut Context<Self>) { self.move_to(0, cx); }
+
+    fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) { self.move_to(self.text.len(), cx); }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.select_all_text(cx);
@@ -560,6 +566,8 @@ impl Render for TextField {
             .on_action(cx.listener(Self::select_right))
             .on_action(cx.listener(Self::home))
             .on_action(cx.listener(Self::end))
+            .on_action(cx.listener(Self::doc_start))
+            .on_action(cx.listener(Self::doc_end))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::cut))

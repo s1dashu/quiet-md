@@ -394,7 +394,21 @@ def diagrams():
     run("mermaid", root, "wait 2500\nshot diagrams\nfolder-caret 0 0\nkey right\nwait 800\nshot source-shown")
     check("mermaid", "file untouched", (root / "a.md").read_bytes() == before)
 
-all_ = dict(noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
+def typing_diagrams():
+    "A diagram can be written from the normal view, however it's started."
+    body = "flowchart LR\n  A[Start] --> B[Finish]"
+    for name, start in (("mm-enter", "type ```mermaid\nkey enter\n"), ("mm-space", "type ```mermaid \n")):
+        root = folder(name, {"a.md": "# T\n\nbody\n"}); a = root / "a.md"
+        run(name, root, f"folder-caret 0 4\nkey enter\n{start}wait 200\ntype flowchart LR\nkey enter\ntype   A[Start] --> B[Finish]\nwait 1500\nshot typed")
+        check(name, "the fence keeps its language", a.read_text() == f"# T\n\nbody\n\n```mermaid\n{body}\n```\n", repr(a.read_text()))
+    root = folder("mm-slash", {"a.md": "# T\n\nbody\n"}); a = root / "a.md"
+    run("mm-slash", root, "folder-caret 0 4\nkey enter\ntype /mermaid\nwait 300\nshot menu\nkey enter\nwait 2000\nshot inserted")
+    check("mm-slash", "the slash menu inserts a diagram", a.read_text() == f"# T\n\nbody\n\n```mermaid\n{body}\n```\n", repr(a.read_text()))
+    root = folder("mm-source", {"a.md": "# T\n\nbody\n"}); a = root / "a.md"
+    run("mm-source", root, "key cmd-alt-3\nwait 400\nkey cmd-down\ntype end\nwait 1200")
+    check("mm-source", "cmd-down reaches the end of the file in Source", a.read_text() == "# T\n\nbody\nend", repr(a.read_text()))
+
+all_ = dict(typing_diagrams=typing_diagrams, noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
 for name in sys.argv[1:] or all_:
     print(name); all_[name]()
 print(f"work: {work}")

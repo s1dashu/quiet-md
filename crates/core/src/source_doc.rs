@@ -1118,6 +1118,14 @@ mod tests {
         assert_eq!(out, source.replace("| 1 |", "| 1\\|9 |"));
     }
     #[test]
+    fn changing_a_code_block_language_writes_the_fence() {
+        let source = "```\nflowchart LR\n```\n";
+        let pr = p(source);
+        let out = edit(&pr, |c| { c.checkpoint(EditKind::Other); if let BlockKind::Code { lang, .. } = &mut c.doc.blocks[0].kind { *lang = "Mermaid".into(); } });
+        assert_eq!(out, "```mermaid\nflowchart LR\n```\n");
+        assert!(matches!(&p(&out).doc.blocks[0].kind, BlockKind::Code { lang, .. } if lang == "Mermaid"));
+    }
+    #[test]
     fn generated_text_escapes_only_what_it_must() {
         let source = "a\n"; let pr = p(source);
         let out = edit(&pr, |c| { caret(c, 0, 1); c.insert_text(" snake_case 2*3 *x* <div> [y]"); });
