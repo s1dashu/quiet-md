@@ -1691,6 +1691,7 @@ impl Editor {
     }
 
     pub(super) fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
+        crate::spaces::enter_window(window, cx);
         let target = self.img.file_drop.take();
         let fallback = || {
             let h = self.core.sel.head.block;

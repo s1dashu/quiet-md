@@ -75,9 +75,43 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("缩放", "Zoom"), Zoom),
                 MenuItem::separator(),
                 MenuItem::action(tr("进入 / 退出全屏幕", "Enter / Exit Full Screen"), ToggleFullScreen),
+                MenuItem::separator(),
+                MenuItem::action(tr("新窗口", "New Window"), crate::spaces::NewWindow),
+                MenuItem::action(tr("下一个空间", "Next Space"), crate::spaces::NextSpace),
+                MenuItem::action(tr("上一个空间", "Previous Space"), crate::spaces::PrevSpace),
             ],
         },
     ]);
+}
+
+/// A main window showing space `space` (`None`: the one last used), at the
+/// remembered size: centred, or a step down from `from` (the window it came from).
+pub fn open_main_window(space: Option<String>, from: Option<Bounds<Pixels>>, cx: &mut App) {
+    // Scripted dev runs must not steal keyboard focus from whatever the
+    // user is typing into.
+    let scripted = std::env::var_os("FDL_SCRIPT").is_some();
+    let first = cx.windows().is_empty();
+    let mut bounds = Bounds::centered(None, crate::quick_note::main_window_size(cx), cx);
+    if let Some(b) = from { bounds = Bounds { origin: b.origin + point(px(28.), px(28.)), size: b.size }; }
+    let opened = cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_background: WindowBackgroundAppearance::Blurred,
+            titlebar: Some(TitlebarOptions {
+                title: Some("quiet.md".into()),
+                appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
+                traffic_light_position: Some(point(px(20.), px(HEADER_H / 2. - 7.))),
+            }),
+            window_min_size: Some(size(px(480.), px(480.))),
+            focus: !scripted,
+            ..Default::default()
+        },
+        |window, cx| {
+            if first { crate::devtools::start(window, cx); }
+            cx.new(|cx| Workspace::new(space, window, cx))
+        },
+    );
+    if let Err(e) = opened { eprintln!("无法打开窗口：{e:#}"); }
 }
 
 pub fn bind_keys(cx: &mut App) {
@@ -212,7 +246,11 @@ pub struct Workspace {
     /// 快捷键's filter field.
     pub settings_filter: Entity<TextField>,
     native_sidebar: crate::native_header::NativeSidebar,
+    /// The space this window shows (`spaces`); `store` is its library.
+    pub space: String,
     pub store: SharedStore,
+    /// The default library's store, for `settings.json` (shared by every space).
+    pub ui: SharedStore,
     pub entries: Vec<Entry>,
     pub current: Option<String>,
     pub editor: Option<Entity<Editor>>,
@@ -277,6 +315,16 @@ pub struct Workspace {
     /// Held back by a failed save: runs after 重试 succeeds or 放弃修改.
     pub(crate) after_save: Option<AfterSave>,
     editor_sub: Option<Subscription>,
+    /// 设置 › 空间: the space being edited, its theme dropdown and where that was drawn.
+    pub space_edit: Option<crate::spaces::SpaceEdit>,
+    pub space_theme_menu: bool,
+    pub space_theme_anchor: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// A sideways swipe over the sidebar in progress (switches spaces).
+    pub swipe: crate::spaces::Swipe,
+    /// The space switch animation: when it began, and which way (±1).
+    pub space_anim: Option<(Instant, f32)>,
+    /// This frame's point in it (`space_motion`).
+    pub(crate) motion: Option<(f32, f32)>,
     _subs: Vec<Subscription>,
 }
 
@@ -292,22 +340,21 @@ fn notify_system(title: &str, body: &str) {
 }
 
 impl Workspace {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::new_window(false, window, cx)
+    /// A main window showing space `space` (`None`: the one last used).
+    pub fn new(space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build_window(false, None, space, window, cx)
     }
 
-    pub fn new_window(quick: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(quick, None, window, cx)
-    }
-
+    /// A note window, in the space last used (where the document is).
     pub fn new_document_window(document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(true, document, window, cx)
+        Self::build_window(true, document, None, window, cx)
     }
 
-    fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn build_window(quick: bool, document: Option<String>, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         crate::settings::load();
-        if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
-        let mut store = cx.global::<SharedStore>().clone();
+        let (space, mut store, space_error) = crate::spaces::open(&space.unwrap_or_else(crate::spaces::last_id), cx).expect("open document library");
+        if !cx.has_global::<SharedStore>() { cx.set_global(store.clone()); }
+        crate::spaces::enter(&space, cx);
         let entries = store.list();
         let search = cx.new(|cx| {
             let mut f = TextField::new("搜索", cx);
@@ -325,7 +372,7 @@ impl Workspace {
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() { if let Some(id) = &this.current { crate::quick_note::used(id, cx); } this.entries = this.store.list(); this.sort(); cx.notify(); }
+                if window.is_window_active() { this.space_activated(cx); if let Some(id) = &this.current { crate::quick_note::used(id, cx); } this.entries = this.store.list(); this.sort(); cx.notify(); }
                 else { this.cancel_shortcut_recording(cx); this.flush(cx); }
             }),
             cx.subscribe_in(&search, window, |this, _, ev: &TextFieldEvent, window, cx| {
@@ -374,7 +421,8 @@ impl Workspace {
             }
         })
         .detach();
-        let sidebar_width = store.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
+        let ui = cx.try_global::<crate::spaces::UiStore>().map(|u| u.0.clone()).unwrap_or_else(|| store.clone());
+        let sidebar_width = ui.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
         let mut ws = Workspace {
             quick_note: quick,
             shortcut_recording: None,
@@ -384,7 +432,9 @@ impl Workspace {
             theme_menu: None,
             theme_anchor: Default::default(),
             settings_filter,
+            space,
             store,
+            ui,
             entries,
             current: None,
             editor: None,
@@ -428,6 +478,12 @@ impl Workspace {
             unsaved: false,
             after_save: None,
             editor_sub: None,
+            space_edit: None,
+            space_theme_menu: false,
+            space_theme_anchor: Default::default(),
+            swipe: Default::default(),
+            space_anim: None,
+            motion: None,
             _subs: subs,
         };
         ws.sort();
@@ -437,13 +493,46 @@ impl Workspace {
             None => ws.new_doc(window, cx),
         }
         // Kept in the top bar (not just a toast): the user should notice.
-        let warnings = ws.store.take_warnings();
+        let warnings: Vec<String> = space_error.into_iter().chain(ws.store.take_warnings()).collect();
         if !warnings.is_empty() {
             let msg = warnings.iter().map(|s| crate::settings::diagnostic(s)).collect::<Vec<_>>().join(crate::settings::tr("；", "; "));
             ws.show_toast_kind(ToastKind::Error, &msg, cx);
             ws.status = SaveStatus::Failed(msg);
         }
         ws
+    }
+
+    /// Start over on the library now open (another space): nothing of the
+    /// old one stays open. Call with the open document already saved.
+    pub(crate) fn reload_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.save_task = None;
+        self.unsaved = false;
+        self.after_save = None;
+        self.editor_sub = None;
+        self.editor = None;
+        self.current = None;
+        self.status = SaveStatus::Idle;
+        (self.row_menu, self.rename, self.batch, self.confirm, self.move_dlg, self.export_md, self.doc_info, self.trash_menu) = (None, None, None, None, None, None, None, None);
+        (self.doc_menu, self.doc_sub, self.mode_menu, self.search_open) = (false, None, false, false);
+        self.expanded.clear();
+        self.entries = self.store.list();
+        self.sort();
+        self.load_home();
+        self.list_scroll.set_offset(point(px(0.), px(0.)));
+        match self.view {
+            View::Doc => match self.entries.first().map(|e| e.id.clone()) {
+                Some(id) => self.open(&id, window, cx),
+                None => self.show_view(View::Home, cx),
+            },
+            View::Trash => self.trash = self.store.list_trash(),
+            View::Home | View::Settings => {}
+        }
+        let warnings = self.store.take_warnings();
+        if !warnings.is_empty() {
+            let msg = warnings.iter().map(|s| crate::settings::diagnostic(s)).collect::<Vec<_>>().join(crate::settings::tr("；", "; "));
+            self.show_toast_kind(ToastKind::Error, &msg, cx);
+        }
+        cx.notify();
     }
 
     /// Most recently modified first.
@@ -982,7 +1071,7 @@ impl Workspace {
 
     /// 隐藏引用列表 / 显示引用列表: confirm first (hiding can skip it with 不再提示).
     pub(crate) fn ask_refs(&mut self, show: bool, cx: &mut Context<Self>) {
-        if !show && self.store.settings().refs_hide_no_ask {
+        if !show && self.ui.settings().refs_hide_no_ask {
             return self.set_refs_hidden(true, cx);
         }
         self.confirm = Some(Confirm::Refs { show, no_ask: false });
@@ -1213,6 +1302,10 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Paths and the document theme are this window's space's while it draws.
+        self.enter(cx);
+        self.motion = self.space_motion(window);
+        self.sync_space_edit(window, cx);
         self.native_sidebar.sync(if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
@@ -1225,6 +1318,7 @@ impl Render for Workspace {
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
+        let space_theme_menu = self.render_space_theme_menu(cx);
         let toast = self.render_toast(window);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -1263,9 +1357,10 @@ impl Render for Workspace {
         // them (no gutter, radius, border or shadow).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).child(main);
-        div()
-            .id("workspace")
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).overflow_hidden()
+            .child(div().flex_1().min_w_0().h_full().flex().map(Self::slide_page(self.motion)).child(main));
+        let root = div().id("workspace");
+        self.space_actions(root, cx)
             .key_context("Workspace")
             .track_focus(&self.focus)
             .relative()
@@ -1363,6 +1458,7 @@ impl Render for Workspace {
             .children(trash_menu)
             .children(home_menus)
             .children(theme_menu)
+            .children(space_theme_menu)
             .children(confirm)
             .children(move_dlg)
             .children(export_md)

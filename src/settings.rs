@@ -51,7 +51,7 @@ impl Preferences {
     }
 }
 
-fn path() -> std::path::PathBuf { crate::store::Store::root_dir().join("preferences.json") }
+fn path() -> std::path::PathBuf { crate::store::Store::base_dir().join("preferences.json") }
 
 pub fn load() {
     let p = std::fs::read(path()).ok().and_then(|b| serde_json::from_slice::<Preferences>(&b).ok()).unwrap_or_default();
@@ -62,7 +62,7 @@ fn apply(p: Preferences) {
     FEISHU.store(p.feishu, Ordering::Relaxed);
     ENGLISH.store(p.english, Ordering::Relaxed);
     // Before the themes are read (startup) the base comes from `feishu`.
-    themes::select(&p.theme_id());
+    themes::select(&crate::spaces::theme_override().unwrap_or_else(|| p.theme_id()));
     *PREFS.write().unwrap() = Some(p);
 }
 
@@ -97,6 +97,9 @@ pub fn sync_dark(cx: &App) -> bool {
     changed
 }
 
+/// The document theme drawn now: the current window's space's own, else the preference.
+pub fn theme_id() -> String { crate::spaces::theme_override().unwrap_or_else(|| prefs().theme_id()) }
+
 /// The current preferences (loaded on first use).
 pub fn prefs() -> Preferences {
     if PREFS.read().unwrap().is_none() { load(); }
@@ -105,7 +108,7 @@ pub fn prefs() -> Preferences {
 
 fn save(p: &Preferences) -> anyhow::Result<()> {
     use std::io::Write;
-    let root = crate::store::Store::root_dir();
+    let root = crate::store::Store::base_dir();
     std::fs::create_dir_all(&root)?;
     let tmp = root.join("preferences.json.tmp");
     let mut f = std::fs::File::create(&tmp)?;
@@ -145,7 +148,7 @@ pub(crate) fn refresh_all(this: &mut Workspace, cx: &mut Context<Workspace>) {
 
 /// A theme file in the user's editor; scripted runs only log it (they must
 /// not start other apps).
-fn open_in_editor(p: &std::path::Path, cx: &mut App) {
+pub(crate) fn open_in_editor(p: &std::path::Path, cx: &mut App) {
     if std::env::var_os("FDL_SCRIPT").is_some() { eprintln!("devtools: open {}", p.display()); return }
     cx.open_url(&format!("file://{}", p.display()));
 }
@@ -153,10 +156,10 @@ fn open_in_editor(p: &std::path::Path, cx: &mut App) {
 /// Theme files are watched: saving one in an editor redraws at once.
 pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
     static LAST: Mutex<Option<Vec<(std::path::PathBuf, std::time::SystemTime, u64)>>> = Mutex::new(None);
-    *LAST.lock().unwrap() = Some(themes::stamp());
+    *LAST.lock().unwrap() = Some(themes::stamp(&crate::spaces::css_files()));
     cx.spawn(async |this, cx| loop {
         cx.background_executor().timer(std::time::Duration::from_millis(800)).await;
-        let now = cx.background_executor().spawn(async { themes::stamp() }).await;
+        let now = cx.background_executor().spawn(async { themes::stamp(&crate::spaces::css_files()) }).await;
         let changed = { let mut l = LAST.lock().unwrap(); let c = l.as_ref() != Some(&now); *l = Some(now); c };
         if changed && this.update(cx, |w, cx| w.reload_themes(cx)).is_err() { break }
         if this.upgrade().is_none() { break }
@@ -166,7 +169,7 @@ pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
 // ---- the view
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Page { #[default] General, Appearance, Shortcuts, Library, About }
+pub enum Page { #[default] General, Appearance, Shortcuts, Library, Spaces, About }
 
 impl Page {
     fn title(self) -> &'static str {
@@ -175,6 +178,7 @@ impl Page {
             Page::Appearance => tr("外观", "Appearance"),
             Page::Shortcuts => tr("快捷键", "Shortcuts"),
             Page::Library => tr("文档库", "Documents"),
+            Page::Spaces => tr("空间", "Spaces"),
             Page::About => tr("关于", "About"),
         }
     }
@@ -184,14 +188,15 @@ impl Page {
             Page::Appearance => "palette",
             Page::Shortcuts => "keyboard",
             Page::Library => "storage",
+            Page::Spaces => "view-grid",
             Page::About => "info",
         }
     }
 }
 
-/// The sidebar list, one evenly spaced run (six rows need no unlabelled
+/// The sidebar list, one evenly spaced run (seven rows need no unlabelled
 /// groups); `None` is 回收站 (its own view, shown with this sidebar).
-const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), None, Some(Page::About)];
+const NAV: [Option<Page>; 7] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), Some(Page::Spaces), None, Some(Page::About)];
 
 // ---- controls (switch on the accent, 30pt buttons, grouped rows)
 
@@ -212,7 +217,7 @@ pub(crate) fn caption(t: &'static str) -> Div {
 }
 
 /// One setting: title and an optional description on the left, the control on the right.
-fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
+pub(crate) fn row(title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
     div().w_full().min_h(px(48.)).px(px(16.)).py(px(10.)).flex().items_center().justify_between().gap(px(24.))
         .child(div().flex_1().min_w_0().flex().flex_col().gap(px(2.))
             .child(div().text_size(px(13.)).line_height(px(20.)).text_color(Theme::text()).child(title.into()))
@@ -385,7 +390,7 @@ fn badge(t: &themes::Theme) -> Option<&'static str> {
 }
 
 /// A pop-up button (macOS): the current choice and a chevron on `button`'s white pill.
-fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: bool) -> Stateful<Div> {
+pub(crate) fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: bool) -> Stateful<Div> {
     div().id(id).flex_none().max_w(px(220.)).h(px(28.)).pl(px(12.)).pr(px(8.)).flex().items_center().gap(px(6.)).rounded(px(8.)).cursor_pointer()
         .bg(if open { theme::c(craft::N100) } else { Theme::bg_body() }).border_1().border_color(Theme::button_border()).shadow(theme::shadow_button())
         .hover(|s| s.bg(theme::c(craft::N100))).active(|s| s.bg(theme::c(craft::N200)))
@@ -394,9 +399,11 @@ fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: 
         .child(ui::icon("chevron-down", 12., Theme::text_caption()))
 }
 
+/// Draw with theme `id`: this window's space's when it has its own, else the preference.
 fn apply_theme(w: &mut Workspace, id: String, cx: &mut Context<Workspace>) {
-    let feishu = themes::themes().iter().find(|t| t.id == id).is_some_and(|t| t.style.feishu);
     w.theme_menu = None;
+    if crate::spaces::theme_override().is_some() { return w.set_space_theme(&crate::spaces::active().id, id, cx) }
+    let feishu = themes::themes().iter().find(|t| t.id == id).is_some_and(|t| t.style.feishu);
     w.set_pref(move |p| { p.theme = id; p.feishu = feishu; }, cx)
 }
 
@@ -406,7 +413,7 @@ impl Workspace {
         let focused = self.theme_menu.as_ref()?;
         if self.view != View::Settings || self.settings_page != Page::Appearance { return None }
         let b = self.theme_anchor.get()?;
-        let current = prefs().theme_id();
+        let current = theme_id();
         let list = themes::themes();
         let rows: Vec<AnyElement> = list.iter().map(|t| {
             let g = SharedString::from(format!("theme-opt-{}", t.id));
@@ -470,7 +477,7 @@ impl Workspace {
     }
 
     pub(crate) fn reload_themes(&mut self, cx: &mut Context<Self>) {
-        themes::load(&prefs().theme_id(), themes::all_loaded(), || cx.text_system().all_font_names());
+        themes::load(&theme_id(), themes::all_loaded(), || cx.text_system().all_font_names());
         refresh_all(self, cx);
     }
 
@@ -490,8 +497,7 @@ impl Workspace {
         match themes::duplicate(id) {
             Ok((new_id, p)) => {
                 themes::load(&new_id, themes::all_loaded(), || cx.text_system().all_font_names());
-                let feishu = themes::themes().iter().find(|t| t.id == new_id).is_some_and(|t| t.style.feishu);
-                self.set_pref(move |pr| { pr.theme = new_id; pr.feishu = feishu; }, cx);
+                apply_theme(self, new_id, cx);
                 open_in_editor(&p, cx);
             }
             Err(e) => self.show_toast_kind(ui::ToastKind::Error, &e.to_string(), cx),
@@ -501,8 +507,11 @@ impl Workspace {
     fn remove_theme(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Err(e) = themes::remove(id) { return self.show_toast_kind(ui::ToastKind::Error, &e.to_string(), cx) }
         self.reload_themes(cx);
-        // A deleted theme of the user's own: back to Craft.
-        if !themes::themes().iter().any(|t| t.id == id) { self.set_pref(|p| { p.theme = "craft".into(); p.feishu = false; }, cx); }
+        // A deleted theme of the user's own: back to Craft (spaces that used it follow the preference).
+        if !themes::themes().iter().any(|t| t.id == id) {
+            for s in crate::spaces::list().into_iter().filter(|s| s.theme == id) { let _ = crate::spaces::update(&s.id, |s| s.theme.clear()); }
+            if prefs().theme_id() == id { self.set_pref(|p| { p.theme = "craft".into(); p.feishu = false; }, cx); } else { self.reload_themes(cx); }
+        }
     }
 
     pub(crate) fn open_settings(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -579,6 +588,7 @@ impl Workspace {
             Page::Appearance => self.appearance_page(cx),
             Page::Shortcuts => self.shortcut_settings(cx),
             Page::Library => self.library_page(cx),
+            Page::Spaces => self.spaces_page(cx),
             Page::About => self.about_page(cx),
         };
         div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::UI_FONT)
@@ -610,7 +620,7 @@ impl Workspace {
     }
 
     fn appearance_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        let current = prefs().theme_id();
+        let current = theme_id();
         let list = themes::themes();
         let sel = list.iter().find(|t| t.id == current).or_else(|| list.first());
         let (sel_id, sel_name, sel_path, customized, own, warnings) = match sel {
@@ -621,7 +631,7 @@ impl Workspace {
         let errors = themes::errors();
         let where_: SharedString = match &sel_path {
             // Inside the library: the short path (the full one wraps on narrow windows).
-            Some(p) => p.strip_prefix(crate::store::Store::root_dir()).unwrap_or(p).display().to_string().into(),
+            Some(p) => p.strip_prefix(crate::store::Store::base_dir()).unwrap_or(p).display().to_string().into(),
             None => tr("内置主题", "Built in").into(),
         };
         let (edit_id, dup_id, rm_id, open_id) = (sel_id.clone(), sel_id.clone(), sel_id.clone(), sel_id);
@@ -631,7 +641,7 @@ impl Workspace {
             .relative()
             .on_click(cx.listener(move |w, _, _, cx| {
                 if w.theme_menu.is_none() && !themes::all_loaded() {
-                    themes::load(&prefs().theme_id(), true, || cx.text_system().all_font_names());
+                    themes::load(&theme_id(), true, || cx.text_system().all_font_names());
                 }
                 w.theme_menu = if w.theme_menu.is_some() { None } else { Some(open_id.clone()) };
                 cx.notify();
@@ -649,7 +659,7 @@ impl Workspace {
                         segmented("appearance", &[tr("跟随系统", "System"), tr("浅色", "Light"), tr("深色", "Dark")], at,
                             |w, i, cx| w.set_pref(|p| p.appearance = ["", "light", "dark"][i].into(), cx), cx)
                     }).into_any_element(),
-                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                    row(tr("文档主题", "Document theme"), crate::spaces::theme_override().map(|_| crate::localized_format!("空间「{}」使用自己的主题，在这里修改只影响它", "The space “{}” has its own theme; changes here apply to it only", crate::spaces::name(&crate::spaces::active())).into()), picker).into_any_element(),
                     sample.into_any_element(),
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
                         div().flex().items_center().gap(px(8.))

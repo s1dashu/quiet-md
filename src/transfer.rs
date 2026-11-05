@@ -181,6 +181,8 @@ impl Workspace {
         let path = save_path(&format!("{}.md", file_name(&doc)), cx);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = path.await else { return };
+            // Images resolve against this window's space (another may have drawn meanwhile).
+            let _ = this.update(cx, |w, cx| w.enter(cx));
             let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("doc").to_string();
             let assets = format!("{stem}.assets");
             let out = crate::markdown::export(&doc, &crate::markdown::Options { sub_pages: &subs, assets: all.then_some(assets.as_str()) });
@@ -223,7 +225,7 @@ impl Workspace {
         let view = printing::ns_view_of(window);
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = path.await else { return };
-            let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Info, crate::settings::text("正在导出文档"), cx));
+            let _ = this.update(cx, |w, cx| { w.enter(cx); w.show_toast_kind(ToastKind::Info, crate::settings::text("正在导出文档"), cx) });
             let html = crate::html::to_html(&doc, &crate::html::Options { sub_pages: &subs });
             let _ = std::fs::remove_file(&path);
             let res = printing::run(html, name, Job::Pdf(path.clone()), view, cx).await;
@@ -284,6 +286,7 @@ impl Workspace {
         if !self.save_before(cx, move |w, window, cx| w.import_files(&again, window, cx)) {
             return;
         }
+        self.enter(cx);
         let mut last = None;
         let mut failed = false;
         for p in paths {

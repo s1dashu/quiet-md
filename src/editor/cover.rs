@@ -224,7 +224,8 @@ impl Editor {
             if let Ok(Ok(Some(paths))) = rx.await
                 && let Some(p) = paths.into_iter().next()
             {
-                let _ = this.update_in(cx, |e, _, cx| {
+                let _ = this.update_in(cx, |e, window, cx| {
+                    crate::spaces::enter_window(window, cx);
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_string();
                     let stored = std::fs::read(&p).map_err(|_| super::image::BAD_FORMAT).and_then(|b| super::image::store_image(&b, &ext));
                     match stored {

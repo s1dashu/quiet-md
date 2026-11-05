@@ -42,3 +42,12 @@ key enter
 type /
 wait 900
 SHOT slash
+key escape
+resize 1280 800
+place 126 104
+wait 700
+key ctrl-2
+wait 1500
+move 58 737
+wait 900
+SHOT spaces

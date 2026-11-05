@@ -307,14 +307,15 @@ pub fn active() -> &'static Style {
     if p.is_null() { &PLAIN } else { unsafe { &*p } }
 }
 pub fn color(i: usize) -> Option<Hsla> { active().tokens.get(i).copied().flatten().map(crate::theme::adapt) }
-/// Bumped whenever what is drawn may change (the editor re-measures its rows).
-pub fn generation() -> u64 { GENERATION.load(Ordering::Relaxed) }
+/// Changes whenever what is drawn may change (the editor re-measures its
+/// rows): a reload, light / dark, or another style (a window of another space).
+pub fn generation() -> u64 { GENERATION.load(Ordering::Relaxed) ^ (ACTIVE.load(Ordering::Relaxed) as u64).rotate_left(29) }
 /// Something every theme draws changed (light / dark).
 pub fn touch() { GENERATION.fetch_add(1, Ordering::Relaxed); }
 pub fn themes() -> std::sync::RwLockReadGuard<'static, Vec<Theme>> { THEMES.read().unwrap() }
 /// Files that could not be read at all, from the last load.
 pub fn errors() -> Vec<String> { ERRORS.read().unwrap().clone() }
-pub fn dir() -> PathBuf { crate::store::Store::root_dir().join("themes") }
+pub fn dir() -> PathBuf { crate::store::Store::base_dir().join("themes") }
 
 // ---- CSS
 
@@ -683,6 +684,7 @@ pub fn load(selected: &str, all: bool, font_source: impl FnOnce() -> Vec<String>
         }
     }
     ALL_LOADED.store(all, Ordering::Relaxed);
+    LOADS.fetch_add(1, Ordering::Relaxed);
     *THEMES.write().unwrap() = list;
     *ERRORS.write().unwrap() = errors;
     select(selected);
@@ -698,12 +700,74 @@ pub fn select(id: &str) -> String {
     t.id.clone()
 }
 
-/// Modification stamps of the user's theme files (live reload compares them).
-pub fn stamp() -> Vec<(PathBuf, std::time::SystemTime, u64)> {
-    let mut v: Vec<_> = std::fs::read_dir(dir()).map(|rd| rd.flatten().filter(|e| e.path().extension().is_some_and(|x| x == "css"))
-        .filter_map(|e| { let m = e.metadata().ok()?; Some((e.path(), m.modified().ok()?, m.len())) }).collect()).unwrap_or_default();
+/// Modification stamps of the user's theme files and of `extra` (the
+/// spaces' stylesheets); live reload compares them.
+pub fn stamp(extra: &[PathBuf]) -> Vec<(PathBuf, std::time::SystemTime, u64)> {
+    let stamp = |p: PathBuf| { let m = std::fs::metadata(&p).ok()?; Some((p, m.modified().ok()?, m.len())) };
+    let mut v: Vec<_> = std::fs::read_dir(dir()).map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "css")).filter_map(stamp).collect()).unwrap_or_default();
+    v.extend(extra.iter().cloned().filter_map(stamp));
     v.sort();
     v
+}
+
+// ---- a space's own CSS
+
+/// Theme `theme` with a space's stylesheet `css` laid over it, as of load
+/// number `loads`; `None` style: there is no such file.
+struct Layered { theme: String, css: PathBuf, loads: u64, style: Option<&'static Style>, warnings: Vec<String> }
+
+static LOADS: AtomicU64 = AtomicU64::new(0);
+static LAYERED: RwLock<Vec<Layered>> = RwLock::new(Vec::new());
+
+/// The stylesheet text of theme `id` as loaded.
+fn source(id: &str) -> Option<String> {
+    let list = THEMES.read().unwrap();
+    let t = list.iter().find(|t| t.id == id).or_else(|| list.first())?;
+    match &t.path { Some(p) => std::fs::read_to_string(p).ok(), None => t.bundled.map(str::to_string) }
+}
+
+/// Theme `id` with the space stylesheet at `css` (if there is one) laid
+/// over it: the two read as one stylesheet, so the space's rules and
+/// variables win. Read once per file and theme until the themes reload.
+fn layered(id: &str, css: &std::path::Path, fonts: &mut dyn FnMut() -> Vec<String>) -> Option<&'static Style> {
+    let loads = LOADS.load(Ordering::Relaxed);
+    if let Some(l) = LAYERED.read().unwrap().iter().find(|l| l.theme == id && l.css == css && l.loads == loads) { return l.style }
+    let own = std::fs::read_to_string(css).ok();
+    let (style, warnings) = match own.as_deref().zip(source(id)) {
+        Some((own, base)) => {
+            let names = std::cell::OnceCell::new();
+            let mut source = Some(fonts);
+            let mut resolve = || names.get_or_init(|| source.take().map(|f| f()).unwrap_or_default()).as_slice();
+            match parse_with_fonts(&format!("{base}\n{own}"), &mut resolve) {
+                Ok((st, _, w)) => (Some(&*Box::leak(Box::new(st))), w),
+                Err(e) => (None, vec![e]),
+            }
+        }
+        None => (None, vec![]),
+    };
+    let mut all = LAYERED.write().unwrap();
+    all.retain(|l| !(l.theme == id && l.css == css));
+    all.push(Layered { theme: id.into(), css: css.into(), loads, style, warnings });
+    style
+}
+
+/// What the space stylesheet at `css` could not set over theme `id`, as of the last draw.
+pub fn space_warnings(id: &str, css: &std::path::Path) -> Vec<String> {
+    LAYERED.read().unwrap().iter().find(|l| l.theme == id && l.css == css).map(|l| l.warnings.clone()).unwrap_or_default()
+}
+
+/// Draw with theme `id` and the space stylesheet at `css` over it (a
+/// window shows its space this way before it draws); unlike `select`,
+/// only the style in use changes, so windows can take turns.
+pub fn show(id: &str, css: &std::path::Path, mut fonts: impl FnMut() -> Vec<String>) {
+    if !all_loaded() && !THEMES.read().unwrap().iter().any(|t| t.id == id) { load(id, true, &mut fonts) }
+    let style = layered(id, css, &mut fonts).or_else(|| {
+        let list = THEMES.read().unwrap();
+        list.iter().find(|t| t.id == id).or_else(|| list.first()).map(|t| t.style)
+    });
+    let Some(style) = style else { return };
+    let p = style as *const Style as *mut Style;
+    if ACTIVE.swap(p, Ordering::Relaxed) != p { crate::settings::set_base(style.feishu); }
 }
 
 /// The stylesheet of theme `id` as a file the user can edit: their own file,

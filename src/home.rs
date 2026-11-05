@@ -477,15 +477,15 @@ impl Workspace {
 
     /// 主页's view and sort order are remembered (`settings.json`).
     pub(crate) fn load_home(&mut self) {
-        let s = self.store.settings();
+        let s = self.ui.settings();
         self.home.grid = !s.home_list;
         self.home.sort = s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Visited);
     }
 
     fn save_home(&mut self) {
-        let mut s = self.store.settings();
+        let mut s = self.ui.settings();
         (s.home_list, s.home_sort) = (!self.home.grid, Some(self.home.sort.key().to_string()));
-        if let Err(e) = self.store.save_settings(&s) { eprintln!("无法保存主页视图：{e}"); }
+        if let Err(e) = self.ui.save_settings(&s) { eprintln!("无法保存主页视图：{e}"); }
     }
 
     pub(crate) fn render_home(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

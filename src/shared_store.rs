@@ -7,7 +7,9 @@ use std::{rc::Rc, cell::RefCell};
 pub struct SharedStore(Rc<RefCell<Store>>);
 impl gpui::Global for SharedStore {}
 impl SharedStore {
-    pub fn open() -> Result<Self> { Ok(Self(Rc::new(RefCell::new(Store::open()?)))) }
+    /// The library at `root` (a space's folder).
+    pub fn open_at(root: std::path::PathBuf) -> Result<Self> { Ok(Self(Rc::new(RefCell::new(Store::open_at(root)?)))) }
+    pub fn root(&self) -> std::path::PathBuf { self.0.borrow().root().to_path_buf() }
     pub fn take_warnings(&self) -> Vec<String> { std::mem::take(&mut self.0.borrow_mut().warnings) }
     pub fn list(&mut self) -> Vec<Entry> { self.0.borrow_mut().list() }
     pub fn load(&self, id: &str) -> Result<Document> { self.0.borrow_mut().load(id) }

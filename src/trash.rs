@@ -359,9 +359,9 @@ impl Workspace {
                             Confirm::Purge(id) => w.purge_doc(&id, cx),
                             Confirm::Refs { show, no_ask } => {
                                 if no_ask {
-                                    let mut s = w.store.settings();
+                                    let mut s = w.ui.settings();
                                     s.refs_hide_no_ask = true;
-                                    let _ = w.store.save_settings(&s);
+                                    let _ = w.ui.save_settings(&s);
                                 }
                                 w.set_refs_hidden(!show, cx);
                             }

@@ -5,7 +5,7 @@ use crate::{app::Workspace, settings::{english, tr}, theme::Theme};
 
 pub struct Shortcuts { base: Vec<KeyBinding>, custom: BTreeMap<String, String> }
 impl Global for Shortcuts {}
-fn path() -> std::path::PathBuf { crate::store::Store::root_dir().join("shortcuts.json") }
+fn path() -> std::path::PathBuf { crate::store::Store::base_dir().join("shortcuts.json") }
 /// The system-wide quick note hotkey unless the user picked another.
 pub const GLOBAL_DEFAULT: &str = "cmd-space";
 pub fn global_key() -> String {
@@ -82,7 +82,7 @@ pub fn rebuild(cx: &mut App) {
 }
 
 /// Settings groups, in order.
-const GROUPS: [(&str, &str); 5] = [("应用与窗口", "App & windows"), ("文档", "Documents"), ("编辑", "Editing"), ("文字样式", "Text styles"), ("段落与块", "Paragraphs & blocks")];
+const GROUPS: [(&str, &str); 6] = [("应用与窗口", "App & windows"), ("文档", "Documents"), ("编辑", "Editing"), ("文字样式", "Text styles"), ("段落与块", "Paragraphs & blocks"), ("空间", "Spaces")];
 
 /// (group, 中文, English) of the actions shown in Settings.
 fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
@@ -142,6 +142,18 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "AlignLeft" => (4, "左对齐", "Align left"),
         "AlignCenter" => (4, "居中对齐", "Align center"),
         "AlignRight" => (4, "右对齐", "Align right"),
+        "NewWindow" => (5, "新窗口（当前空间）", "New window (this space)"),
+        "NextSpace" => (5, "下一个空间", "Next space"),
+        "PrevSpace" => (5, "上一个空间", "Previous space"),
+        "GoSpace1" => (5, "切换到空间 1", "Go to space 1"),
+        "GoSpace2" => (5, "切换到空间 2", "Go to space 2"),
+        "GoSpace3" => (5, "切换到空间 3", "Go to space 3"),
+        "GoSpace4" => (5, "切换到空间 4", "Go to space 4"),
+        "GoSpace5" => (5, "切换到空间 5", "Go to space 5"),
+        "GoSpace6" => (5, "切换到空间 6", "Go to space 6"),
+        "GoSpace7" => (5, "切换到空间 7", "Go to space 7"),
+        "GoSpace8" => (5, "切换到空间 8", "Go to space 8"),
+        "GoSpace9" => (5, "切换到空间 9", "Go to space 9"),
         _ => return None,
     })
 }

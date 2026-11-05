@@ -36,7 +36,7 @@ pub fn open_last(cx: &mut App) {
 }
 
 pub fn open_document(document: Option<String>, cx: &mut App) {
-    let stored = cx.try_global::<crate::shared_store::SharedStore>().and_then(|s| s.settings().quick_note_size);
+    let stored = cx.try_global::<crate::spaces::UiStore>().and_then(|s| s.0.settings().quick_note_size);
     let remembered = cx.try_global::<Sizes>().and_then(|s| s.quick).or(stored).unwrap_or([640., 800.]);
     let mut previous = None;
     let handles = cx.try_global::<QuickWindows>().map(|w| w.0.clone()).unwrap_or_default();
@@ -164,7 +164,7 @@ pub fn remember(window: &Window, quick: bool, cx: &mut App) {
     }
 }
 pub fn persist(cx: &mut App) {
-    let (Some(sizes), Some(store)) = (cx.try_global::<Sizes>().copied(), cx.try_global::<crate::shared_store::SharedStore>()) else { return };
+    let (Some(sizes), Some(crate::spaces::UiStore(store))) = (cx.try_global::<Sizes>().copied(), cx.try_global::<crate::spaces::UiStore>()) else { return };
     let mut settings = store.settings();
     if sizes.quick.is_some() { settings.quick_note_size = sizes.quick }
     if sizes.main.is_some() { settings.window_size = sizes.main }
@@ -173,7 +173,7 @@ pub fn persist(cx: &mut App) {
 
 /// The main window's size: last used, or 1280 × 800.
 pub fn main_window_size(cx: &App) -> gpui::Size<Pixels> {
-    let s = cx.global::<crate::shared_store::SharedStore>().settings().window_size.unwrap_or([1280., 800.]);
+    let s = cx.try_global::<crate::spaces::UiStore>().and_then(|s| s.0.settings().window_size).unwrap_or([1280., 800.]);
     size(px(s[0].max(480.)), px(s[1].max(480.)))
 }
 

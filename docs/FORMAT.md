@@ -9,7 +9,10 @@ Quiet.md/
 ├── format.json          {"format": 1}：目录布局版本（store::FORMAT）
 ├── index.json           文档 id → Meta
 ├── index.json.bak       上一版 index.json
-├── settings.json        窗口级 UI 设置（侧栏宽度等）
+├── settings.json        窗口级 UI 设置（侧栏宽度等）；有多个空间时只用默认文档库里的这一份
+├── spaces.json          空间列表和最近使用的空间（只在默认文档库里，见下文）
+├── space.css            这个空间叠加在文档主题上的 CSS（可选，每个空间各一份）
+├── spaces/<id>/         新建空间的默认文件夹，本身也是一个完整的文档库
 ├── .lock                写锁（flock）：改写索引时短暂独占，不是单实例标记
 ├── docs/<id>.xml        每篇文档一份 DocxXML
 ├── assets/              粘贴或插入的图片、附件；assets/thumbs 是文件预览缩略图
@@ -17,6 +20,23 @@ Quiet.md/
     ├── index.json       id → Trashed { meta, deleted, root }
     └── <id>.xml
 ```
+
+### 空间
+
+一个空间就是一个文档库文件夹，布局和上面完全一样。`spaces.json` 只放在默认文档库（`QUIET_MD_HOME` 或 `~/Documents/Quiet.md`）里：
+
+```json
+{"spaces": [{"id": "default", "name": "", "icon": "", "dir": "", "theme": ""},
+            {"id": "5937f1ff", "name": "工作", "icon": "💼", "dir": "/Users/me/Work notes", "theme": "obsidian"}],
+ "active": "5937f1ff"}
+```
+
+- `active` 是最近使用的空间：新窗口和下次启动打开它。每个窗口显示自己的空间，窗口里切换不影响别的窗口。
+- 第一个永远是 `default`，即默认文档库本身，`dir` 为空，不能移除。没有 `spaces.json` 时只有它。
+- `dir` 是空间的文档库文件夹。相对路径相对于默认文档库：新建空间写成 `spaces/<id>`，整个文档库搬家后仍然有效；也可以在 设置 › 空间 改成任意文件夹（写绝对路径）。`theme` 为空时跟随 设置 › 外观。
+- 全局文件只放在默认文档库：`preferences.json`、`shortcuts.json`、`themes/`、`emoji.json`、`spaces.json`，以及 `settings.json`（侧栏宽度、主页视图和排序、窗口大小在各空间都一样）。其余文件（`index.json`、`docs/`、`assets/`、`trash/`、`space.css`）每个空间各有一份。
+- `space.css` 写法和主题 CSS 相同，读的时候接在空间所用主题的样式表后面，变量和规则都以它为准（见 THEMES.md）。
+- 移除空间只改 `spaces.json`，不删文件夹。旧版本不认识 `spaces.json`，只会打开默认文档库，不会误读别的空间，所以不需要改 `FORMAT`。
 
 ### Meta 字段
 

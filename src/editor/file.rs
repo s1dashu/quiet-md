@@ -250,8 +250,7 @@ fn first_png(dir: &Path) -> Option<PathBuf> {
     std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.extension().is_some_and(|e| e == "png"))
 }
 
-fn make_thumb(p: &Path) -> Option<PathBuf> {
-    let dir = thumb_dir(p);
+fn make_thumb(p: &Path, dir: PathBuf) -> Option<PathBuf> {
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::process::Command::new("qlmanage")
         .args(["-t", "-s", "1200", "-o"])
@@ -277,11 +276,11 @@ pub fn quick_look(p: &Path) {
     });
 }
 
-/// A new attachment for `p`, copied into `assets/files/<uuid>/<name>`.
-fn file_block_from_path(p: &Path) -> Option<Block> {
+/// A new attachment for `p`, copied into `<files>/<uuid>/<name>` (`assets/files`).
+fn file_block_from_path(p: &Path, files: &Path) -> Option<Block> {
     let name = p.file_name()?.to_string_lossy().to_string();
     let size = std::fs::metadata(p).ok().filter(|m| m.is_file())?.len();
-    let dir = Store::assets_dir().join("files").join(uuid::Uuid::new_v4().to_string());
+    let dir = files.join(uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir).ok()?;
     let dest = dir.join(&name);
     std::fs::copy(p, &dest).ok()?;
@@ -729,8 +728,8 @@ impl Editor {
     pub(super) fn start_thumbs(&mut self, cx: &mut Context<Self>) {
         let queued: Vec<PathBuf> = self.file.queue.borrow_mut().drain(..).collect();
         for p in queued {
-            let q = p.clone();
-            let task = cx.background_executor().spawn(async move { make_thumb(&q) });
+            let (q, dir) = (p.clone(), thumb_dir(&p));
+            let task = cx.background_executor().spawn(async move { make_thumb(&q, dir) });
             cx.spawn(async move |this, cx| {
                 let t = task.await;
                 let _ = this.update(cx, |e, cx| {
@@ -926,7 +925,10 @@ impl Editor {
     /// Copies `paths` into the library off the main thread, then inserts
     /// them at `target` (or the caret).
     pub(super) fn import_files(&mut self, paths: Vec<PathBuf>, target: Option<(BlockId, DropPlace)>, window: &mut Window, cx: &mut Context<Self>) {
-        let task = cx.background_executor().spawn(async move { paths.iter().map(|p| file_block_from_path(p)).collect::<Vec<_>>() });
+        crate::spaces::enter_window(window, cx);
+        // Resolved here: off the main thread another window's space may be current.
+        let files = Store::assets_dir().join("files");
+        let task = cx.background_executor().spawn(async move { paths.iter().map(|p| file_block_from_path(p, &files)).collect::<Vec<_>>() });
         cx.spawn_in(window, async move |this, cx| {
             let blocks = task.await;
             let _ = this.update_in(cx, |e, window, cx| {
