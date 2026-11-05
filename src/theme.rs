@@ -265,6 +265,11 @@ pub fn shadow_s4_down() -> Vec<BoxShadow> {
     vec![shadow(0.05, 1., 3., 0.), shadow(0.11, 10., 28., 0.)]
 }
 
+/// Cards resting on the sidebar (更新日志): a faint lift, no border.
+pub fn shadow_card() -> Vec<BoxShadow> {
+    vec![shadow(0.04, 1., 2., 0.), shadow(0.06, 4., 14., 0.)]
+}
+
 /// Header buttons and other white pills on a white panel (back / share).
 pub fn shadow_button() -> Vec<BoxShadow> {
     vec![shadow(0.05, 1., 1.5, 0.)]
@@ -343,7 +348,7 @@ impl Theme {
     pub fn danger_cell() -> Hsla { c(craft::R50) }
     pub fn danger() -> Hsla { c(craft::R500) }
 
-    // ---- quiet.md shell
+    // ---- Quiet.md shell
     /// A light gray tint separates the sidebar from the white page while keeping wallpaper colors quiet.
     /// The document pane paints its own opaque white surface.
     pub fn window() -> Hsla { if crate::native_header::supported() { ca(craft::WINDOW, 0.) } else { ca(craft::WINDOW, 0.84) } }
@@ -359,7 +364,6 @@ impl Theme {
     /// SF Symbols sit near secondary label; this is between N700 and N600.
     pub fn icon() -> Hsla { ca(craft::N900, 0.6) }
     /// Line above the sidebar footer (1pt, black 3.5%, #E8E8E9 on the sidebar).
-    pub fn sidebar_divider() -> Hsla { ca(craft::N1000, 0.035) }
     /// Line under the page title.
     /// White pill buttons on the note (back / + / share): hairline.
     pub fn button_border() -> Hsla { ca(craft::N1000, 0.075) }
@@ -518,7 +522,7 @@ pub fn heading_weight(level: u8) -> gpui::FontWeight {
     if level <= 2 { gpui::FontWeight::BOLD } else { gpui::FontWeight::SEMIBOLD }
 }
 
-/// Page title: quiet.md uses 34 / 55.25 Bold, larger than the 21pt
+/// Page title: Quiet.md uses 34 / 55.25 Bold, larger than the 21pt
 /// reference `.pageTitle`, to match preview typography; the larger title is
 /// an intentional deviation, not a measurement.
 pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };

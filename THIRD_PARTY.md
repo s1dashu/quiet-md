@@ -1,6 +1,6 @@
 # 第三方组件与素材
 
-quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随它一起分发的第三方代码和素材。
+Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随它一起分发的第三方代码和素材。
 
 ## Rust 依赖
 

@@ -104,7 +104,7 @@ pub fn check(manual: bool, cx: &mut App) {
 
 /// A toast in the front window: the version and the sidebar's 更新 pill.
 fn announce(version: &str, cx: &mut App) {
-    let msg = crate::localized_format!("quiet.md {} 已发布，点侧栏顶部的「更新」安装", "quiet.md {} is available. Click Update at the top of the sidebar.", version);
+    let msg = crate::localized_format!("Quiet.md {} 已发布，点侧栏顶部的「更新」安装", "Quiet.md {} is available. Click Update at the top of the sidebar.", version);
     let window = cx.active_window().or_else(|| cx.windows().first().copied()).and_then(|w| w.downcast::<crate::app::Workspace>());
     if let Some(w) = window { let _ = w.update(cx, |ws, _, cx| ws.show_toast_kind(crate::ui::ToastKind::Info, &msg, cx)); }
 }
@@ -152,7 +152,7 @@ fn public_key() -> Option<minisign_verify::PublicKey> {
 }
 
 /// `a` is a later version than `b` (dotted numbers; a missing part is 0).
-fn newer(a: &str, b: &str) -> bool {
+pub(crate) fn newer(a: &str, b: &str) -> bool {
     let parts = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
     let (Some(mut a), Some(mut b)) = (parts(a), parts(b)) else { return false };
     let n = a.len().max(b.len());
@@ -215,7 +215,10 @@ fn fetch_package(m: &Manifest) -> Result<PathBuf, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(&name);
     let part = dir.join(format!("{name}.part"));
-    curl(&["--max-time", "900", "-o", &part.to_string_lossy(), &m.url])?;
+    // curl gets no path: a Windows curl.exe reads its arguments in the ANSI
+    // code page, which cannot spell every user folder name (中文 included).
+    let out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+    curl_to(&["--max-time", "900", &m.url], Stdio::from(out))?;
     let bytes = std::fs::read(&part).map_err(|e| e.to_string())?;
     let failed = |what: &str| format!("{}: {what}", crate::settings::tr("更新包校验失败", "The update package failed verification"));
     if bytes.len() as u64 != m.size { return Err(failed("size")) }
@@ -239,9 +242,12 @@ fn fetch_package(m: &Manifest) -> Result<PathBuf, String> {
     Ok(file)
 }
 
-fn curl(args: &[&str]) -> Result<Vec<u8>, String> {
+fn curl(args: &[&str]) -> Result<Vec<u8>, String> { curl_to(args, Stdio::piped()) }
+
+/// `stdout`: piped (returned) or a file to download into.
+fn curl_to(args: &[&str], stdout: Stdio) -> Result<Vec<u8>, String> {
     let out = command("curl").args(["-fsSL", "--proto", "=https,http", "--connect-timeout", "15"]).args(args)
-        .stdin(Stdio::null()).stderr(Stdio::piped()).output()
+        .stdin(Stdio::null()).stdout(stdout).stderr(Stdio::piped()).output()
         .map_err(|e| format!("curl: {e}"))?;
     if out.status.success() { return Ok(out.stdout) }
     let msg = String::from_utf8_lossy(&out.stderr).trim().trim_start_matches("curl: ").to_string();
@@ -301,7 +307,7 @@ fn start_installer(new: &Path) -> Result<(), String> {
     let app = app_bundle().ok_or_else(|| crate::settings::tr("找不到正在运行的应用", "Could not find the running app").to_string())?;
     let parent = app.parent().ok_or("parent")?;
     if app.to_string_lossy().contains("/AppTranslocation/") {
-        return Err(crate::settings::tr("请先把 quiet.md 移到「应用程序」文件夹，再更新", "Move quiet.md to the Applications folder first, then update").into());
+        return Err(crate::settings::tr("请先把 Quiet.md 移到「应用程序」文件夹，再更新", "Move Quiet.md to the Applications folder first, then update").into());
     }
     // The folder must take the new bundle (a standard user cannot write to /Applications).
     let probe = parent.join(format!(".quiet.md-update-{}", std::process::id()));

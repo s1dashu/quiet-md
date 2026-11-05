@@ -91,4 +91,4 @@ minisign -G -f -p packaging/update-key.pub -s ~/.minisign/quiet-md.key
 
 本地试更新流程：用 `QUIET_MD_UPDATE_URL=http://127.0.0.1:<端口>` 指向一个放着清单和包的目录，再用 `QUIET_MD_UPDATE_PUBKEY=<测试公钥>` 编译；设了这个变量时，未签名的构建也会检查更新。
 
-发布新版本时，两个 `Cargo.toml` 的版本号一起更新。
+发布新版本时，两个 `Cargo.toml` 的版本号一起更新，并在 `src/changelog.rs` 写下这个版本的更新要点：老用户更新后，侧栏底部会显示一次。

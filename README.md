@@ -1,4 +1,4 @@
-<h1 align="center">quiet.md</h1>
+<h1 align="center">Quiet.md</h1>
 
 <p align="center">
   <b>A fast, quiet, local notes app.</b><br>
@@ -33,17 +33,17 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/home.png" width="100%" alt="The quiet.md home screen: a document tree on the left and all notes in a grid on the right.">
+  <img src="docs/images/home.png" width="100%" alt="The Quiet.md home screen: a document tree on the left and all notes in a grid on the right.">
 </p>
 
 > [!NOTE]
-> quiet.md is in **beta** and changing quickly. If you hit a bug or have an idea, please [open an issue](https://github.com/s1dashu/quiet-md/issues) — or better, send a pull request.
+> Quiet.md is in **beta** and changing quickly. If you hit a bug or have an idea, please [open an issue](https://github.com/s1dashu/quiet-md/issues) — or better, send a pull request.
 
-## Why quiet.md
+## Why Quiet.md
 
 **⚡ Fast, the native kind of fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No WebView, no Electron. In a one-million-character document, typing, deleting and scrolling all stay under 6 ms per frame at P95.
 
-**🔒 Local-first. Your files are yours.** No account, no cloud, and nothing goes over the network by default (the optional update check aside). Your library is an ordinary folder on your computer, and each note is one XML file. Manage it with Git, iCloud or any sync tool you like; if you ever stop using quiet.md, your files are still there.
+**🔒 Local-first. Your files are yours.** No account, no cloud, and nothing goes over the network by default (the optional update check aside). Your library is an ordinary folder on your computer, and each note is one XML file. Manage it with Git, iCloud or any sync tool you like; if you ever stop using Quiet.md, your files are still there.
 
 **📝 A full rich-text editor that speaks Feishu (Lark) DocxXML.** Notes are saved in the DocxXML format used by Feishu (Lark) Docs, so copy-paste, import and export keep their structure. Headings, to-dos, tables, columns, callouts, code, math, images and attachments — the blocks you reach for when writing documents are all there.
 
@@ -63,9 +63,9 @@
 - **macOS**: unzip and drag `quiet.md.app` into Applications. The app is signed and notarized by Apple.
 - **Windows**: run the installer. By default it installs for the current user only, and uninstalling never deletes your notes. If SmartScreen appears on first launch, click **More info → Run anyway**.
 
-You can also download from [quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/s1dashu/quiet-md/releases). There is no Intel Mac build yet; you can [build from source](CONTRIBUTING.md#从源码构建).
+You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/s1dashu/quiet-md/releases). There is no Intel Mac build yet; you can [build from source](CONTRIBUTING.md#从源码构建).
 
-On first launch, quiet.md puts a **Getting started** guide into an empty library — a ten-minute tour of the main features. Existing notes are never overwritten.
+On first launch, Quiet.md puts a **Getting started** guide into an empty library — a ten-minute tour of the main features. Existing notes are never overwritten.
 
 The interface is available in English and Simplified Chinese.
 
@@ -94,7 +94,7 @@ A 120 Hz display gives each frame 8.3 ms. Even at P95 on a million-character doc
 - **Editing**: headings, ordered and bulleted lists, to-dos, quotes, code blocks with syntax highlighting, LaTeX math, tables (with merged cells), callouts, columns, images, attachments and covers. Markdown shortcuts such as `#`, `-`, `[]` and `>`, plus a `/` slash menu.
 - **Organizing**: a document tree, pinning, favorites, full-text search and a trash.
 - **Import and export**: import Markdown and Feishu (Lark) DocxXML; export Markdown and PDF, or print directly. Pasting from Feishu or a web page keeps the structure.
-- **Shortcuts**: press `⌘ /` to see them all. Every one can be rebound.
+- **Shortcuts**: press `⌘ /` (`Ctrl+/` on Windows) to see them all. Every one can be rebound. On Windows, Ctrl stands in for ⌘ and Alt for ⌥; the app and the Getting started guides show the keys for your system.
 - **Themes**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or write your own in CSS; see [docs/THEMES.md](docs/THEMES.md).
 
 ## Recent updates
@@ -131,7 +131,7 @@ Limits are listed in the [architecture notes](docs/ARCHITECTURE.md#文件夹).
 
 ## Contributing
 
-quiet.md is still in beta and there is plenty to do: fixing bugs, adding features, supporting more platforms. Issues and pull requests are welcome.
+Quiet.md is still in beta and there is plenty to do: fixing bugs, adding features, supporting more platforms. Issues and pull requests are welcome.
 
 Quick start from source (Rust toolchain is pinned in `rust-toolchain.toml`; macOS needs the Xcode Command Line Tools, Windows needs the Visual Studio 2022 C++ Build Tools and the Windows SDK):
 
@@ -152,4 +152,4 @@ The code is licensed under [MIT](LICENSE). Third-party code, fonts and assets ar
 The following are not covered by the MIT license and should be replaced in forks:
 
 - The 67 Nucleo icons in `assets/icons/` are under a commercial Nucleo license. Do not extract or redistribute them on their own.
-- The name "quiet.md" and the app icon.
+- The name "Quiet.md" and the app icon.

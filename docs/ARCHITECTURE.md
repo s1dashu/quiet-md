@@ -1,6 +1,6 @@
 # 架构
 
-quiet.md 是一个单进程 GPUI 应用（Rust，约 4 万行）。一篇文档在内存里是一棵 block 树（`model.rs`），在磁盘上是一份 DocxXML 文件（`docxml.rs`）。编辑器把这棵树画成一个虚拟化列表。
+Quiet.md 是一个单进程 GPUI 应用（Rust，约 4 万行）。一篇文档在内存里是一棵 block 树（`model.rs`），在磁盘上是一份 DocxXML 文件（`docxml.rs`）。编辑器把这棵树画成一个虚拟化列表。
 
 仓库是一个 Cargo workspace，分两个 crate：
 

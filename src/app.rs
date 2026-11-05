@@ -25,20 +25,20 @@ pub fn set_menus(cx: &mut App) {
     use crate::settings::tr;
     cx.set_menus(vec![
         Menu {
-            name: "quiet.md".into(),
+            name: "Quiet.md".into(),
             items: vec![
-                MenuItem::action(tr("关于 quiet.md", "About quiet.md"), OpenAbout),
+                MenuItem::action(tr("关于 Quiet.md", "About Quiet.md"), OpenAbout),
                 MenuItem::action(tr("检查更新…", "Check for Updates…"), CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action(tr("设置…", "Settings…"), OpenSettings),
                 MenuItem::separator(),
                 MenuItem::os_submenu(tr("服务", "Services"), SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action(tr("隐藏 quiet.md", "Hide quiet.md"), HideApp),
+                MenuItem::action(tr("隐藏 Quiet.md", "Hide Quiet.md"), HideApp),
                 MenuItem::action(tr("隐藏其他", "Hide Others"), HideOthers),
                 MenuItem::action(tr("全部显示", "Show All"), ShowAll),
                 MenuItem::separator(),
-                MenuItem::action(tr("退出 quiet.md", "Quit quiet.md"), Quit),
+                MenuItem::action(tr("退出 Quiet.md", "Quit Quiet.md"), Quit),
             ],
         },
         Menu {
@@ -184,6 +184,8 @@ pub enum Confirm {
     Restore(String),
     /// 回收站 → 彻底删除.
     Purge(String),
+    /// 回收站 → 清空回收站: every trashed page, permanently.
+    EmptyTrash,
     /// 隐藏引用列表 (with 不再提示) / 显示引用列表.
     Refs { show: bool, no_ask: bool },
     /// The open document could not be written before it was to be replaced
@@ -449,9 +451,12 @@ impl Workspace {
         };
         ws.sort();
         ws.load_home();
+        // An empty library opens on 主页's empty state; only a quick note
+        // window starts a document of its own.
         match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
             Some(id) => ws.open(&id, window, cx),
-            None => ws.new_doc(window, cx),
+            None if quick => ws.new_doc(window, cx),
+            None => ws.view = View::Home,
         }
         // Kept in the top bar (not just a toast): the user should notice.
         let warnings = ws.store.take_warnings();
@@ -673,12 +678,13 @@ impl Workspace {
         self.row_menu = None;
         if self.current.is_none() {
             // Stay on 主页 / 回收站 if that's where the delete came from.
+            // The last document gone leaves the library empty (主页's empty
+            // state), not a new 未命名 document.
             let view = self.view;
             match self.entries.first().map(|e| e.id.clone()) {
-                Some(next) => self.open(&next, window, cx),
-                None => self.new_doc(window, cx),
+                Some(next) => { self.open(&next, window, cx); self.view = view; }
+                None => self.view = if view == View::Doc { View::Home } else { view },
             }
-            self.view = view;
         }
         self.sync_sub_pages(cx);
         if self.view == View::Trash {
@@ -1219,7 +1225,7 @@ impl Workspace {
                     })
                     .child(
                         seg("doc-search", "search")
-                            .tip_label(crate::settings::text("搜索(⌘ + J)").into(), TipSide::Below)
+                            .tip_label(crate::shortcuts::keys(crate::settings::text("搜索(⌘ + J)")).into(), TipSide::Below)
                             .on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(FocusSearch), cx))),
                     )
                     .child(

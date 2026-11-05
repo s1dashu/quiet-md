@@ -6,7 +6,7 @@
 //! mode edits the text directly and re-parses. Parsed documents, Git rows and
 //! diagrams are all derived and disposable. `Workspace` owns the window: this
 //! module only supplies the sidebar, top bar and pane it draws.
-use crate::{app::{Workspace, View}, editor::view::{Editor, EditorEvent}, input::{TextField, TextFieldEvent}, sidebar::{ROW_H, ROW_ICON, ROW_R, SB_X, footer_line, footer_row, footer_slot}, theme::{self, Theme, craft}, ui::{TipExt, TitleBarExt, ToastKind, icon, menu_row, menu_label, menu_glyph, popover}};
+use crate::{app::{Workspace, View}, editor::view::{Editor, EditorEvent}, input::{TextField, TextFieldEvent}, sidebar::{ROW_H, ROW_ICON, ROW_R, SB_X, footer_row, footer_slot}, theme::{self, Theme, craft}, ui::{TipExt, TitleBarExt, ToastKind, icon, menu_row, menu_label, menu_glyph, popover}};
 use fdl_core::{source_doc::{self, Projection}, workspace_files::{self as files, Entry, Source}, workspace_git::{self as git, FileStatus, Repository, Snapshot}};
 use futures::StreamExt;
 use gpui::{prelude::FluentBuilder, *};
@@ -751,9 +751,8 @@ impl Folder {
         let tree = uniform_list("folder-tree", tree_len, cx.processor(|f, range: std::ops::Range<usize>, _, cx| range.map(|i| f.tree_row(i, cx)).collect::<Vec<_>>())).track_scroll(self.tree_scroll.clone()).flex_1().min_h_0().px(px(SB_X));
         let retained: Vec<PathBuf> = self.recoveries.iter().filter(|p| !self.buffers.contains_key(*p)).cloned().collect();
         let footer = div().flex_none().flex().flex_col()
-            .child(footer_line())
+            .child(div().flex_none().mx(px(17.)).h(px(1.)).bg(Theme::line_border()))
             .child(self.git_panel(cx))
-            .child(footer_line())
             .child(footer_slot(footer_row("ft-settings", "settings-gear", crate::settings::tr("设置", "Settings")).on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::OpenSettings), cx))));
         div().w(px(width)).flex_none().h_full().flex().flex_col().relative().child(header).child(title)
             .when(tree_len == 0, |d| d.child(div().flex_1().min_h_0().px(px(SB_X + 6.)).py(px(8.)).text_size(px(12.)).text_color(Theme::text_caption()).child(crate::settings::tr("没有 Markdown 文件", "No Markdown files here"))))

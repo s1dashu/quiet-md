@@ -1,4 +1,4 @@
-"""Scripted run of quiet.md against a throwaway library.
+"""Scripted run of Quiet.md against a throwaway library.
 
 usage: python3 tools/harness/run.py <script.txt> [lib_dir] [work_dir]
   lib_dir  default: tools/harness/lib_clean  (copied fresh every run, never mutated)

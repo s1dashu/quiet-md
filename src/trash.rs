@@ -85,9 +85,15 @@ impl Workspace {
     }
 
     pub(crate) fn render_trash(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let header = page_header(self, "回收站", 26., cx).child(
+        // 清空回收站: a labelled button, only when there is something to empty.
+        let empty = (!self.trash.is_empty()).then(|| div().id("trash-empty").no_drag().flex_none().mr(px(8.)).h(px(28.)).px(px(10.)).flex().items_center().gap(px(6.))
+            .rounded(px(9.)).cursor_pointer().hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed()))
+            .text_size(px(13.)).line_height(px(20.)).text_color(Theme::text())
+            .child(icon("bin", 14., Theme::text_code())).child(crate::settings::text("清空回收站"))
+            .on_click(cx.listener(|w, _, _, cx| { w.trash_menu = None; w.confirm = Some(Confirm::EmptyTrash); cx.notify(); })));
+        let header = page_header(self, "回收站", 26., cx).children(empty).child(
             crate::ui::header_icon("trash-search", "search")
-                .tip_label("搜索(⌘ + J)".into(), crate::ui::TipSide::Below)
+                .tip_label(crate::shortcuts::keys(crate::settings::text("搜索(⌘ + J)")).into(), crate::ui::TipSide::Below)
                 .on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::app::FocusSearch), cx))),
         );
         let mut page = div().flex_1().min_w_0().h_full().flex().flex_col().child(header);
@@ -202,7 +208,9 @@ impl Workspace {
         let menu = popover()
             .id("trash-menu")
             .occlude()
-            .w(px(TRASH_MENU_W))
+            // At least TRASH_MENU_W, wider when a label needs it (English
+            // "Delete permanently" ran into the edge).
+            .min_w(px(TRASH_MENU_W))
             .py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| {
                 w.trash_menu = None;
@@ -253,6 +261,17 @@ impl Workspace {
         self.show_store_warnings(cx);
     }
 
+    /// 清空回收站: purges every trashed page; stops at the first failure.
+    fn empty_trash(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.store.list_trash().into_iter().map(|t| t.id).collect();
+        match ids.iter().try_for_each(|id| self.store.purge(id)) {
+            Ok(()) => self.show_toast(crate::settings::text("已清空回收站"), cx),
+            Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+        }
+        self.trash = self.store.list_trash();
+        self.show_store_warnings(cx);
+    }
+
     fn show_store_warnings(&mut self, cx: &mut Context<Self>) {
         let warnings = self.store.take_warnings();
         if !warnings.is_empty() {
@@ -283,6 +302,12 @@ impl Workspace {
                 true,
             ),
             Confirm::Restore(_) => (crate::settings::text("确认恢复？").to_string(), crate::settings::text("确认后将恢复至原位置").to_string(), crate::settings::text("恢复"), false),
+            Confirm::EmptyTrash => (
+                crate::settings::text("确认清空回收站？").to_string(),
+                crate::localized_format!("回收站中的 {} 项将被彻底删除，无法恢复", "The {} items in the Trash will be deleted permanently. This cannot be undone.", self.trash.len()),
+                crate::settings::text("清空"),
+                true,
+            ),
             Confirm::Purge(_) => (crate::settings::text("确认彻底删除？").to_string(), crate::settings::text("彻底删除后，该页面及其子页面将无法恢复").to_string(), crate::settings::text("删除"), true),
             Confirm::Refs { show: false, .. } => (
                 crate::settings::text("是否隐藏引用列表？").to_string(),
@@ -361,6 +386,7 @@ impl Workspace {
                             }
                             Confirm::Restore(id) => w.restore_doc(&id, cx),
                             Confirm::Purge(id) => w.purge_doc(&id, cx),
+                            Confirm::EmptyTrash => w.empty_trash(cx),
                             Confirm::Refs { show, no_ask } => {
                                 if no_ask {
                                     let mut s = w.store.settings();
