@@ -16,7 +16,7 @@ impl Palette {
     pub fn current() -> Self {
         fn hex(c: gpui::Hsla) -> String { let c = c.to_rgb(); let bg = crate::theme::Theme::bg_body().to_rgb(); let mix = |v: f32, b: f32| ((v * c.a + b * (1. - c.a)) * 255.).round() as u8; format!("#{:02x}{:02x}{:02x}", mix(c.r, bg.r), mix(c.g, bg.g), mix(c.b, bg.b)) }
         use crate::theme::Theme;
-        Self { background: hex(Theme::bg_body()), text: hex(Theme::text()), muted: hex(Theme::text_caption()), surface: hex(Theme::window()), border: hex(Theme::line_border()), accent: hex(Theme::primary()) }
+        Self { background: hex(Theme::bg_body()), text: hex(Theme::text()), muted: hex(Theme::text_caption()), surface: hex(Theme::window()), border: hex(Theme::text_caption()), accent: hex(Theme::primary()) }
     }
 }
 /// A rasterized diagram. `width`/`height` are logical pixels.

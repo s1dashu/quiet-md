@@ -732,10 +732,10 @@ impl R<'_> {
             .into_any_element()
     }
 
-    /// In a folder document a Mermaid block shows its diagram. The block's text
+    /// A Mermaid block shows its diagram. The block's text
     /// stays the source: with the caret inside, or on request, it shows too.
     fn code_or_diagram(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<Editor>) -> AnyElement {
-        if !self.ed.source_doc || !lang.eq_ignore_ascii_case("mermaid") { return self.code_block(b, lang, wrap, cx); }
+        if !lang.eq_ignore_ascii_case("mermaid") { return self.code_block(b, lang, wrap, cx); }
         let id = b.id;
         let width = self.ed.layout.content.max(200.);
         let (diagram, queued) = self.ed.diagrams.borrow_mut().request(&b.text.text, width, &crate::pele::Palette::current());
@@ -977,6 +977,8 @@ impl R<'_> {
                             .flex_none()
                             .items_center()
                             .gap(px(17.))
+                            // A folder file's label is all the row has to say: the tools float over it, on hover.
+                            .when(self.ed.source_doc, |d| d.absolute().top(px(6.)).right(px(6.)).pl(px(8.)).rounded(px(6.)).bg(crate::theme::raised(Theme::bg_body())))
                             .when(!editing, |d| d.opacity(0.).group_hover(g.clone(), |s| s.opacity(1.)))
                             .child(lang_btn)
                             .when(!folded, |d| {
@@ -1637,11 +1639,14 @@ impl Editor {
         let meta = &self.source_meta;
         if meta.is_empty() { return None; }
         let open = self.meta_open;
-        let count = meta.fields.len() + meta.imports.len();
+        let (count, imports) = (meta.fields.len(), meta.imports.len());
+        let imported = match imports { 0 => None, 1 => Some(crate::settings::tr("1 个导入", "1 import").to_string()), n => Some(crate::localized_format!("{} 个导入", "{} imports", n)) };
+        let properties = match count { 0 => None, 1 => Some(crate::settings::tr("1 项属性", "1 property").to_string()), n => Some(crate::localized_format!("{} 项属性", "{} properties", n)) };
+        let summary = properties.into_iter().chain(imported).collect::<Vec<_>>().join(" · ");
         let preview = meta.fields.iter().map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{k}: {v}") }).chain(meta.imports.iter().cloned()).collect::<Vec<_>>().join("  ·  ");
         let head = div().id("source-meta").h(px(24.)).w_full().min_w_0().flex().items_center().gap(px(4.)).rounded(px(6.)).cursor_pointer().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption())
             .child(crate::ui::icon("tree-triangle", 10., Theme::text_caption()).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
-            .child(div().flex_none().child(if count == 1 { crate::settings::tr("1 项属性", "1 property").to_string() } else { crate::localized_format!("{} 项属性", "{} properties", count) }))
+            .child(div().flex_none().child(summary))
             .when(!open, |d| d.child(div().flex_1().min_w_0().pl(px(8.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(Theme::text_placeholder()).child(preview)))
             .on_click(cx.listener(|e, _, _, cx| { cx.stop_propagation(); e.meta_open = !e.meta_open; cx.notify(); }));
         let row = |k: String, v: String| div().w_full().min_w_0().flex().gap(px(12.)).py(px(2.)).text_size(px(12.)).line_height(px(18.))
@@ -1658,7 +1663,7 @@ impl Editor {
 impl Render for Editor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t0 = std::time::Instant::now();
-        if self.source_doc { self.diagrams.borrow_mut().density = window.scale_factor(); }
+        self.diagrams.borrow_mut().density = window.scale_factor();
         let el = self.render_editor(window, cx);
         crate::devtools::RENDER_NS.fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         el
@@ -2235,6 +2240,8 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                             .flex_none()
                             .items_center()
                             .gap(px(17.))
+                            // A folder file's label is all the row has to say: the tools float over it, on hover.
+                            .when(self.ed.source_doc, |d| d.absolute().top(px(6.)).right(px(6.)).pl(px(8.)).rounded(px(6.)).bg(crate::theme::raised(Theme::bg_body())))
                             .when(!editing, |d| d.opacity(0.).group_hover(g.clone(), |s| s.opacity(1.)))
                             .child(lang_btn)
                             .when(!folded, |d| {

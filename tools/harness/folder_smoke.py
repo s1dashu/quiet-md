@@ -237,6 +237,34 @@ folder-state
     check("rename", "unsaved edits follow and save", field(states[1], "path") == "c2.md" and (root / "c2.md").read_text() == "# C\n\nc!\n", repr((root / "c2.md").read_text()) + states[1])
     check("rename", "nothing is recreated at the old path", not (root / "c.md").exists() and not (root / "b.md").exists())
     check("rename", "history follows a moved file", field(states[2], "path") in ("a2.md",), states[2])
+    body = "# Plan\n\nThe first paragraph explains why this exists and who reads it.\n\nThe second one lists what happens next.\n"
+    edited = body.replace("next", "later on").replace("\n", "\\n")
+    r = folder("rename-edit", {"clean.md": body, "dirty.md": body, "gone.md": body, "other.md": "# O\n"})
+    states = run("rename-edit", r, f"""folder-open {r/'clean.md'}
+wait 500
+fswrite {r/'clean2.md'} :: {edited}
+fsrm {r/'clean.md'}
+wait 1500
+folder-state
+folder-open {r/'dirty.md'}
+wait 500
+folder-caret 0 0
+type MINE
+fswrite {r/'dirty2.md'} :: {edited}
+fsrm {r/'dirty.md'}
+wait 2000
+folder-state
+shot rename-dirty
+folder-open {r/'gone.md'}
+wait 500
+fswrite {r/'unrelated.md'} :: # Other\\n\\nCompletely unrelated words about something else entirely.\\n
+fsrm {r/'gone.md'}
+wait 1500
+folder-state
+""")
+    check("rename-edit", "clean file follows a rename that changed it, showing the new text", field(states[0], "path") == "clean2.md" and field(states[0], "conflict") == "None" and "later on" in (r / "clean2.md").read_text(), states[0])
+    check("rename-edit", "unsaved edits follow and ask instead of overwriting", field(states[1], "path") == "dirty2.md" and "Changed" in field(states[1], "conflict") and "later on" in (r / "dirty2.md").read_text() and "MINE" not in (r / "dirty2.md").read_text(), states[1])
+    check("rename-edit", "an unrelated new file is not mistaken for the rename", field(states[2], "path") == "gone.md" and "Deleted" in field(states[2], "conflict"), states[2])
 
 def views():
     "Scroll comes back with history; quitting saves; conflicts ask; themes redraw."
@@ -405,6 +433,37 @@ def diagrams():
     run("mermaid", root, "wait 2500\nshot diagrams\nfolder-caret 0 0\nkey right\nwait 800\nshot source-shown")
     check("mermaid", "file untouched", (root / "a.md").read_bytes() == before)
 
+def big_files():
+    "Files up to the limit open and edit; past it they say why and stay untouched."
+    para = "A paragraph of ordinary prose with **some bold** and a [link](a.md), long enough to look real.\n\n"
+    big, huge = "# Big\n\n" + para * (6 * 1024 * 1024 // len(para)), "# Huge\n\n" + para * (9 * 1024 * 1024 // len(para))
+    root = folder("big", {"big.md": big, "huge.md": huge, "a.md": "# A\n"})
+    states = run("big", root, f"""folder-open {root/'big.md'}
+wait 9000
+folder-state
+shot big-open
+folder-caret 0 1
+type Z
+wait 2500
+folder-state
+folder-open {root/'huge.md'}
+wait 1500
+shot huge-refused
+folder-state
+""")
+    check("big", "6 MiB file opens", field(states[0], "path") == "big.md", states[0])
+    text = (root / "big.md").read_text()
+    check("big", "and an edit changes one character", len(text) == len(big) + 1 and text.count("Z") == big.count("Z") + 1, str(len(text) - len(big)))
+    check("big", "9 MiB file is left alone", (root / "huge.md").read_text() == huge)
+    check("big", "9 MiB file does not open", field(states[2], "path") != "huge.md", states[2])
+
+def notebook_diagrams():
+    "A Mermaid block in a notebook document draws too, and saves as an ordinary code block."
+    root = folder("nb", {"a.md": "# A\n"}); lib = work / "nb" / "lib"
+    run("nb", root, "key cmd-n\nwait 600\ntype Diagram note\nkey enter\nwait 200\ntype /mermaid\nwait 400\nkey enter\nwait 2500\nshot notebook-diagram\nwait 1200")
+    xml = "".join(p.read_text() for p in (lib / "docs").glob("*.xml"))
+    check("nb", "saved with its language", "flowchart LR" in xml and "mermaid" in xml.lower(), xml[-400:])
+
 def typing_diagrams():
     "A diagram can be written from the normal view, however it's started."
     body = "flowchart LR\n  A[Start] --> B[Finish]"
@@ -419,7 +478,7 @@ def typing_diagrams():
     run("mm-source", root, "key cmd-alt-3\nwait 400\nkey cmd-down\ntype end\nwait 1200")
     check("mm-source", "cmd-down reaches the end of the file in Source", a.read_text() == "# T\n\nbody\nend", repr(a.read_text()))
 
-all_ = dict(tables=tables, typing_diagrams=typing_diagrams, noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
+all_ = dict(big_files=big_files, notebook_diagrams=notebook_diagrams, tables=tables, typing_diagrams=typing_diagrams, noop=noop, typing=typing, source_mode=source_mode, external=external, renames=renames, views=views, markdown=markdown, recovery=recovery, navigation=navigation, repository=repository, lfs=lfs, rendering=rendering, diagrams=diagrams)
 for name in sys.argv[1:] or all_:
     print(name); all_[name]()
 print(f"work: {work}")

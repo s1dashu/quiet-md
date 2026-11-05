@@ -662,7 +662,7 @@ impl Editor {
         };
         let (grid, with_text) = (self.slash_grid(), self.slash_grid_text());
         let ranked: Vec<usize> =
-            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).filter(|i| { let kind = menus::SLASH_ITEMS[*i].kind; if self.source_doc { menus::in_markdown(kind) } else { kind != SlashKind::Mermaid } }).collect();
+            ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text)).filter(|i| { let kind = menus::SLASH_ITEMS[*i].kind; !self.source_doc || menus::in_markdown(kind) }).collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;

@@ -2,7 +2,20 @@
 use anyhow::{Context, Result, bail, ensure};
 use std::{fs, io::{Read, Write}, path::{Path, PathBuf}};
 
-pub const MAX_SOURCE: u64 = 2 * 1024 * 1024;
+/// Parsing grows faster than the file (about 8s at 8 MiB), while edits stay in the tens of milliseconds.
+pub const MAX_SOURCE: u64 = 8 * 1024 * 1024;
+/// How alike two texts must be to count as one file renamed and edited, the same bar as `git diff -M`.
+pub const SAME_FILE: f32 = 0.5;
+/// Shared word pairs between two texts, from 0 to 1. Words rather than lines, so
+/// an edit to a long unwrapped paragraph doesn't look like a different file.
+pub fn similarity(a: &str, b: &str) -> f32 {
+    fn pairs(t: &str) -> std::collections::HashMap<(&str, &str), u32> { let w: Vec<&str> = t.split_whitespace().collect(); let mut m = std::collections::HashMap::new(); for p in w.windows(2) { *m.entry((p[0], p[1])).or_default() += 1; } m }
+    let (x, y) = (pairs(a), pairs(b));
+    let (nx, ny): (u32, u32) = (x.values().sum(), y.values().sum());
+    if nx + ny == 0 { return 0.; }
+    let shared: u32 = x.iter().map(|(k, n)| (*n).min(y.get(k).copied().unwrap_or(0))).sum();
+    2. * shared as f32 / (nx + ny) as f32
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
     pub path: PathBuf, pub directory: bool,
@@ -84,7 +97,7 @@ pub fn read(path: &Path) -> Result<String> {
     ensure!(fs::metadata(path)?.is_file(), "Not a regular file");
     let mut bytes = vec![];
     fs::File::open(path)?.take(MAX_SOURCE + 1).read_to_end(&mut bytes)?;
-    ensure!(bytes.len() as u64 <= MAX_SOURCE, "File exceeds the 2 MiB editing limit");
+    ensure!(bytes.len() as u64 <= MAX_SOURCE, "File exceeds the 8 MiB editing limit");
     String::from_utf8(bytes).context("This file is not UTF-8; it was not changed")
 }
 
@@ -125,7 +138,7 @@ impl Source {
     }
     pub fn save(&mut self, root: &Path) -> Result<()> {
         if !self.dirty() { return Ok(()); }
-        ensure!(self.text.len() as u64 <= MAX_SOURCE, "File exceeds the 2 MiB editing limit; your edits are retained");
+        ensure!(self.text.len() as u64 <= MAX_SOURCE, "File exceeds the 8 MiB editing limit; your edits are retained");
         ensure!(contained(root, &self.path)? == self.path, "File target changed");
         let disk = read(&self.path)?;
         ensure!(disk == self.baseline || disk == self.text, "File changed on disk. Your edits are retained; save a copy or reload explicitly.");
@@ -263,6 +276,14 @@ fn percent_decode(s: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn similarity_tells_an_edit_from_a_different_file() {
+        let doc = "# Plan\n\nThe first paragraph explains why this exists and who reads it.\n\nThe second one lists what happens next.\n";
+        assert_eq!(super::similarity(doc, doc), 1.);
+        assert!(super::similarity(doc, &doc.replace("next", "later on")) >= super::SAME_FILE);
+        assert!(super::similarity(doc, "# Other\n\nCompletely unrelated words about something that is not the plan at all.\n") < super::SAME_FILE);
+        assert_eq!(super::similarity("", ""), 0.);
+    }
     use super::*;
     #[test]
     fn workspace_files_preserve_conflicts_undo_and_recovery() {

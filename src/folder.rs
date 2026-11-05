@@ -478,11 +478,12 @@ impl Folder {
         let jobs: Vec<(PathBuf, u64, String)> = paths.iter().filter_map(|p| self.buffers.get(p).map(|b| (p.clone(), b.source.revision, b.source.baseline.clone()))).collect();
         let arrivals: Vec<PathBuf> = only.into_iter().flatten().filter(|p| !self.buffers.contains_key(p) && files::supported(p)).collect();
         cx.spawn(async move |this, cx| {
-            let results = cx.background_executor().spawn(async move { jobs.into_iter().map(|(p, rev, baseline)| {
+            let results = cx.background_executor().spawn(async move { let mut arrived: Vec<(PathBuf, String)> = arrivals.into_iter().filter_map(|p| files::read(&p).ok().map(|t| (p, t))).collect(); jobs.into_iter().map(|(p, rev, baseline)| {
                 if p.exists() { let disk = files::read(&p).map(Disk::Text).map_err(|e| e.to_string()); return (p, rev, disk); }
-                // Gone: a file that just appeared with the same bytes is the same file, renamed.
-                let moved = arrivals.iter().find(|new| files::read(new).is_ok_and(|t| t == baseline)).cloned();
-                (p, rev, Ok(moved.map_or(Disk::Missing, Disk::Moved)))
+                // Gone: a new file with the same bytes, or failing that mostly the same text, is this file renamed.
+                let exact = arrived.iter().position(|(_, t)| *t == baseline);
+                let moved = exact.or_else(|| arrived.iter().enumerate().map(|(i, (_, t))| (i, files::similarity(&baseline, t))).filter(|(_, s)| *s >= files::SAME_FILE).max_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| i));
+                (p, rev, Ok(moved.map_or(Disk::Missing, |i| Disk::Moved(arrived.remove(i).0))))
             }).collect::<Vec<_>>() }).await;
             let _ = this.update(cx, |f, cx| { for (p, rev, disk) in results { f.reconcile(&p, rev, disk, cx); } cx.notify(); });
         }).detach();
@@ -506,7 +507,8 @@ impl Folder {
             }
         }
     }
-    /// The open file was renamed: same text, new home. Unsaved edits come along.
+    /// The open file was renamed: new home, unsaved edits included. A rename that
+    /// also changed the text then goes through the normal check against the disk.
     fn follow_move(&mut self, from: &Path, to: PathBuf, cx: &mut Context<Self>) {
         let Some(mut source) = self.buffers.get(from).map(|b| b.source.clone()) else { return };
         let (root, handle, was_current, old) = (self.root.clone(), self.window, self.current.as_deref() == Some(from), from.to_path_buf());
@@ -526,6 +528,7 @@ impl Folder {
                 cx.emit(FolderEvent::Toast(ToastKind::Info, crate::localized_format!("文件已移动到 {}", "File moved to {}", new.strip_prefix(&f.root).unwrap_or(&new).display())));
                 if was_current { f.current = Some(new.clone()); f.reveal(&new, cx); f.focus_current(window, cx); }
                 if dirty { f.schedule_save(&new, cx); }
+                f.check_buffers(Some(HashSet::from([new.clone()])), cx);
                 cx.notify();
             }); });
         }).detach();
