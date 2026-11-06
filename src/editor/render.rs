@@ -105,6 +105,12 @@ fn hash_block(b: &Block, orders: &rustc_hash::FxHashMap<BlockId, String>, h: &mu
     match &b.kind {
         BlockKind::Heading { level, .. } => (level, orders.get(&b.id)).hash(h),
         BlockKind::Code { wrap, .. } => wrap.hash(h),
+        BlockKind::Canvas(d) => {
+            for n in d.nodes() { (n.id, n.center, n.size, std::mem::discriminant(&n.shape)).hash(h); }
+            for e in d.edges() {
+                (e.from.node, e.from.port, e.to.node, e.to.port, std::mem::discriminant(&e.route), e.label.len()).hash(h);
+            }
+        }
         BlockKind::Image { src, width, height, caption, crop, .. } => {
             (src, width.map(f32::to_bits), height.map(f32::to_bits), caption.as_ref().map(String::len), crop.map(|c| c.map(f32::to_bits))).hash(h)
         }
@@ -430,6 +436,7 @@ impl R<'_> {
             BlockKind::Image { .. } => self.image(b, env, cx),
             BlockKind::SubPageList => self.sub_page_list(b, cx),
             BlockKind::Countdown(c) => self.countdown(b, c, cx),
+            BlockKind::Canvas(d) => self.canvas_block(b.id, d, env.width, cx),
             BlockKind::File(f) => self.file(b, f, env, cx),
             BlockKind::Table(t) if self.ghost => self.ghost_table(b, t, cx),
             BlockKind::Table(t) => self.table(b, t, cx),
@@ -1297,6 +1304,7 @@ impl Editor {
         // Overlays are positioned from last frame's layout, so build them
         // before the caches are reset for this frame.
         let overlays = self.render_overlays(window, cx);
+        let canvas_overlay = self.canvas_overlay(window, cx);
         let lightbox = self.lightbox_el(window, cx);
         let toast = self.toast_el(window);
         let probes = std::mem::take(&mut *self.probes.borrow_mut());
@@ -1582,6 +1590,7 @@ impl Editor {
             .children(image_layer)
             .children(counter)
             .children(find_box)
+            .children(canvas_overlay)
             .children(lightbox)
             .children(toast)
             .child(root_canvas)
@@ -1748,6 +1757,7 @@ pub(super) fn block_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env
             BlockKind::Image { .. } => self.image(b, env, cx),
             BlockKind::SubPageList => self.sub_page_list(b, cx),
             BlockKind::Countdown(c) => self.countdown(b, c, cx),
+            BlockKind::Canvas(d) => self.canvas_block(b.id, d, env.width, cx),
             BlockKind::File(f) => self.file(b, f, env, cx),
             BlockKind::Table(t) if self.ghost => self.ghost_table(b, t, cx),
             BlockKind::Table(t) => self.table(b, t, cx),

@@ -19,6 +19,7 @@ body { margin: 0; color: #1f2225; font: 15px/22px -apple-system, "SF Pro Text", 
 .icon { font-size: 48px; line-height: 56px; margin-bottom: 8px; }
 h1.title { font-size: 21px; line-height: 27px; font-weight: 700; margin: 0 0 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(0,0,0,0.045); }
 .b { margin: 13px 0; min-height: 22px; }
+.drawing-canvas img { max-width: 100%; height: auto; vertical-align: top; }
 .h { font-weight: 600; }
 .h1 { font-size: 21px; line-height: 27px; font-weight: 700; margin-top: 48px; margin-bottom: 16px; }
 .h2 { font-size: 19px; line-height: 25px; font-weight: 700; margin-top: 36px; margin-bottom: 16px; }
@@ -233,6 +234,12 @@ impl Writer<'_> {
                     }
                     None => out.push_str(&esc(&f.name)),
                 }
+                out.push_str("</div>");
+            }
+            BlockKind::Canvas(drawing) => {
+                let _ = write!(out, "<div class=\"b drawing-canvas\"{align} data-canvas-version=\"{}\" data-quiet-md-canvas=\"{}\">",
+                    drawing.version(), esc(&drawing.record()));
+                svg_image(out, &crate::canvas::svg(drawing), crate::settings::text("画布"));
                 out.push_str("</div>");
             }
             BlockKind::Countdown(c) => {
@@ -450,9 +457,40 @@ fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
+/// SVG loaded as an image has no active document context or external resources.
+fn svg_image(out: &mut String, svg: &str, alt: &str) {
+    use base64::Engine;
+    let data = base64::engine::general_purpose::STANDARD.encode(svg);
+    let _ = write!(out, "<img alt=\"{}\" src=\"data:image/svg+xml;base64,{data}\">", esc(alt));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canvas_svg_png_and_html_keep_the_drawing() {
+        use base64::Engine;
+        let mut drawing = fdl_core::canvas::Drawing::default();
+        let node = drawing.add_node(fdl_core::canvas::Shape::Diamond, [220, 230]).unwrap();
+        let target = drawing.add_node(fdl_core::canvas::Shape::Circle, [490, 320]).unwrap();
+        drawing.connect(node, target).unwrap();
+        drawing.label_node(node, "<script>");
+        let doc = Document { blocks: vec![Block::new(BlockKind::Canvas(drawing.clone()), RichText::default())], ..Default::default() };
+        let svg = crate::canvas::svg(&drawing);
+        assert!(svg.contains("&lt;script&gt;"));
+        assert!(!svg.contains("<script"));
+        let html = to_html(&doc, &Options { sub_pages: &[] });
+        let encoded = html.split_once("data:image/svg+xml;base64,").unwrap().1.split('"').next().unwrap();
+        assert_eq!(base64::engine::general_purpose::STANDARD.decode(encoded).unwrap(), svg.as_bytes());
+        let blocks = crate::paste::html_to_blocks(&html);
+        let restored = blocks.iter().find_map(|b| match &b.kind { BlockKind::Canvas(read) => Some(read), _ => None }).unwrap();
+        assert_eq!(*restored, drawing);
+        assert_eq!(crate::canvas::svg(restored), svg);
+        let renderer = gpui::SvgRenderer::new(std::sync::Arc::new(crate::assets::Assets));
+        let png = crate::canvas::png(&drawing, &renderer).unwrap();
+        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    }
 
     #[test]
     fn renders_blocks_and_marks() {

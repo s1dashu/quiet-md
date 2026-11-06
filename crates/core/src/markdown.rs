@@ -1,6 +1,7 @@
 //! 下载为 → Markdown: DocxXML document model to CommonMark/GFM text.
 
 use crate::model::*;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::PathBuf;
 
 /// 导出 Markdown 设置.
@@ -17,6 +18,8 @@ pub struct Export {
     pub text: String,
     /// Local image files to copy: (source, path relative to the .md file).
     pub files: Vec<(PathBuf, String)>,
+    /// Editable canvases to render as PNG, with paths relative to the .md file.
+    pub canvases: Vec<(crate::canvas::Drawing, String)>,
 }
 
 #[cfg(test)]
@@ -25,7 +28,7 @@ pub fn to_markdown(doc: &Document) -> String {
 }
 
 pub fn export(doc: &Document, opts: &Options) -> Export {
-    let mut w = Writer { opts, files: vec![] };
+    let mut w = Writer { opts, files: vec![], canvases: vec![] };
     let mut out = String::new();
     let title = doc.title.text.trim();
     if !title.is_empty() {
@@ -35,12 +38,13 @@ pub fn export(doc: &Document, opts: &Options) -> Export {
     let trimmed = out.trim_end().len();
     out.truncate(trimmed);
     out.push('\n');
-    Export { text: out, files: w.files }
+    Export { text: out, files: w.files, canvases: w.canvases }
 }
 
 struct Writer<'a> {
     opts: &'a Options<'a>,
     files: Vec<(PathBuf, String)>,
+    canvases: Vec<(crate::canvas::Drawing, String)>,
 }
 
 impl Writer<'_> {
@@ -88,6 +92,7 @@ impl Writer<'_> {
                 let fence = if b.text.text.contains("```") { "````" } else { "```" };
                 format!("{fence}{lang}\n{}\n{fence}", b.text.text)
             }
+            BlockKind::Canvas(drawing) => self.canvas(drawing),
             BlockKind::Quote => indent(&self.blocks(&b.children), "> "),
             BlockKind::Callout { emoji, .. } => {
                 let body = self.blocks(&b.children);
@@ -101,7 +106,7 @@ impl Writer<'_> {
                 }
                 None => String::new(),
             },
-            BlockKind::Table(t) => table(t),
+            BlockKind::Table(t) => table(t, self),
             BlockKind::Grid | BlockKind::Column { .. } => self.blocks(&b.children),
             // An add-on block: Markdown has nothing for it.
             BlockKind::Countdown(_) => String::new(),
@@ -121,6 +126,15 @@ impl Writer<'_> {
 
     /// The link for an image: remote ones stay remote, local files get a
     /// copy in the assets folder (same name, numbered on clashes).
+    fn canvas(&mut self, drawing: &crate::canvas::Drawing) -> String {
+        let Some(dir) = self.opts.assets else { return "[Canvas]".into() };
+        let mut hash = DefaultHasher::new();
+        drawing.record().hash(&mut hash);
+        let rel = format!("{dir}/canvases/{:016x}.png", hash.finish());
+        if !self.canvases.iter().any(|(_, path)| *path == rel) { self.canvases.push((drawing.clone(), rel.clone())); }
+        format!("![Canvas]({})", rel.replace(' ', "%20"))
+    }
+
     fn image(&mut self, src: &str, dir: &str) -> String {
         if src.starts_with("http://") || src.starts_with("https://") {
             return src.to_string();
@@ -142,14 +156,17 @@ impl Writer<'_> {
     }
 }
 
-fn table(t: &Table) -> String {
+fn table(t: &Table, writer: &mut Writer<'_>) -> String {
     let cols = t.rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
-    let cell = |c: &TableCell| {
-        let parts: Vec<String> = c.blocks.iter().map(|b| inline(&b.text)).filter(|s| !s.is_empty()).collect();
+    let mut cell = |c: &TableCell| {
+        let parts: Vec<String> = c.blocks.iter().map(|b| match &b.kind {
+            BlockKind::Canvas(drawing) => writer.canvas(drawing),
+            _ => inline(&b.text),
+        }).filter(|s| !s.is_empty()).collect();
         parts.join("<br>").replace('|', "\\|")
     };
-    let row = |r: &Vec<TableCell>| {
-        let mut cells: Vec<String> = r.iter().map(cell).collect();
+    let mut row = |r: &Vec<TableCell>| {
+        let mut cells: Vec<String> = r.iter().map(&mut cell).collect();
         cells.resize(cols, String::new());
         format!("| {} |", cells.join(" | "))
     };
@@ -301,6 +318,7 @@ mod tests {
     fn exports_tables() {
         let cell = |s: &str| TableCell { blocks: vec![Block::text(s)], ..TableCell::empty() };
         let t = Table { col_widths: vec![], header_rows: 1, header_col: false, rows: vec![vec![cell("a"), cell("b|c")], vec![cell("1")]] };
-        assert_eq!(table(&t), "| a | b\\|c |\n| --- | --- |\n| 1 |  |");
+        let doc = Document { blocks: vec![Block::new(BlockKind::Table(t), RichText::default())], ..Default::default() };
+        assert_eq!(to_markdown(&doc), "| a | b\\|c |\n| --- | --- |\n| 1 |  |\n");
     }
 }

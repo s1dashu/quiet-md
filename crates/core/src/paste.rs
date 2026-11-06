@@ -273,6 +273,15 @@ fn node(n: &Handle, ctx: &Ctx, out: &mut Vec<Block>, para: &mut RichText) {
             if SKIP.contains(&t.as_str()) || hidden(&st) {
                 return;
             }
+            if let Some(drawing) = attr(n, "data-quiet-md-canvas").and_then(|record| {
+                crate::canvas::Drawing::from_record(&attr(n, "data-canvas-version").unwrap_or_default(), &record)
+            }) {
+                flush(para, ctx, out);
+                let mut block = Block::new(BlockKind::Canvas(drawing), RichText::default());
+                block.align = align_of(n, &st).or(ctx.align).unwrap_or_default();
+                out.push(block);
+                return;
+            }
             let mut bctx = ctx.clone();
             if let Some(a) = align_of(n, &st) {
                 bctx.align = Some(a);

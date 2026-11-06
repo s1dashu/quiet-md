@@ -751,6 +751,8 @@ pub enum BlockKind {
     SubPageList,
     /// 倒计时 (an add-on block; `<countdown …/>` is ours).
     Countdown(Countdown),
+    /// Native drawing with editable nodes and arrows.
+    Canvas(crate::canvas::Drawing),
     /// 视频或文件 (`<source>`, or `<figure view-type><source/></figure>`).
     File(FileBlock),
     /// Any element we don't model; kept verbatim for round-tripping.
@@ -1000,6 +1002,13 @@ impl Document {
         let mut out = String::new();
         fn walk(blocks: &[Block], out: &mut String) {
             for b in blocks {
+                if let BlockKind::Canvas(d) = &b.kind {
+                    let labels = d.nodes().iter().map(|n| &n.label).chain(d.edges().iter().map(|e| &e.label));
+                    for label in labels.filter(|s| !s.is_empty()) {
+                        if !out.is_empty() { out.push('\n'); }
+                        out.push_str(label);
+                    }
+                }
                 if !b.text.is_empty() {
                     if !out.is_empty() {
                         out.push('\n');

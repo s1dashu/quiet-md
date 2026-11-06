@@ -9,6 +9,7 @@ mod changelog;
 mod guides;
 mod clipboard;
 mod devtools;
+mod canvas;
 mod docinfo;
 mod docmenu;
 mod editor;
@@ -113,6 +114,7 @@ fn main() {
         input::bind_keys(cx);
         editor::keymap::bind_keys(cx);
         editor::image::bind_keys(cx);
+        editor::canvas::bind_keys(cx);
         app::bind_keys(cx);
         settings::load();
         settings::apply_appearance(&settings::prefs().appearance);

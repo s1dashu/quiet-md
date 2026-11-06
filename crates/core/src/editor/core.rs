@@ -340,6 +340,7 @@ fn doc_bytes(doc: &Document) -> usize {
         if let BlockKind::Raw { xml, .. } = &b.kind {
             n += xml.len();
         }
+        if let BlockKind::Canvas(d) = &b.kind { n += d.retained_bytes(); }
     });
     n
 }
@@ -360,6 +361,7 @@ pub enum EditKind {
     Delete,
     /// Typing in an equation's editor.
     Equation,
+    CanvasLabel(u32),
     Other,
 }
 
@@ -645,6 +647,9 @@ impl Core {
             total -= old.bytes;
         }
     }
+
+    pub fn can_undo(&self) -> bool { !self.undo.is_empty() }
+    pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
 
     pub fn undo(&mut self) -> bool {
         let Some(s) = self.undo.pop_back() else { return false };
@@ -1938,6 +1943,22 @@ impl Core {
             self.sel = Selection::caret(Pos::new(id, self.len_of(id)));
             self.fix_selection();
         }
+    }
+
+    pub fn insert_canvas(&mut self, drawing: crate::canvas::Drawing) -> BlockId {
+        let id = self.insert_block(Block::new(BlockKind::Canvas(drawing), RichText::default()));
+        let next = self.ensure_paragraph_after(id);
+        self.sel = Selection::caret(Pos::new(next, 0));
+        id
+    }
+
+    pub fn set_canvas(&mut self, id: BlockId, drawing: crate::canvas::Drawing, label_node: Option<u32>) -> bool {
+        if !self.block(id).is_some_and(|b| matches!(&b.kind, BlockKind::Canvas(old) if *old != drawing)) { return false }
+        self.clear_block_sel();
+        self.sel = Selection::caret(Pos::new(id, 0));
+        self.checkpoint(label_node.map_or(EditKind::Other, EditKind::CanvasLabel));
+        if let Some(block) = self.block_mut(id) { block.kind = BlockKind::Canvas(drawing); }
+        true
     }
 
     /// Insert a new block after the caret block (or replace it when it's an

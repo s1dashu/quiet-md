@@ -215,6 +215,7 @@ pub struct Editor {
     pub(super) tables: super::table::TableUi,
     /// Name / description fields of code blocks and images (`caption.rs`).
     pub(super) captions: HashMap<BlockId, (Entity<TextField>, Vec<Subscription>)>,
+    pub(super) canvas_ui: Option<super::canvas::CanvasEdit>,
     pub(super) img: super::image::ImageUi,
     pub(super) cd: super::countdown::CdUi,
     pub(super) btn: super::button::BtnUi,
@@ -424,6 +425,7 @@ impl Editor {
             col_anim: HashMap::default(),
             tables: Default::default(),
             captions: HashMap::new(),
+            canvas_ui: None,
             img: super::image::ImageUi::new(cx),
             file: super::file::FileUi::new(),
             code_folded: Default::default(),
@@ -858,6 +860,11 @@ impl Editor {
             return self.changed(window, cx);
         }
         match kind {
+            SlashKind::Canvas => {
+                let id = self.core.insert_canvas(Default::default());
+                self.changed(window, cx);
+                return self.open_canvas(id, window, cx);
+            }
             SlashKind::Formula => {
                 if let Some(p) = self.core.insert_equation("") {
                     self.changed(window, cx);

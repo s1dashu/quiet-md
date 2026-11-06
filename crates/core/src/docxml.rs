@@ -119,6 +119,7 @@ fn is_block_tag(name: &str) -> bool {
             | "checkbox" | "blockquote" | "hr" | "pre" | "img" | "table" | "grid" | "column"
             | "callout" | "whiteboard" | "source" | "figure" | "sheet" | "task" | "chat_card"
             | "bookmark" | "html5-block" | "okr" | "sub-page-list" | "countdown"
+            | "quiet-canvas"
     )
 }
 
@@ -229,6 +230,9 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
             };
             Block::new(BlockKind::Countdown(cd), RichText::default())
         }
+        "quiet-canvas" if let Some(drawing) = crate::canvas::Drawing::from_record(
+            e.attr("version").unwrap_or_default(), e.attr("data").unwrap_or_default(),
+        ) => Block::new(BlockKind::Canvas(drawing), RichText::default()),
         "pre" => {
             let code_el = e.children.iter().find_map(|n| match n {
                 Node::El(c) if c.name == "code" => Some(c),
@@ -836,6 +840,9 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
             s.push_str("><code>");
             s.push_str(&esc(&b.text.text));
             s.push_str("</code></pre>\n");
+        }
+        BlockKind::Canvas(drawing) => {
+            s.push_str(&format!("<quiet-canvas version=\"{}\"{al} data=\"{}\"/>\n", drawing.version(), esc_attr(&drawing.record())));
         }
         BlockKind::Quote => {
             s.push_str(&format!("<blockquote{}>\n", bg_attr(b)));

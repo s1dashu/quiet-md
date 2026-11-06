@@ -116,7 +116,7 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(23) {
+    match rng.below(25) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -211,6 +211,22 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         20 => table_step(c, rng),
         21 => object_step(c, rng),
+        22 => {
+            c.insert_canvas(crate::canvas::Drawing::default());
+            "insert_canvas".into()
+        }
+        23 => {
+            let mut ids = vec![];
+            c.doc.for_each_block(|b| if matches!(b.kind, BlockKind::Canvas(_)) { ids.push(b.id); });
+            if !ids.is_empty() {
+                let id = *rng.pick(&ids);
+                let BlockKind::Canvas(mut d) = c.block(id).unwrap().kind.clone() else { unreachable!() };
+                let center = [rng.below(crate::canvas::WIDTH as usize) as i32, rng.below(crate::canvas::HEIGHT as usize) as i32];
+                if let Some(node) = d.add_node(crate::canvas::Shape::Rectangle, center) { d.label_node(node, "画布"); }
+                c.set_canvas(id, d, None);
+            }
+            "edit_canvas".into()
+        }
         _ => {
             c.trailing_line();
             "trailing_line".into()

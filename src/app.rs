@@ -328,7 +328,7 @@ impl Workspace {
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
                 if window.is_window_active() { if let Some(id) = &this.current { crate::quick_note::used(id, cx); } this.entries = this.store.list(); this.sort(); crate::update::check_if_stale(cx); cx.notify(); }
-                else { this.cancel_shortcut_recording(cx); this.flush(cx); }
+                else { this.cancel_shortcut_recording(cx); this.finish_canvas_input(cx); this.flush(cx); }
             }),
             cx.subscribe_in(&search, window, |this, _, ev: &TextFieldEvent, window, cx| {
                 match ev {
@@ -352,6 +352,7 @@ impl Workspace {
             // go through `save_before` and ask when the save fails.
             cx.on_app_quit(|this, cx| {
                 crate::quick_note::persist(cx);
+                this.finish_canvas_input(cx);
                 this.flush(cx);
                 async {}
             }),
@@ -524,6 +525,7 @@ impl Workspace {
                 cx.notify();
             }
             EditorEvent::Save => {
+                this.finish_canvas_input(cx);
                 this.flush(cx);
             }
             EditorEvent::Search(q) => {
@@ -907,6 +909,7 @@ impl Workspace {
     /// fails nothing is replaced: the 保存失败 dialog offers 重试 / 放弃修改
     /// and runs `then` after either.
     pub fn save_before(&mut self, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> bool {
+        self.finish_canvas_input(cx);
         if self.flush(cx) {
             return true;
         }
@@ -914,6 +917,12 @@ impl Workspace {
         self.confirm = Some(Confirm::SaveFailed);
         cx.notify();
         false
+    }
+
+    fn finish_canvas_input(&mut self, cx: &mut Context<Self>) {
+        if let Some(ed) = &self.editor && ed.update(cx, |e, cx| e.commit_canvas_input(cx)) {
+            self.unsaved = true;
+        }
     }
 
     /// The 保存失败 dialog's choices: `retry` saves again, otherwise the

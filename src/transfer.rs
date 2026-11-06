@@ -1,6 +1,5 @@
-//! 导入 / 导出: 下载为 → PDF / Markdown (with the 导出 Markdown 设置
-//! dialog), 打印, and 导入为文档 (主页's 上传, the app menu): local Markdown
-//! or DocxXML files picked straight away. The Word / PDF settings and
+//! 导入 / 导出: 下载为 → PDF / Markdown / HTML, 打印, and 导入为文档
+//! (主页's 上传, the app menu): local Markdown, HTML or DocxXML files. The Word / PDF settings and
 //! 打印选项 only choose what happens to comments, so they are left out.
 
 use crate::app::Workspace;
@@ -38,11 +37,11 @@ fn save_path(name: &str, cx: &mut App) -> impl std::future::Future<Output = Opti
     }
 }
 
-/// Markdown and DocxXML files to import: the system open panel, or a
+/// Markdown, HTML and DocxXML files to import: the system open panel, or a
 /// scripted answer.
 fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>> + use<> {
     let picked = crate::devtools::take_pick();
-    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml"]).map(|e| SharedString::from(*e)).collect());
+    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["html", "htm", "xml"]).map(|e| SharedString::from(*e)).collect());
     let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(crate::settings::text("导入").into()), extensions }));
     async move {
         match prompt {
@@ -55,6 +54,13 @@ fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<Path
 /// The page title as a file name.
 fn file_name(doc: &Document) -> String {
     display_title(&doc.title.text).replace(['/', ':', '\\'], "_")
+}
+
+fn write_export_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let temp = path.with_file_name(format!(".quiet-md-export-{}.tmp", uuid::Uuid::new_v4()));
+    let result = std::fs::write(&temp, bytes).and_then(|()| std::fs::rename(&temp, path));
+    if result.is_err() { let _ = std::fs::remove_file(temp); }
+    result
 }
 
 /// The modal mask (the window dimmed) and its dialog.
@@ -145,11 +151,28 @@ pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
     if let Some(dir) = path.parent() {
         resolve_images(&mut blocks, dir);
     }
+    Ok(imported_document(RichText::plain(stem), blocks))
+}
+
+fn html_document(path: &Path) -> std::io::Result<Document> {
+    let bytes = std::fs::read(path)?;
+    let mut blocks = crate::paste::html_to_blocks(&String::from_utf8_lossy(&bytes));
+    let title = if blocks.first().is_some_and(|b| matches!(b.kind, BlockKind::Heading { level: 1, .. })) {
+        let mut heading = blocks.remove(0);
+        blocks.splice(0..0, heading.children.drain(..));
+        heading.text
+    } else {
+        RichText::plain(path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim())
+    };
+    Ok(imported_document(title, blocks))
+}
+
+fn imported_document(title: RichText, mut blocks: Vec<Block>) -> Document {
     crate::editor::image::localize_pasted_images(&mut blocks);
     if blocks.is_empty() {
         blocks.push(Block::text(""));
     }
-    Ok(Document { title: RichText::plain(stem), icon: None, cover: None, blocks })
+    Document { title, icon: None, cover: None, blocks }
 }
 
 impl Workspace {
@@ -179,14 +202,23 @@ impl Workspace {
         let Some(doc) = self.doc_of(&id, cx) else { return };
         let subs = self.sub_page_titles(&id);
         let path = save_path(&format!("{}.md", file_name(&doc)), cx);
+        let renderer = cx.svg_renderer();
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = path.await else { return };
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("doc").to_string();
-            let assets = format!("{stem}.assets");
-            let out = crate::markdown::export(&doc, &crate::markdown::Options { sub_pages: &subs, assets: all.then_some(assets.as_str()) });
-            let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-            let mut missing = 0;
-            let written = std::fs::write(&path, &out.text).and_then(|_| {
+            let written = cx.background_executor().spawn(async move {
+                let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("doc");
+                let assets = format!("{stem}.assets");
+                let out = crate::markdown::export(&doc, &crate::markdown::Options { sub_pages: &subs, assets: all.then_some(assets.as_str()) });
+                let dir = path.parent().unwrap_or_else(|| Path::new("."));
+                // Publish canvas PNGs before replacing the Markdown that references them.
+                for (drawing, rel) in &out.canvases {
+                    let to = dir.join(rel);
+                    if let Some(p) = to.parent() { std::fs::create_dir_all(p)?; }
+                    let png = crate::canvas::png(drawing, &renderer).map_err(std::io::Error::other)?;
+                    write_export_file(&to, &png)?;
+                }
+                write_export_file(&path, out.text.as_bytes())?;
+                let mut missing = 0;
                 for (src, rel) in &out.files {
                     let to = dir.join(rel);
                     if let Some(p) = to.parent() {
@@ -197,18 +229,35 @@ impl Workspace {
                         missing += 1;
                     }
                 }
-                Ok(())
+                Ok::<_, std::io::Error>(missing)
+            }).await;
+            let _ = this.update(cx, |w, cx| match written {
+                Err(_) => w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx),
+                Ok(missing) if missing > 0 => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} images or attachments could not be copied"), cx),
+                _ => {}
             });
-            if written.is_err() {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx));
-            } else if missing > 0 {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_format!("已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} images or attachments could not be copied"), cx));
-            }
         })
         .detach();
     }
 
-    /// 下载为 → PDF: the page laid out on A4 by WebKit, saved where the user picks.
+    /// 下载为 → HTML: a self-contained document with editable canvas records.
+    pub fn export_html(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.close_menus();
+        cx.notify();
+        let Some(doc) = self.doc_of(id, cx) else { return };
+        let subs = self.sub_page_titles(id);
+        let path = save_path(&format!("{}.html", file_name(&doc)), cx);
+        cx.spawn(async move |this, cx| {
+            let Some(path) = path.await else { return };
+            let saved = cx.background_executor().spawn(async move {
+                let html = crate::html::to_html(&doc, &crate::html::Options { sub_pages: &subs });
+                write_export_file(&path, html.as_bytes())
+            }).await;
+            let _ = this.update(cx, |w, cx| if saved.is_err() { w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx); });
+        }).detach();
+    }
+
+    /// 下载为 → PDF: the page laid out on A4 saved where the user picks.
     pub fn export_pdf(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
         if !printing::SUPPORTED {
@@ -266,7 +315,7 @@ impl Workspace {
         .detach();
     }
 
-    /// 上传 / 导入为文档: pick Markdown or DocxXML files, each becoming a
+    /// 上传 / 导入为文档: pick Markdown, HTML or DocxXML files, each becoming a
     /// document; the last one opens.
     pub fn open_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
@@ -290,6 +339,7 @@ impl Workspace {
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
             let made = match ext.as_str() {
                 e if MARKDOWN_EXTS.contains(&e) => markdown_document(p).map_err(anyhow::Error::from).and_then(|doc| self.store.create_from(&doc)),
+                "html" | "htm" => html_document(p).map_err(anyhow::Error::from).and_then(|doc| self.store.create_from(&doc)),
                 "xml" => self.store.import(p),
                 _ => Err(anyhow::anyhow!("文件格式不支持")),
             };
@@ -393,7 +443,27 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockKind, markdown_document, percent_decode};
+    use super::{Block, BlockKind, Document, RichText, html_document, markdown_document, percent_decode};
+    use crate::model::Align;
+
+    #[test]
+    fn imports_an_exported_html_document_with_an_editable_canvas() {
+        let mut drawing = fdl_core::canvas::Drawing::default();
+        let node = drawing.add_node(fdl_core::canvas::Shape::Rectangle, [-20, 40]).unwrap();
+        drawing.label_node(node, "原始文字");
+        let mut block = Block::new(BlockKind::Canvas(drawing), RichText::default());
+        block.align = Align::Center;
+        let doc = Document { title: RichText::plain("原始标题"), blocks: vec![block], ..Default::default() };
+        let path = std::env::temp_dir().join(format!("fdl-{}.html", uuid::Uuid::new_v4()));
+        std::fs::write(&path, crate::html::to_html(&doc, &crate::html::Options { sub_pages: &[] })).unwrap();
+        let read = html_document(&path);
+        std::fs::remove_file(&path).unwrap();
+        let read = read.unwrap();
+        assert_eq!(read.title, doc.title);
+        assert_eq!(read.blocks.len(), 1);
+        assert_eq!(read.blocks[0].kind, doc.blocks[0].kind);
+        assert_eq!(read.blocks[0].align, doc.blocks[0].align);
+    }
 
     #[test]
     fn imports_markdown_file() {

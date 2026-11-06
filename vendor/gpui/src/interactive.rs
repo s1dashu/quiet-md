@@ -367,6 +367,9 @@ pub struct ScrollWheelEvent {
     /// The change in scroll wheel position for this event.
     pub delta: ScrollDelta,
 
+    /// Relative scale change from a native trackpad pinch, zero for scrolling.
+    pub magnification: f32,
+
     /// The modifiers that were held down when the mouse was moved.
     pub modifiers: Modifiers,
 

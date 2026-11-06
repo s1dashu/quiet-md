@@ -21,6 +21,7 @@ pub enum SlashKind {
     Formula,
     SubPageList,
     Countdown,
+    Canvas,
     Button,
     File,
     Reminder,
@@ -187,6 +188,7 @@ pub const SLASH_ITEMS: &[SlashItem] = &[
         keywords: &["日期提醒", "riqitixing", "rqtx", "reminder", "tixing", "date"],
     },
     SlashItem { kind: SlashKind::Countdown, label: "倒计时", icon: "timer", color: ORANGE, group: 3, keywords: &["倒计时", "djs", "timer", "daojishi", "countdown"] },
+    SlashItem { kind: SlashKind::Canvas, label: "画布", icon: "layout-grid", color: TEAL, group: 3, keywords: &["canvas", "drawing", "huabu", "画图", "架构图", "绘图"] },
 ];
 
 /// Whether a basic-group item shows in the icon grid. 文本 shows only where

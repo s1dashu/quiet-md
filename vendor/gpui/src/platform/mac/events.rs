@@ -239,8 +239,20 @@ impl PlatformInput {
                             window_height - px(native_event.locationInWindow().y as f32),
                         ),
                         delta,
+                        magnification: 0.,
                         touch_phase: phase,
                         modifiers: read_modifiers(native_event),
+                    })
+                }),
+                NSEventType::NSEventTypeMagnify => window_height.map(|window_height| {
+                    Self::ScrollWheel(ScrollWheelEvent {
+                        position: point(
+                            px(native_event.locationInWindow().x as f32),
+                            window_height - px(native_event.locationInWindow().y as f32),
+                        ),
+                        magnification: native_event.magnification() as f32,
+                        modifiers: read_modifiers(native_event),
+                        ..Default::default()
                     })
                 }),
                 NSEventType::NSLeftMouseDragged

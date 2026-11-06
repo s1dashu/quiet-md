@@ -87,6 +87,7 @@ pub struct TextField {
     pub mono: bool,
     /// Longest text in chars (longer input is cut off).
     pub max_len: Option<usize>,
+    pub max_lines: Option<usize>,
     /// Only ASCII digits get in (number inputs).
     pub digits: bool,
     /// Tab / Shift+Tab emit events instead of reaching the parent.
@@ -128,6 +129,7 @@ impl TextField {
             multiline: false,
             mono: false,
             max_len: None,
+            max_lines: None,
             digits: false,
             tab_events: false,
             hide_caret: false,
@@ -140,6 +142,8 @@ impl TextField {
         self.placeholder = s.into();
         cx.notify();
     }
+
+    pub fn is_composing(&self) -> bool { self.marked.is_some() }
 
     pub fn set_text(&mut self, s: &str, cx: &mut Context<Self>) {
         self.text = s.to_string();
@@ -199,6 +203,11 @@ impl TextField {
             if let Some((cut, _)) = s.char_indices().nth(room) {
                 s.truncate(cut);
             }
+        }
+        if let Some(max) = self.max_lines {
+            let breaks = self.text.matches('\n').count() - self.text[range.clone()].matches('\n').count();
+            let room = max.saturating_sub(1 + breaks);
+            if let Some((cut, _)) = s.match_indices('\n').nth(room) { s.truncate(cut); }
         }
         self.text.replace_range(range.clone(), &s);
         let o = range.start + s.len();
@@ -286,6 +295,7 @@ impl TextField {
     }
 
     fn submit(&mut self, _: &Submit, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_composing() { return }
         if self.multiline {
             return self.replace(self.sel.clone(), "\n", cx);
         }
@@ -293,6 +303,7 @@ impl TextField {
     }
 
     fn shift_submit(&mut self, _: &ShiftSubmit, _: &mut Window, cx: &mut Context<Self>) {
+        if self.is_composing() { return }
         if self.multiline {
             return self.replace(self.sel.clone(), "\n", cx);
         }

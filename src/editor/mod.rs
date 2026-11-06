@@ -2,6 +2,7 @@ mod button;
 mod caption;
 mod catalogue;
 mod countdown;
+pub(crate) mod canvas;
 mod cover;
 pub use fdl_core::editor::core;
 mod drag;

@@ -1196,6 +1196,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "预览" => "Preview",
         "无法播放该音频" => "Cannot play this audio",
         "全屏" => "Full screen",
+        "画布" => "Canvas",
         "文本视图" => "Text view",
         "卡片视图" => "Card view",
         "预览视图" => "Preview view",
