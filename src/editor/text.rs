@@ -3,6 +3,7 @@
 //! shared cache that the editor uses for hit-testing and caret navigation.
 
 use crate::editor::core::Pos;
+use fdl_core::editor::equation_edit::EquationProjection;
 use crate::editor::math;
 use crate::model::{Align, BlockId, Marks, RichText};
 use crate::editor_theme::{self as theme, Theme, craft};
@@ -32,6 +33,7 @@ pub struct Row {
 }
 
 pub struct TextLayout {
+    pub projection: Option<EquationProjection>,
     pub bounds: Bounds<Pixels>,
     pub lines: Vec<(usize, WrappedLine)>,
     pub rows: Vec<Row>,
@@ -46,6 +48,9 @@ pub struct TextLayout {
 }
 
 impl TextLayout {
+    pub fn model_index(&self, visual: usize) -> usize { self.projection.map_or(visual, |p| p.model_offset(visual)) }
+    pub fn visual_index(&self, model: usize) -> usize { self.projection.map_or(model, |p| p.visual_offset(model)) }
+
     /// Wrapped rows per hard line.
     pub fn rows_per_line(&self) -> Vec<usize> {
         let mut v = vec![0; self.rows.last().map_or(0, |r| r.hard + 1)];
@@ -205,6 +210,7 @@ impl TextSpec {
 }
 
 pub struct RichTextElement {
+    pub projection: Option<EquationProjection>,
     pub id: BlockId,
     pub text: RichText,
     pub spec: TextSpec,
@@ -902,7 +908,7 @@ impl Element for RichTextElement {
                 y += h;
             }
         }
-        let mut layout = TextLayout { bounds, lines: p.lines, rows, line_height: lh, mono: self.spec.mono, eqs: vec![], buttons: vec![] };
+        let mut layout = TextLayout { projection: self.projection, bounds, lines: p.lines, rows, line_height: lh, mono: self.spec.mono, eqs: vec![], buttons: vec![] };
         let mut placed = vec![];
         for e in p.eqs {
             let ri = layout.row_for(e.ix);
@@ -1394,7 +1400,7 @@ pub fn hit_test(cache: &LayoutCache, p: Point<Pixels>, candidates: &[BlockId]) -
     }
     let (_, _, id) = best?;
     let l = cache.get(&id)?;
-    Some(Pos::new(id, l.index_for(p)))
+    Some(Pos::new(id, l.model_index(l.index_for(p))))
 }
 
 #[cfg(all(test, target_os = "macos"))]

@@ -20,6 +20,7 @@ impl Editor {
             return;
         }
         self.read_only = on;
+        self.inline_close(true);
         self.ro_doc = on.then(|| self.core.doc.clone());
         self.core.break_coalescing();
         self.menu = None;

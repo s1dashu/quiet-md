@@ -21,3 +21,7 @@ print("Bundled guide assets match their sources")
 cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", "--", "-D", "warnings")
 # The harness build (script driver compiled in) must stay clean too.
 cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", "--features", "devtools", "--", "-D", "warnings")
+
+# Keep the opt-in equation editor and its script assertions buildable too.
+cargo("test", "--release", "--workspace", "--locked", "--features", "experimental-inline-math,devtools")
+cargo("clippy", "--release", "--workspace", "--locked", "--all-targets", "--features", "experimental-inline-math,devtools", "--", "-D", "warnings")

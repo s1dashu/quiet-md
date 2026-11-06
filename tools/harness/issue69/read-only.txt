@@ -1,0 +1,20 @@
+move 300 600
+wait 1000
+click 500 186
+key cmd-right
+key ctrl-alt-v
+wait 100
+math-check {"active":false,"read_only":true}
+key left left left left left left left
+math-check {"active":false,"read_only":true,"model_head":7}
+type q
+math-check {"active":false,"model_head":7,"contains":"<p>before <latex>x^2</latex> after</p>"}
+key right
+math-check {"active":false,"model_head":10}
+key left
+key ctrl-alt-e
+wait 100
+key right
+math-check {"active":true,"read_only":false,"source":"x^2","head":0}
+key right right right right
+math-check {"active":false,"model_head":10}
