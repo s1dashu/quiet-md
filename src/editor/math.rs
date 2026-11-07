@@ -168,7 +168,12 @@ pub fn layout(src: &str, display: bool, font_px: f32, color: Hsla, eqno: u32, wi
     math
 }
 
+#[cfg(feature = "devtools")]
+pub(crate) static SOURCE_RENDERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn render_html(src: &str, display: bool) -> Option<String> {
+    #[cfg(feature = "devtools")]
+    SOURCE_RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut settings = katex::types::Settings::default();
     settings.display_mode = display;
     settings.output = katex::types::OutputFormat::Html;
@@ -1099,5 +1104,9 @@ mod tests {
         assert!(root.find("katex-html").is_some());
         assert!(root.find("frac-line").is_some());
         assert!(render_html("\\frac{a", false).is_none());
+        for display in [false, true] {
+            let html = render_html("f(x^2)", display).unwrap();
+            assert!(parse(&html).unwrap().find("katex-html").is_some());
+        }
     }
 }

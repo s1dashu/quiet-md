@@ -21,7 +21,7 @@ binary = os.environ.get('FDL_BIN') or os.path.join(repo, 'target', 'release', 'q
 if b'devtools: cannot read' not in open(binary, 'rb').read():
     sys.exit(f'{binary} has no script driver: build it with `cargo build --release --features devtools`')
 env = {'HOME': os.path.expanduser('~'), 'QUIET_MD_HOME': lib, 'FDL_SCRIPT': script,
-       'FDL_SHOTS': work, 'PATH': '/opt/homebrew/bin:/usr/bin:/bin'}
-for k in ('FDL_TRACE', 'FDL_NOPARK', 'FDL_WINDOW_CAPTURE', 'FDL_NOBLINK', 'FDL_RECORD_FPS'):
+       'FDL_SHOTS': work, 'QUIET_MD_LOG_DIR': os.path.join(work, 'logs'), 'PATH': '/opt/homebrew/bin:/usr/bin:/bin'}
+for k in ('FDL_TRACE', 'FDL_NOPARK', 'FDL_WINDOW_CAPTURE', 'FDL_NOBLINK', 'FDL_RECORD_FPS', 'QUIET_MD_INLINE_MATH'):
     if k in os.environ: env[k] = os.environ[k]
-subprocess.run(binary, env=env, cwd=work, stdout=open(os.path.join(work, 'log'), 'w'), stderr=subprocess.STDOUT)
+subprocess.run(binary, env=env, cwd=work, stdout=open(os.path.join(work, 'log'), 'w'), stderr=subprocess.STDOUT, check=True)

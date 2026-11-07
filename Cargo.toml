@@ -13,6 +13,7 @@ categories = ["text-editors"]
 # --features devtools`). Off in release builds: shipped apps cannot be scripted.
 [features]
 devtools = []
+experimental-inline-math = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
 [workspace]

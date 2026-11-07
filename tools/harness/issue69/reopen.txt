@@ -1,0 +1,7 @@
+move 300 600
+wait 1000
+math-check {"active":false,"focus":true,"contains":"<latex>X_t+1</latex>"}
+click 433 186
+math-check {"active":true,"source":"x_t","focus":true}
+key right right right right
+math-check {"active":false,"contains":"<latex>x_t</latex>","focus":true}

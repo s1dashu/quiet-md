@@ -36,7 +36,7 @@ pub(super) struct R<'a> {
 #[derive(Default)]
 pub(super) struct Frame {
     /// `core.generation` that `units` / `eqnos` were computed at.
-    generation: Option<u64>,
+    pub(super) generation: Option<u64>,
     units: Rc<Vec<Unit>>,
     pub eqnos: Rc<HashMap<BlockId, u32>>,
     selected: Rc<HashSet<BlockId>>,
@@ -241,19 +241,31 @@ impl R<'_> {
         spec.link_underline = !bm && self.focused && sel.head.block == id;
         let selection = if bm || sel.is_collapsed() { None } else { core.range_in(id, &self.units) };
         let caret_here = !bm && core.cell_sel.is_none() && sel.head.block == id && sel.is_collapsed();
+        let active = self.ed.inline_math.as_ref().filter(|e| e.pos.block == id && !self.ghost && !bm);
+        let source_sel = active.map(|e| e.input.sel);
+        let selection = source_sel.map(|s| {
+            let base = active.unwrap().pos.offset;
+            base + s.anchor.offset.min(s.head.offset)..base + s.anchor.offset.max(s.head.offset)
+        }).filter(|r| !r.is_empty()).or(selection);
+        let caret = active.map(|e| e.pos.offset + e.input.sel.head.offset).or(caret_here.then_some(sel.head.offset));
+        let marked = self.ed.marked.as_ref().filter(|(b, _)| *b == id && !self.ghost).map(|(_, r)| {
+            let base = active.map_or(0, |e| e.pos.offset);
+            base + r.start..base + r.end
+        });
         RichTextElement {
+            projection: active.map(|e| e.projection()),
             id,
-            text: text.clone(),
+            text: active.map_or_else(|| text.clone(), |e| e.project(text)),
             spec,
             align,
             placeholder,
             placeholder_color: None,
             placeholder_dx: 0.,
             selection,
-            caret: caret_here.then_some(sel.head.offset),
-            marked: self.ed.marked.as_ref().filter(|(b, _)| *b == id && !self.ghost).map(|(_, r)| r.clone()),
+            caret,
+            marked,
             cache: self.cache.clone(),
-            show_caret: caret_here && self.focused && self.ed.caret_visible && !self.ed.read_only,
+            show_caret: active.map_or(caret_here, |e| e.input.sel.is_collapsed()) && self.focused && self.ed.caret_visible && !self.ed.read_only,
             highlight: None,
             found: if self.ghost { vec![] } else { self.ed.find_hits(id) },
             eq_counter: self.eqnos.get(&id).copied().unwrap_or(0),
@@ -1048,7 +1060,7 @@ impl Editor {
         // Walking a long document costs ~1.5ms (1M chars): skip it when
         // nothing the rows depend on changed, as on every scrolling frame.
         let mut fh = FxHasher::default();
-        (self.core.generation, seed, keys[0], links, &nonces).hash(&mut fh);
+        (self.inline_math.as_ref().map_or(self.core.generation, |e| e.generation), seed, keys[0], links, &nonces).hash(&mut fh);
         let frame_key = fh.finish();
         if self.items_key == Some(frame_key) {
             return;
@@ -1255,7 +1267,7 @@ impl Editor {
                 Some(b) => (b.head, self.block_bounds.borrow().get(&b.head).copied()),
                 // A selected image has no text layout: keep its box in view.
                 None => {
-                    let h = self.core.sel.head;
+                    let h = self.inline_math.as_ref().map_or(self.core.sel.head, |e| Pos::new(e.pos.block, e.pos.offset + e.input.sel.head.offset));
                     (h.block, caret_rect(h).or_else(|| self.img.boxes.borrow().get(&h.block).copied()))
                 }
             },
@@ -1292,6 +1304,10 @@ impl Editor {
     }
 
     fn render_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.inline_math.is_some() && !self.focus.is_focused(window) {
+            self.inline_close(true);
+        }
+        if std::mem::take(&mut self.inline_refresh) { self.refresh_find(false, cx); }
         self.sync_crop(window, cx);
         self.tick_image_ui(window, cx);
         // Overlays are positioned from last frame's layout, so build them

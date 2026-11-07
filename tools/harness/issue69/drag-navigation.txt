@@ -1,0 +1,25 @@
+move 300 600
+wait 1000
+click 433 186
+math-check {"active":true,"source":"x^2","focus":true}
+wait 100
+drag 423 186 449 186
+math-check {"active":true,"source":"x^2","anchor":0,"head":3,"focus":true}
+type q
+math-check {"source":"q","focus":true}
+key cmd-a
+key backspace
+math-check {"source":"","focus":true,"contains":"<latex/>"}
+key backspace
+math-check {"active":false,"focus":true,"contains":"<latex/>"}
+key right
+math-check {"active":true,"source":"","focus":true}
+type long中文😀
+wait 100
+drag 423 186 700 186
+math-check {"active":false,"focus":true,"contains":"<latex>long中文😀</latex>"}
+key left left left right right right
+math-check {"focus":true}
+key up down cmd-left cmd-right
+math-check {"focus":true}
+key cmd-s

@@ -498,6 +498,7 @@ impl Render for TextField {
         spec.wrap = self.wrap;
         spec.mono = self.mono;
         let el = RichTextElement {
+            projection: None,
             id: self.id,
             text: RichText::plain(self.text.clone()),
             spec,

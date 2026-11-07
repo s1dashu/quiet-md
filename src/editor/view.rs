@@ -106,6 +106,8 @@ pub type BoundsMap = Rc<RefCell<HashMap<BlockId, Bounds<Pixels>>>>;
 
 pub struct Editor {
     pub core: Core,
+    pub(super) inline_math: Option<fdl_core::editor::equation_edit::EquationEdit>,
+    pub(super) inline_refresh: bool,
     pub focus: FocusHandle,
     pub cache: LayoutCache,
     /// Window bounds of every rendered block wrapper (last frame).
@@ -244,11 +246,11 @@ impl Focusable for Editor {
     }
 }
 
-fn to16(s: &str, o: usize) -> usize {
-    s[..o.min(s.len())].encode_utf16().count()
+pub(super) fn to16(s: &str, o: usize) -> usize {
+    s[..core::char_boundary(s, o)].encode_utf16().count()
 }
 
-fn from16(s: &str, o16: usize) -> usize {
+pub(super) fn from16(s: &str, o16: usize) -> usize {
     let mut n = 0;
     for (i, ch) in s.char_indices() {
         if n >= o16 {
@@ -369,6 +371,8 @@ impl Editor {
             mention: None,
             content_origin: Rc::new(Cell::new(Point::default())),
             probes: RefCell::new(vec![]),
+            inline_math: None,
+            inline_refresh: false,
             marked: None,
             dragging: false,
             gap_press: None,
@@ -440,6 +444,12 @@ impl Editor {
             _subs: subs,
         };
         e.cat_seen.1 = e.core.sel.head.block;
+        e._subs.push(cx.on_blur(&e.focus, window, |e, window, cx| {
+            if e.inline_math.is_some() {
+                e.inline_close(true);
+                e.changed(window, cx);
+            }
+        }));
         e.restart_blink(window, cx);
         e
     }
@@ -478,6 +488,7 @@ impl Editor {
     pub fn receive_document(&mut self, core: &Core, cx: &mut Context<Self>) {
         let sel = self.core.sel;
         let generation = self.core.generation;
+        self.inline_math = None;
         self.core = core.clone();
         self.core.sel = sel;
         self.core.block_sel = None;
@@ -496,7 +507,12 @@ impl Editor {
     }
 
     pub fn changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.inline_math.as_ref().is_some_and(|e| self.core.equation_source(e.pos).as_deref() != Some(e.text())) {
+            self.inline_close(true);
+            self.core.fix_selection();
+        }
         self.core.reveal_caret();
+        if std::mem::take(&mut self.inline_refresh) { self.refresh_find(false, cx); }
         if self.core.dirty {
             self.core.dirty = false;
             self.typing = true;
@@ -555,18 +571,28 @@ impl Editor {
         }
     }
 
+    fn normalize_selection(&mut self) {
+        let clamp = |p: Pos| self.core.text_of(p.block).map_or(p, |t| Pos::new(p.block, core::char_boundary(&t.text, p.offset)));
+        self.core.sel = Selection { anchor: clamp(self.core.sel.anchor), head: clamp(self.core.sel.head) };
+    }
+
     pub(super) fn set_caret(&mut self, p: Pos, extend: bool) {
+        self.inline_close(false);
         self.core.cell_sel = None;
         if extend {
             self.core.sel.head = p;
         } else {
             self.core.sel = Selection::caret(p);
         }
+        self.normalize_selection();
         self.core.pending_marks = None;
         self.core.break_coalescing();
         self.marked = None;
         if extend {
             self.toolbar_hidden = false;
+        }
+        if !self.read_only && !extend && super::inline_math::enabled() && self.core.equation_source(self.core.sel.head).is_some() {
+            self.inline_open(self.core.sel.head, 0);
         }
     }
 
@@ -956,6 +982,11 @@ impl Editor {
 
     /// Open the LaTeX editor of the equation at `p` (its source selected).
     pub fn open_equation_editor(&mut self, p: Pos, window: &mut Window, cx: &mut Context<Self>) {
+        if super::inline_math::enabled() {
+            self.inline_open(p, 0);
+            self.restart_blink(window, cx);
+            return cx.notify();
+        }
         let Some(src) = self.core.equation_source(p) else { return };
         self.eq_field.update(cx, |f, cx| {
             f.set_text(&src, cx);
@@ -1177,6 +1208,7 @@ impl Editor {
     // ---- caret movement
 
     fn move_h(&mut self, right: bool, word: bool, extend: bool) {
+        self.normalize_selection();
         let s = self.core.sel;
         if !extend && !s.is_collapsed() {
             let (a, b) = self.core.ordered();
@@ -1184,6 +1216,13 @@ impl Editor {
             return;
         }
         let h = s.head;
+        if !self.read_only && super::inline_math::enabled() && !word && !extend && (right || h.offset >= core::EQUATION.len()) {
+            let p = if right { h } else { Pos::new(h.block, core::prev_grapheme(self.core.text_of(h.block).map(|t| t.text.as_str()).unwrap_or(""), h.offset)) };
+            if let Some(src) = self.core.equation_source(p) {
+                self.inline_open(p, if right { 0 } else { src.len() });
+                return;
+            }
+        }
         let us = self.core.units();
         let Some(i) = us.iter().position(|u| u.id == h.block) else { return };
         if us[i].text {
@@ -1216,16 +1255,16 @@ impl Editor {
         let cache = cache.borrow();
         let goal = self
             .goal_x
-            .or_else(|| cache.get(&h.block).map(|l| l.position_for(h.offset).x))
+            .or_else(|| cache.get(&h.block).map(|l| l.position_for(l.visual_index(h.offset)).x))
             .unwrap_or_default();
         if us[i].text
             && let Some(l) = cache.get(&h.block)
             && !l.rows.is_empty()
         {
-            let ri = l.row_index_for(h.offset);
+            let ri = l.row_index_for(l.visual_index(h.offset));
             let target = if down { (ri + 1 < l.rows.len()).then_some(ri + 1) } else { ri.checked_sub(1) };
             if let Some(t) = target {
-                let o = l.index_in_row(t, goal);
+                let o = l.model_index(l.index_in_row(t, goal));
                 drop(cache);
                 self.set_caret(Pos::new(h.block, o), extend);
                 self.goal_x = Some(goal);
@@ -1251,7 +1290,7 @@ impl Editor {
                 let o = cache
                     .get(&u.id)
                     .filter(|l| !l.rows.is_empty())
-                    .map(|l| l.index_in_row(if down { 0 } else { l.rows.len() - 1 }, goal))
+                    .map(|l| l.model_index(l.index_in_row(if down { 0 } else { l.rows.len() - 1 }, goal)))
                     .unwrap_or(0);
                 Pos::new(u.id, o.min(self.core.len_of(u.id)))
             }
@@ -1277,13 +1316,13 @@ impl Editor {
             let cache = self.cache.borrow();
             match cache.get(&h.block) {
                 Some(l) if !l.rows.is_empty() => {
-                    let ri = l.row_index_for(h.offset);
+                    let ri = l.row_index_for(l.visual_index(h.offset));
                     if end {
                         let r = &l.rows[ri];
                         let last_of_hard = l.rows.get(ri + 1).is_none_or(|n| n.hard != r.hard);
-                        if last_of_hard { r.range.end } else { l.index_in_row(ri, px(1.0e6)) }
+                        l.model_index(if last_of_hard { r.range.end } else { l.index_in_row(ri, px(1.0e6)) })
                     } else {
-                        l.rows[ri].range.start
+                        l.model_index(l.rows[ri].range.start)
                     }
                 }
                 _ => {
@@ -2186,6 +2225,10 @@ impl Editor {
 
     pub fn on_mouse_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
+        if self.inline_pointer(ev.position, ev.modifiers.shift, cx) {
+            window.prevent_default();
+            return;
+        }
         self.reminder_blur(window, cx);
         self.menu = None;
         self.menu_hovered = false;
@@ -2210,7 +2253,8 @@ impl Editor {
             return cx.notify();
         }
         let Some(pos) = self.pos_at(ev.position) else { return };
-        let eq = self.cache.borrow().get(&pos.block).and_then(|l| l.equation_at(ev.position));
+        let eq = self.cache.borrow().get(&pos.block).and_then(|l| l.equation_at(ev.position).map(|ix| l.model_index(ix)));
+        self.inline_close(true);
         if let Some(ix) = eq
             && !ev.modifiers.shift
             && !self.read_only
@@ -2245,6 +2289,18 @@ impl Editor {
     }
 
     pub fn drag_to(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.inline_pointer(p, true, cx) { return; }
+        if let Some(pos) = self.pos_at(p)
+            && let Some(e) = self.inline_math.as_ref()
+        {
+            let anchor = if pos.block == e.pos.block && pos.offset < e.pos.offset { Pos::new(e.pos.block, e.pos.offset + core::EQUATION.len()) } else { e.pos };
+            self.inline_close(false);
+            self.core.sel = Selection { anchor, head: pos };
+            self.normalize_selection();
+            self.core.break_coalescing();
+            self.marked = None;
+            return cx.notify();
+        }
         if self.cell_drag_to(p, cx) {
             return;
         }
@@ -2252,6 +2308,7 @@ impl Editor {
             && pos != self.core.sel.head
         {
             self.core.sel.head = pos;
+            self.normalize_selection();
             cx.notify();
         }
     }
@@ -2465,7 +2522,13 @@ impl Editor {
         } else if s == "-" {
             self.core.markdown_divider();
         }
-        self.core.markdown_inline_shortcut();
+        if super::inline_math::enabled()
+            && let Some((p, offset)) = self.core.enclosing_equation_shortcut()
+        {
+            self.inline_open(p, offset);
+        } else {
+            self.core.markdown_inline_shortcut();
+        }
         if s == "/" || s == "、" {
             self.maybe_open_slash(s.len());
         } else if let Some(c) = s.chars().last().filter(|c| matches!(c, '@' | '＠')) {
@@ -2477,6 +2540,7 @@ impl Editor {
     }
 
     fn head_text(&self) -> Option<String> {
+        if let Some(e) = &self.inline_math { return Some(e.text().to_string()); }
         if self.core.in_block_mode() {
             return None;
         }
@@ -2485,7 +2549,7 @@ impl Editor {
 
     /// Selection reported to the platform: within the head block only.
     fn reported_range(&self, text: &str) -> (Range<usize>, bool) {
-        let s = self.core.sel;
+        let s = self.inline_math.as_ref().map_or(self.core.sel, |e| e.input.sel);
         let h = s.head.offset.min(text.len());
         if s.anchor.block == s.head.block {
             let a = s.anchor.offset.min(text.len());
@@ -2557,8 +2621,8 @@ impl EntityInputHandler for Editor {
         if *b != self.core.sel.head.block {
             return None;
         }
-        let t = self.core.text_of(*b)?;
-        Some(to16(&t.text, r.start)..to16(&t.text, r.end))
+        let t = self.head_text()?;
+        Some(to16(&t, r.start)..to16(&t, r.end))
     }
 
     fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
@@ -2567,9 +2631,10 @@ impl EntityInputHandler for Editor {
 
     fn replace_text_in_range(&mut self, range: Option<Range<usize>>, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.pointer_hidden = true;
-        if self.core.in_block_mode() {
-            return;
+        if self.inline_math.is_some() {
+            return self.inline_replace(range, text, None, false, window, cx);
         }
+        if self.core.in_block_mode() { return; }
         let head = self.core.sel.head.block;
         if let Some((b, r)) = self.marked.take() {
             self.core.sel = Selection { anchor: Pos::new(b, r.start), head: Pos::new(b, r.end) };
@@ -2594,9 +2659,10 @@ impl EntityInputHandler for Editor {
         cx: &mut Context<Self>,
     ) {
         self.pointer_hidden = true;
-        if self.core.in_block_mode() {
-            return;
+        if self.inline_math.is_some() {
+            return self.inline_replace(range, text, new_sel, true, window, cx);
         }
+        if self.core.in_block_mode() { return; }
         if self.core.text_of(self.core.sel.head.block).is_none() || self.core.sel.head.block != self.core.sel.anchor.block {
             // Atomic caret or a cross-block selection: clear it first.
             if !self.core.sel.is_collapsed() {
@@ -2629,21 +2695,23 @@ impl EntityInputHandler for Editor {
 
     fn bounds_for_range(&mut self, range: Range<usize>, _: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
         let head = self.core.sel.head.block;
-        let t = self.core.text_of(head)?.text.clone();
+        let t = self.head_text()?;
+        let base = self.inline_math.as_ref().map_or(0, |e| e.pos.offset);
         let cache = self.cache.borrow();
         let l = cache.get(&head)?;
-        let a = l.position_for(from16(&t, range.start));
-        let b = l.position_for(from16(&t, range.end));
+        let a = l.position_for(base + from16(&t, range.start));
+        let b = l.position_for(base + from16(&t, range.end));
         let r = Bounds::from_corners(a, point(b.x.max(a.x), b.y + l.line_height));
         Some(r)
     }
 
     fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         let head = self.core.sel.head.block;
-        let t = self.core.text_of(head)?.text.clone();
+        let t = self.head_text()?;
+        let base = self.inline_math.as_ref().map_or(0, |e| e.pos.offset);
         let cache = self.cache.borrow();
         let l = cache.get(&head)?;
-        Some(to16(&t, l.index_for(p).min(t.len())))
+        Some(to16(&t, l.index_for(p).saturating_sub(base).min(t.len())))
     }
 }
 
@@ -2655,6 +2723,7 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
 ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
     cx.listener(move |e, a: &A, w, cx| {
         if e.cd.dialog.is_none() {
+            if e.inline_action(a.name(), w, cx) { return; }
             f(e, a, w, cx)
         } else {
             cx.propagate()

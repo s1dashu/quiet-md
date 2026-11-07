@@ -116,7 +116,7 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(23) {
+    match rng.below(24) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -211,6 +211,14 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         20 => table_step(c, rng),
         21 => object_step(c, rng),
+        23 => {
+            c.insert_text("$$");
+            let p = c.sel.head;
+            c.sel = Selection::caret(Pos::new(p.block, p.offset.saturating_sub(1)));
+            c.insert_text("x");
+            c.enclosing_equation_shortcut();
+            "enclosing_equation_shortcut".into()
+        }
         _ => {
             c.trailing_line();
             "trailing_line".into()
