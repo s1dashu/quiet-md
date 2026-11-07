@@ -37,6 +37,7 @@ mod native_header;
 mod printing;
 mod search;
 mod sidebar;
+mod sidebar_drag;
 mod settings;
 mod themes;
 mod shortcuts;
