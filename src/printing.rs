@@ -46,6 +46,31 @@ pub fn parent_of(window: &Window) -> usize {
     }
 }
 
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::{Duration, Job, run};
+    use gpui::Application;
+
+    #[test]
+    fn exports_html_and_svg_with_the_windows_backend() {
+        let path = std::env::temp_dir().join(format!("quiet-md-pdf-test-{}.pdf", uuid::Uuid::new_v4()));
+        let output = path.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        Application::new().run(move |cx| {
+            cx.spawn(async move |cx| {
+                let html = "<!doctype html><meta charset='utf-8'><h1>Quiet.md 中文 PDF</h1><svg xmlns='http://www.w3.org/2000/svg' width='400' height='100'><rect x='2' y='2' width='396' height='96' fill='#eef' stroke='#123'/><text x='30' y='55'>Native Mermaid SVG</text></svg>";
+                let result = run(html.into(), "PDF test".into(), Job::Pdf(output), 0, cx).await;
+                let _ = tx.send(result);
+                let _ = cx.update(|cx| cx.quit());
+            }).detach();
+        });
+        assert!(rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap());
+        let bytes = std::fs::read(&path).unwrap();
+        let _ = std::fs::remove_file(path);
+        assert!(bytes.starts_with(b"%PDF-")); assert!(bytes.len() > 1000);
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod native {
     use super::*;

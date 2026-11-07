@@ -38,6 +38,11 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 
 | 18 | `platform/linux/wayland/client.rs`、`platform/linux/x11/client.rs` | 外观变化时先复制窗口句柄，释放 client 的 RefCell 借用后再触发窗口回调 | 避免回调重新访问平台、更新菜单时触发重复借用 panic |
 
+| 19 | `gpui.rs`、`svg_renderer.rs` | 公开 `SvgRenderer` / `SvgSize` 并补齐公开 API 文档 | 文本绘图按屏幕像素密度和当前缩放在后台栅格化，避免固定 1× 图片被拉伸 |
+| 20 | `platform.rs`、`platform/{mac,windows,linux}` | 新增 `CursorStyle::ZoomIn`；macOS 15+ 和 Linux 使用系统光标，Windows 和旧 macOS 使用内置放大镜 | 文本绘图悬停时提示点击打开图片预览 |
+| 21 | `platform/mac/metal_atlas.rs` | 删除图片时立即移除对应 key，重复删除不再重复扣减共享纹理计数；与 Windows / Blade 后端一致 | 修复反复预览多张图表后其他图片消失，以及 Metal 查找已释放纹理时崩溃 |
+| 22 | `svg_renderer.rs`、`Cargo.toml` | 从 SVG 系统字体库移除 LastResort 占位字体，并启用 resvg 的 `raster-images` 功能以绘制字体内的位图字形 | 防止含 emoji 的整行标签被替换成问号方框，并实际显示 Apple Color Emoji 的彩色字形 |
+
 ## taffy 0.9.0
 
 | 文件 | 改动 | 用途 |
