@@ -217,6 +217,7 @@ pub struct Editor {
     pub(super) captions: HashMap<BlockId, (Entity<TextField>, Vec<Subscription>)>,
     pub(super) img: super::image::ImageUi,
     pub(super) cd: super::countdown::CdUi,
+    pub(super) html_blocks: super::html_block::HtmlUi,
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
     pub(super) file: super::file::FileUi,
@@ -435,6 +436,7 @@ impl Editor {
             ro_doc: None,
             info: Default::default(),
             cd,
+            html_blocks: super::html_block::HtmlUi::default(),
             btn,
             rm,
             _subs: subs,
@@ -869,6 +871,11 @@ impl Editor {
             SlashKind::Divider | SlashKind::SubPageList => {
                 let k = if kind == SlashKind::Divider { BlockKind::Divider } else { BlockKind::SubPageList };
                 let nid = self.core.insert_block(Block::new(k, RichText::default()));
+                let p = self.core.ensure_paragraph_after(nid);
+                self.core.sel = Selection::caret(Pos::new(p, 0));
+            }
+            SlashKind::Html => {
+                let nid = self.core.insert_block(Block::new(BlockKind::Html(Default::default()), RichText::default()));
                 let p = self.core.ensure_paragraph_after(nid);
                 self.core.sel = Selection::caret(Pos::new(p, 0));
             }
@@ -1696,6 +1703,7 @@ impl Editor {
     }
 
     fn on_escape(&mut self, _: &k::Escape, window: &mut Window, cx: &mut Context<Self>) {
+        if self.html_blocks.full.take().is_some() { cx.notify(); return }
         if !self.guard(window, cx) {
             return;
         }
@@ -1879,6 +1887,7 @@ impl Editor {
         self.slash = None;
         self.marked = None;
         self.core.undo();
+        self.reset_html_source();
         self.changed(window, cx);
     }
 
@@ -1890,6 +1899,7 @@ impl Editor {
         self.slash = None;
         self.marked = None;
         self.core.redo();
+        self.reset_html_source();
         self.changed(window, cx);
     }
 

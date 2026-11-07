@@ -26,6 +26,7 @@ mod editor;
 mod highlight;
 mod home;
 mod html;
+mod html_preview;
 mod input;
 mod logging;
 mod modes;

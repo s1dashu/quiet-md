@@ -1279,6 +1279,13 @@ pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::html_preview::begin_frame(window, cx);
+        if let Some(ed) = &self.editor {
+            // Only modal views obscure the whole page; overlay shells report their actual bounds.
+            let obscured = self.view != View::Doc || self.search_open || self.doc_info.is_some()
+                || self.confirm.is_some() || self.move_dlg.is_some() || self.export_md.is_some() || self.shortcuts || self.rename.is_some();
+            ed.update(cx, |e, cx| e.obscure_html(obscured, cx));
+        }
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus); }
