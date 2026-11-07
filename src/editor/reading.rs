@@ -40,6 +40,11 @@ impl Editor {
     /// Called for every `Changed` the editor emits: in reading mode an edited
     /// document goes back to the snapshot (folding and renaming are allowed,
     /// they are kept in the snapshot as they happen) and true is returned.
+    /// Contents replaced from outside (飞书同步) become the ones 阅读模式 keeps.
+    pub fn accept_read_only_contents(&mut self) {
+        self.ro_doc = Some(self.core.doc.clone());
+    }
+
     pub fn reject_read_only_edit(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.read_only {
             return false;

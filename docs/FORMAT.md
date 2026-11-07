@@ -13,6 +13,9 @@ Quiet.md/
 ├── .lock                写锁（flock）：改写索引时短暂独占，不是单实例标记
 ├── docs/<id>.xml        每篇文档一份 DocxXML
 ├── assets/              粘贴或插入的图片、附件；assets/thumbs 是文件预览缩略图
+├── sync/                关联了飞书文档的文档才有（见下文「飞书同步」）
+│   ├── <id>.json        Link { url, token, wiki_node, revision, media, synced }
+│   └── <id>.base.xml    上次同步时的云端内容：三方合并的基线
 └── trash/
     ├── index.json       id → Trashed { meta, deleted, root }
     └── <id>.xml
@@ -45,6 +48,17 @@ Quiet.md/
 - **版本标记。** 打开库时，如果 `format.json` 里的版本比本程序新，会提示「请升级后再编辑」。改目录布局、会让旧版本误读的时候，要把 `FORMAT` 加一。
 - **手放的文件也会出现。** 直接放进 `docs/` 的 `.xml` 文件（比如从飞书导出的 DocxXML）会出现在列表里。
 - **保存失败不静默。**
+
+### 飞书同步
+
+文档可以关联一篇飞书云文档或知识库文档（`src/feishu.rs`，通过 `lark-cli --as user` 收发 DocxXML，比对与合并在 `fdl_core::sync`）。
+
+- **拉取**：取云端，和基线（`<id>.base.xml`）比较，把云端的改动合并进本地。打开已同步过的文档时自动拉取。
+- **推送**：手动。先拉取合并，再把云端缺的部分按顶层 block 发出（`block_replace` / `block_insert_after` / `block_delete`），发完重新取一次作为新基线。
+- **合并**：以顶层 block 为单位的 diff3。三边都没动的 block 作稳定点；两边只有一边改的段取改的一边；两边都改且块数相同的段逐块判断。真正的冲突保留本地，云端版本另存为这篇文档的子文档「…（云端版本 MM-DD HH:MM）」。折叠状态只在本地有，比较时忽略。
+- **云端不能表达的内容**：倒计时、全天提醒等本地扩展，以及飞书对高亮块内容的限制。推送只检查这次要发出的 block，有就拒绝推送并列出位置。
+- 图片：云端 `token` ↔ 本地 `assets/feishu-<token>.<ext>`，对照表存在 `Link.media`。
+- 知识库链接给的是节点 token，用 `wiki +node-get` 换成背后的 docx（快捷方式先跟到原节点，非 docx 拒绝）。
 
 ## DocxXML
 

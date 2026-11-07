@@ -90,6 +90,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `store.rs` | 文档库读写、索引恢复、回收站、设置；`image_path` |
 | `paste.rs` | HTML / Markdown → block（粘贴和导入共用） |
 | `markdown.rs` | 导出 Markdown |
+| `sync.rs` | 飞书同步的比对与三方合并：block 键、diff3、推送计划（`plan`）、云端不能表达的内容（`blockers`）|
 | `lang.rs` | 代码语言表 |
 | `palette.rs` | 文字色、背景色、高亮块色板（RGBA，不依赖 GPUI；`theme.rs` 转成 GPUI 颜色） |
 | `time.rs` | 日期换算、本地时区、当前时间 |
@@ -105,6 +106,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `guides.rs` | 文档库是空的时放入内置的「开始指南」（只放一次） |
 | `app.rs` | `Workspace`：两栏窗口、打开 / 新建 / 保存 / 删除、保存状态、提醒调度 |
 | `html.rs` / `printing.rs` / `transfer.rs` | 导出 HTML / PDF、打印、导入导出的界面 |
+| `feishu.rs` | 飞书同步：`lark-cli` 调用、关联与同步状态（`sync/`）、关联对话框和「飞书同步」子菜单 |
 | `clipboard.rs` | 系统剪贴板的 HTML 读取，以及脚本模式的模拟剪贴板 |
 | `sidebar.rs` / `tree.rs` | 左栏与文档树（子文档、移动到） |
 | `home.rs` / `trash.rs` | 主页、回收站 |
