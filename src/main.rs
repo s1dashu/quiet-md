@@ -27,6 +27,7 @@ mod highlight;
 mod home;
 mod html;
 mod input;
+mod local_file;
 mod logging;
 mod modes;
 #[cfg(target_os = "macos")]
@@ -53,7 +54,7 @@ mod tree;
 mod ui;
 mod update;
 
-use fdl_core::{docxml, lang, markdown, model, palette, paste, store, time};
+use fdl_core::{docxml, lang, markdown, markdown_file, model, palette, paste, store, time};
 
 use gpui::*;
 
@@ -116,6 +117,18 @@ fn main() {
         logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
     }
     let app = Application::new().with_assets(assets::Assets);
+    // Finder can deliver file URLs before applicationDidFinishLaunching.
+    let pending = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let open_cx = std::rc::Rc::new(std::cell::RefCell::new(None::<AsyncApp>));
+    app.on_open_urls({
+        let pending = pending.clone();
+        let open_cx = open_cx.clone();
+        move |urls| {
+            let paths = local_file::paths_from_urls(urls);
+            if let Some(cx) = open_cx.borrow().as_ref() { let _ = cx.update(|cx| local_file::open_paths(&paths, cx)); }
+            else { pending.borrow_mut().extend(paths); }
+        }
+    });
     // macOS keeps running after ⌘W closes the last window (quick notes stay
     // available); clicking the Dock icon then brings the main window back.
     app.on_reopen(|cx| if cx.windows().is_empty() { open_main_window(false, cx); });
@@ -127,6 +140,7 @@ fn main() {
         editor::keymap::bind_keys(cx);
         editor::image::bind_keys(cx);
         app::bind_keys(cx);
+        local_file::install(cx);
         settings::load();
         settings::apply_appearance(&settings::prefs().appearance);
         settings::sync_dark(cx);
@@ -141,7 +155,11 @@ fn main() {
         if quick_enabled { quick_note::install(cx); }
         app::set_menus(cx);
         update::init(cx);
-        open_main_window(scripted, cx);
+        let mut paths: Vec<_> = std::env::args_os().skip(1).filter(|p| !p.to_string_lossy().starts_with("-psn_")).map(std::path::PathBuf::from).collect();
+        paths.extend(pending.take());
+        if paths.is_empty() { open_main_window(scripted, cx); }
+        else { local_file::open_paths(&paths, cx); }
+        *open_cx.borrow_mut() = Some(cx.to_async());
         cx.on_window_closed(move |cx| {
             if (!quick_enabled || !cfg!(target_os = "macos")) && cx.windows().is_empty() {
                 cx.quit();

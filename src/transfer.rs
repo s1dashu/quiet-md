@@ -5,7 +5,7 @@
 
 use crate::app::Workspace;
 use crate::settings::display_title;
-use crate::model::{Block, BlockKind, Document, RichText};
+use crate::model::Document;
 use crate::printing::{self, Job};
 use crate::theme::Theme;
 use crate::trash::{close_button, dialog, primary_button, scrim, secondary_button};
@@ -19,7 +19,7 @@ pub struct ExportMd {
     pub all: bool,
 }
 
-const MARKDOWN_EXTS: [&str; 4] = ["md", "markdown", "mark", "txt"];
+const MARKDOWN_EXTS: [&str; 5] = ["md", "mdx", "markdown", "mark", "txt"];
 
 fn downloads() -> PathBuf {
     std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Downloads")).unwrap_or_default()
@@ -89,68 +89,6 @@ pub(crate) fn radio(on: bool) -> Div {
         .when(!on, |d| d.border_1().border_color(Theme::todo_box()).bg(crate::theme::raised(Theme::bg_body())))
 }
 
-/// Percent-escapes in a Markdown link (`%20` and friends).
-fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'%'
-            && i + 2 < b.len()
-            && let Some(v) = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())
-        {
-            out.push(v);
-            i += 3;
-            continue;
-        }
-        out.push(b[i]);
-        i += 1;
-    }
-    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
-}
-
-/// Relative and `file://` image links of an imported file, made absolute.
-fn resolve_images(blocks: &mut [Block], base: &Path) {
-    for b in blocks.iter_mut() {
-        resolve_images(&mut b.children, base);
-        if let BlockKind::Table(t) = &mut b.kind {
-            for cell in t.rows.iter_mut().flatten() {
-                resolve_images(&mut cell.blocks, base);
-            }
-        }
-        let BlockKind::Image { src, .. } = &mut b.kind else { continue };
-        if src.starts_with("http://") || src.starts_with("https://") || src.starts_with("data:") {
-            continue;
-        }
-        let path = match src.strip_prefix("file://") {
-            Some(p) => PathBuf::from(percent_decode(p)),
-            None => base.join(percent_decode(src)),
-        };
-        *src = path.to_string_lossy().to_string();
-    }
-}
-
-/// A Markdown / TXT file as a page: titled after the file, its leading
-/// `# 标题` dropped when it repeats the name.
-pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
-    let bytes = std::fs::read(path)?;
-    let text = String::from_utf8_lossy(&bytes);
-    let text = text.trim_start_matches('\u{feff}');
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim().to_string();
-    let off = crate::paste::Off { file: true, ..Default::default() };
-    let mut blocks = crate::paste::markdown_to_blocks(text, off);
-    if blocks.first().is_some_and(|b| matches!(b.kind, BlockKind::Heading { level: 1, .. }) && b.text.text.trim() == stem) {
-        blocks.remove(0);
-    }
-    if let Some(dir) = path.parent() {
-        resolve_images(&mut blocks, dir);
-    }
-    crate::editor::image::localize_pasted_images(&mut blocks);
-    if blocks.is_empty() {
-        blocks.push(Block::text(""));
-    }
-    Ok(Document { title: RichText::plain(stem), icon: None, cover: None, blocks })
-}
 
 impl Workspace {
     fn close_menus(&mut self) {
@@ -291,7 +229,10 @@ impl Workspace {
         for p in paths {
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
             let made = match ext.as_str() {
-                e if MARKDOWN_EXTS.contains(&e) => markdown_document(p).map_err(anyhow::Error::from).and_then(|doc| self.store.create_from(&doc)),
+                e if MARKDOWN_EXTS.contains(&e) => crate::markdown_file::read(p, true).map_err(anyhow::Error::from).and_then(|mut doc| {
+                    crate::editor::image::localize_pasted_images(&mut doc.blocks);
+                    self.store.create_from(&doc)
+                }),
                 "xml" => self.store.import(p),
                 _ => Err(anyhow::anyhow!("文件格式不支持")),
             };
@@ -420,29 +361,5 @@ impl Workspace {
         self.export_md = Some(ExportMd { id, all: true });
         self.export_markdown(window, cx);
         eprintln!("export-safety: HTML rejected outside file; Markdown export dispatched");
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::{BlockKind, markdown_document, percent_decode};
-
-    #[test]
-    fn imports_markdown_file() {
-        let dir = std::env::temp_dir().join(format!("fdl-import-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("周报.md");
-        std::fs::write(&path, "\u{feff}# 周报\n\n第一段\n\n- a\n- b\n\n![图](https://e.com/a.png)\n\n## 小结\n").unwrap();
-        let doc = markdown_document(&path).unwrap();
-        assert_eq!(doc.title.text, "周报");
-        let kinds: Vec<_> = doc.blocks.iter().map(|b| std::mem::discriminant(&b.kind)).collect();
-        assert_eq!(kinds.len(), 5);
-        assert_eq!(doc.blocks[0].text.text, "第一段");
-        assert!(matches!(doc.blocks[1].kind, BlockKind::Bullet));
-        assert!(matches!(&doc.blocks[3].kind, BlockKind::Image { src, .. } if src == "https://e.com/a.png"));
-        assert!(matches!(doc.blocks[4].kind, BlockKind::Heading { level: 2, .. }));
-        assert_eq!(percent_decode("a%20b%E5%9B%BE.png"), "a b图.png");
-        let _ = std::fs::remove_dir_all(dir);
     }
 }
