@@ -108,7 +108,7 @@ use crate::model::{ButtonAction, InlineButton};
 use crate::input::{TextField, TextFieldEvent};
 use crate::model::BlockId;
 use crate::editor_theme::{self as theme, Theme};
-use crate::editor_ui::{ROW_RADIUS, TipExt, ToastKind, icon, panel, popover};
+use crate::editor_ui::{MENU_INSET, MENU_PAD_Y, MENU_ROW_H, ROW_RADIUS, TipExt, ToastKind, icon, menu, panel, popover};
 use gpui::prelude::FluentBuilder;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -120,7 +120,7 @@ const PANEL_W: f32 = 270.;
 const MAX_TEXT: usize = 200;
 /// The type submenu of the slash / "+" menu, built like the insert panel it
 /// hangs off: 8 + its 32pt title + two 32pt rows + 8.
-pub const TYPE_MENU_H: f32 = 8. + 32. + 32. * 2. + 8.;
+pub const TYPE_MENU_H: f32 = MENU_PAD_Y + 32. + 32. * 2. + MENU_PAD_Y;
 /// Rows of the 执行操作 list.
 const ACTION_ROW_H: f32 = 26.;
 /// The actions a new button can take (关注文档更新 needs the cloud).
@@ -353,7 +353,7 @@ impl Editor {
                     .hover(|s| s.bg(Theme::fill_hover_strong()))
                     .active(|s| s.bg(Theme::fill_pressed()))
                     .tip_above(crate::settings::text("编辑"), None)
-                    .child(icon("pen-line", 18., Theme::text_code()))
+                    .child(icon("pen-line", 18., Theme::icon()))
                     .on_click(cx.listener(move |e, _, window, cx| e.open_button_panel(at_, window, cx))),
             );
         Some(at(self.rel(point(r.center().x - px(w / 2.), r.top() - px(4.))), Corner::BottomLeft, el))
@@ -564,7 +564,7 @@ impl Editor {
             .cursor_pointer()
             .child(canvas(move |b, _, _| select_cell.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
             .child(div().flex_1().text_size(px(13.)).line_height(px(20.)).child(crate::settings::text(p.preview.action.label())))
-            .child(div().ml(px(8.)).child(icon("chevron-down", 12., Theme::text_caption())))
+            .child(div().ml(px(8.)).child(icon("chevron-down", 12., Theme::icon())))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|e, _, _, cx| {
@@ -665,18 +665,18 @@ impl Editor {
         let cur = p.preview.action;
         // The select's list: a popover with 26pt rows, a grey hover,
         // the current choice in the accent with a check.
-        let mut list = popover().w(a.size.width).py(px(5.)).text_size(px(13.)).occlude();
+        let mut list = menu().w(a.size.width).py(px(MENU_PAD_Y)).text_size(px(13.)).occlude();
         for (i, act) in ACTIONS.into_iter().enumerate() {
             let on = act == cur;
             list = list.child(
                 div()
                     .id(("btn-action-opt", i))
-                    .mx(px(5.))
+                    .mx(px(MENU_INSET))
                     .h(px(ACTION_ROW_H))
                     .px(px(8.))
                     .flex()
                     .items_center()
-                    .rounded(px(ROW_RADIUS))
+                    .rounded(px(crate::ui::ROW_RADIUS))
                     .line_height(px(20.))
                     .cursor_pointer()
                     .hover(|s| s.bg(Theme::fill_hover()))
@@ -692,7 +692,7 @@ impl Editor {
                     ),
             );
         }
-        let h = 10. + 2. + ACTION_ROW_H * ACTIONS.len() as f32;
+        let h = 2. * MENU_PAD_Y + 2. + ACTION_ROW_H * ACTIONS.len() as f32;
         let vh = f32::from(window.viewport_size().height);
         let below = f32::from(a.bottom()) + 4.;
         let y = if below + h > vh - 8. { f32::from(a.top()) - 4. - h } else { below };
@@ -708,26 +708,27 @@ impl Editor {
     pub(super) fn button_type_menu(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         // An editor list popover, like the insert panel: the menu shell,
         // a small secondary title, 32pt rows with a grey hover, 16pt glyphs.
-        let mut el = popover()
+        let mut el = menu()
             .id("btn-type-menu")
             .occlude()
             .w(px(200.))
-            .px(px(8.)).py(px(crate::editor_ui::MENU_PAD_Y))
+            .py(px(MENU_PAD_Y))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().h(px(32.)).px(px(8.)).flex().items_center().text_size(px(12.)).text_color(Theme::text_caption()).child(crate::settings::text("选择按钮类型")));
+            .child(div().h(px(32.)).px(px(MENU_INSET + 8.)).flex().items_center().text_size(px(12.)).text_color(Theme::text_caption()).child(crate::settings::text("选择按钮类型")));
         for (i, act) in ACTIONS.into_iter().enumerate() {
             el = el.child(
                 div()
                     .id(("btn-type", i))
-                    .h(px(32.))
+                    .h(px(MENU_ROW_H))
+                    .mx(px(MENU_INSET))
                     .px(px(8.))
                     .flex()
                     .items_center()
-                    .gap(px(12.))
-                    .rounded(px(ROW_RADIUS))
+                    .gap(px(8.))
+                    .rounded(px(crate::ui::ROW_RADIUS))
                     .cursor_pointer()
                     .hover(|s| s.bg(Theme::fill_hover()))
-                    .child(icon(action_icon(act), 16., Theme::text_code()))
+                    .child(icon(action_icon(act), 16., Theme::icon()))
                     .child(div().text_size(px(13.)).line_height(px(20.)).child(crate::settings::text(act.label())))
                     .on_mouse_down(
                         MouseButton::Left,

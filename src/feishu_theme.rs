@@ -108,8 +108,11 @@ pub fn shadow_s4_down() -> Vec<BoxShadow> {
     vec![shadow(0.04, 8., 24., 8.), shadow(0.04, 6., 12., 0.), shadow(0.06, 4., 8., -8.)]
 }
 
-pub const UI_FONT: &str = ".SystemUIFont";
+pub const UI_FONT: &str = crate::theme::UI_FONT;
+#[cfg(not(target_os = "linux"))]
 pub const MONO_FONT: &str = "Menlo";
+#[cfg(target_os = "linux")]
+pub const MONO_FONT: &str = crate::theme::MONO_FONT;
 
 pub struct Theme;
 
@@ -284,3 +287,7 @@ impl Theme { pub fn todo_box() -> Hsla { ca(craft::N1000, 0.22) } }
 impl Theme { pub fn code_text() -> Hsla { c(0x4c4d50) } }
 
 pub fn font_swatch(name: Option<&str>) -> Hsla { name.and_then(text_color).unwrap_or(Theme::text()) }
+
+impl Theme {
+    pub fn icon() -> gpui::Hsla { if crate::theme::dark() { Self::text_code() } else { crate::theme::Theme::icon() } }
+}

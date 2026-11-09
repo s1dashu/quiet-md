@@ -199,11 +199,12 @@ pub fn close_button(id: &'static str) -> Stateful<Div> {
 pub const MENU_RADIUS: f32 = 12.;
 pub const ROW_RADIUS: f32 = 6.;
 
-/// A menu row like a native menu's: 26 tall, 13pt label, 16pt glyph;
-/// hovering paints the accent. `group` names the row so its glyph
-/// ([`menu_glyph`]) and label ([`menu_label`]) can turn white with it.
+/// A menu row: 32 tall, 13pt label, 16pt glyph; hovering lays the quiet
+/// fill the editor's menus use, and text and glyph keep their colours.
 pub const MENU_ROW_H: f32 = 32.;
 pub const MENU_PAD_Y: f32 = 6.;
+/// How far a menu row sits in from the menu's sides.
+pub const MENU_INSET: f32 = 5.;
 
 pub fn menu_row(id: impl Into<ElementId>, group: SharedString) -> Stateful<Div> {
     div()
@@ -211,7 +212,7 @@ pub fn menu_row(id: impl Into<ElementId>, group: SharedString) -> Stateful<Div> 
         .group(group)
         .flex_none()
         .h(px(MENU_ROW_H))
-        .mx(px(5.))
+        .mx(px(MENU_INSET))
         .px(px(8.))
         .flex()
         .items_center()
@@ -221,27 +222,17 @@ pub fn menu_row(id: impl Into<ElementId>, group: SharedString) -> Stateful<Div> 
         .text_size(px(13.))
         .line_height(px(20.))
         .text_color(Theme::text())
-        .hover(|s| s.bg(Theme::menu_highlight()))
+        .hover(|s| s.bg(Theme::fill_hover()))
 }
 
-/// A [`crate::ui::menu_row`] label that turns `hover` (white) while its row
-/// is highlighted. GPUI fixes a text's colour when it lays the text out,
-/// before hover is known, so a hover text colour on the row never reaches
-/// the label; instead a `hover` copy lies over it and the two swap through
-/// `group_hover` opacity, which is resolved at paint.
-pub fn menu_label(label: impl Into<SharedString>, group: SharedString, hover: Hsla) -> Div {
-    let label: SharedString = crate::settings::label(label.into()).into();
-    div()
-        .relative()
-        .whitespace_nowrap()
-        .child(div().group_hover(group.clone(), |s| s.opacity(0.)).child(label.clone()))
-        .child(div().absolute().top_0().left_0().text_color(hover).opacity(0.).group_hover(group, |s| s.opacity(1.)).child(crate::settings::label(label)))
+/// A [`menu_row`]'s label; it keeps its colour on hover (the row's fill
+/// shows it). `_group` and `_hover` are left from the accent highlight.
+pub fn menu_label(label: impl Into<SharedString>, _group: SharedString, _hover: Hsla) -> Div {
+    div().whitespace_nowrap().child(crate::settings::label(label.into()))
 }
 
-/// Glyph of a [`menu_row`]: secondary, white while its row is hovered.
-pub fn menu_glyph(name: &str, size: f32, group: SharedString) -> Svg {
-    icon(name, size, Theme::text_code()).group_hover(group, |s| s.text_color(gpui::white()))
-}
+/// Glyph of a [`menu_row`]: secondary, on hover too.
+pub fn menu_glyph(name: &str, size: f32, _group: SharedString) -> Svg { icon(name, size, Theme::icon()) }
 
 /// Tooltip bubble: the dark rounded tip (12pt white on near-black, radius 7, arrow).
 pub struct Tooltip {
@@ -417,16 +408,25 @@ pub trait TitleBarExt: InteractiveElement + Sized {
 
 impl<E: InteractiveElement> TitleBarExt for E {}
 
-pub(crate) const WINDOW_CONTROLS_W: f32 = if cfg!(target_os = "windows") { 163. } else { 0. };
+pub(crate) const WINDOW_CONTROLS_W: f32 = if cfg!(any(target_os = "windows", target_os = "linux")) { 163. } else { 0. };
 pub(crate) fn header_right_inset() -> f32 {
-    if cfg!(target_os = "windows") { WINDOW_CONTROLS_W } else { (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2. }
+    if cfg!(any(target_os = "windows", target_os = "linux")) { WINDOW_CONTROLS_W } else { (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2. }
 }
 
 pub(crate) fn window_controls(window: &Window) -> Option<Div> {
-    if !cfg!(target_os = "windows") { return None; }
+    if !cfg!(any(target_os = "windows", target_os = "linux")) { return None; }
+    // Windows must receive mouse-down to arm its native caption buttons.
     let button = |id: &'static str, area: WindowControlArea, label: &'static str| {
         div().id(id).size(px(crate::app::HEADER_ACTIONS_H)).mx(px(7.)).rounded(px(8.)).flex_none().flex().items_center().justify_center().cursor_pointer()
-            .occlude().window_control_area(area).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed())).tip(label, None)
+            .occlude()
+            .when(cfg!(target_os = "linux"), |d| d.no_drag())
+            .when(cfg!(target_os = "windows"), |d| d.window_control_area(area))
+            .when(cfg!(target_os = "linux"), |d| d.on_click(move |_, window, cx| match area {
+                WindowControlArea::Min => window.minimize_window(),
+                WindowControlArea::Max => window.zoom_window(),
+                WindowControlArea::Close => window.dispatch_action(Box::new(crate::app::CloseWindow), cx),
+                WindowControlArea::Drag => {},
+            })).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed())).tip(label, None)
     };
     let maximized = window.is_maximized();
     // Native hit-test areas preserve Snap Layouts and the normal WM_CLOSE save guard.

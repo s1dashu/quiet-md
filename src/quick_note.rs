@@ -20,7 +20,7 @@ pub fn used(_: &str, _: &mut App) {}
 #[cfg(target_os = "macos")]
 pub fn open_last(cx: &mut App) {
     let Some(mut store) = cx.try_global::<crate::shared_store::SharedStore>().cloned() else { return };
-    let entries = store.list();
+    let entries: Vec<_> = store.list().into_iter().filter(|e| e.meta.folder.is_none()).collect();
     let id = cx.try_global::<LastDocument>().and_then(|s| s.0.clone()).filter(|id| entries.iter().any(|e| &e.id == id))
         .or_else(|| entries.iter().max_by_key(|e| e.meta.opened).map(|e| e.id.clone()));
     let Some(id) = id else { return };
@@ -64,6 +64,8 @@ pub fn open_document(document: Option<String>, cx: &mut App) {
     let result = cx.open_window(WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_background: crate::theme::window_background(),
+        app_id: Some(crate::APP_ID.into()),
+        window_decorations: if cfg!(target_os = "linux") { Some(WindowDecorations::Client) } else { None },
         titlebar: Some(TitlebarOptions {
             title: Some(crate::settings::text("Quiet.md · 快速笔记").into()),
             appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),

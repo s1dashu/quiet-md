@@ -562,7 +562,7 @@ impl R<'_> {
                 .pl(px(pad))
                 .cursor_pointer()
                 .child(
-                    icon("triangle-down", 16., Theme::text_caption())
+                    icon("triangle-down", 16., Theme::icon())
                         .group_hover("fold-handler", |s| s.text_color(Theme::text()))
                         .with_transformation(Transformation::rotate(radians(-std::f32::consts::FRAC_PI_2 * turn))),
                 )
@@ -834,7 +834,7 @@ impl R<'_> {
                 .gap(px(0.))
                 .text_color(Theme::text())
                 .child(div().px(px(4.)).child(SharedString::from(lang.to_string())))
-                .child(icon("caret-down", 14., Theme::text_placeholder()))
+                .child(icon("caret-down", 14., Theme::icon()))
                 .child(sep(-8.))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -885,7 +885,7 @@ impl R<'_> {
                     .items_center()
                     .justify_center()
                     .hover(|s| s.bg(Theme::fill_hover()))
-                    .child(icon(if folded { "code-fold-right" } else { "code-fold-down" }, 12., Theme::text_caption())),
+                    .child(icon(if folded { "code-fold-right" } else { "code-fold-down" }, 12., Theme::icon())),
             )
             .on_mouse_down(
                 MouseButton::Left,
@@ -960,7 +960,7 @@ impl R<'_> {
                             .when(!folded, |d| {
                                 d.child(
                                     header_btn("code-wrap")
-                                        .child(icon("wrap-text", 14., Theme::text_caption()))
+                                        .child(icon("wrap-text", 14., Theme::icon()))
                                         .child(if wrap { crate::settings::text("取消换行") } else { crate::settings::text("自动换行") })
                                         .child(sep(-3.))
                                         .on_mouse_down(
@@ -980,7 +980,7 @@ impl R<'_> {
                             })
                             .child(
                                 header_btn("code-copy")
-                                    .child(icon("copy", 14., Theme::text_caption()))
+                                    .child(icon("copy", 14., Theme::icon()))
                                     .child(crate::settings::tr("复制", "Copy"))
                                     .on_mouse_down(
                                         MouseButton::Left,
@@ -1885,7 +1885,7 @@ fn text_block_feishu(&self, b: &Block, env: Env, cx: &mut Context<Editor>) -> An
                         .flex()
                         .items_center()
                         .whitespace_nowrap()
-                        .font_family("Helvetica Neue")
+                        .font_family(crate::theme::NUMERAL_FONT)
                         .font_weight(weight)
                         .text_size(px(size))
                         .text_color(Theme::primary())
@@ -1931,7 +1931,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 .px(px(2.))
                 .mr(px(6.))
                 .whitespace_nowrap()
-                .font_family("Helvetica Neue")
+                .font_family(crate::theme::NUMERAL_FONT)
                 .text_size(px(spec.size))
                 .text_color(Theme::primary())
                 .child(core::ordered_marker(core::ordered_number(siblings, idx), env.depth))
@@ -2082,7 +2082,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                 .gap(px(0.))
                 .text_color(Theme::text())
                 .child(div().px(px(4.)).child(SharedString::from(lang.to_string())))
-                .child(icon("caret-down", 14., Theme::text_placeholder()))
+                .child(icon("caret-down", 14., Theme::icon()))
                 .child(sep(-8.))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -2133,7 +2133,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                     .items_center()
                     .justify_center()
                     .hover(|s| s.bg(Theme::fill_hover()))
-                    .child(icon(if folded { "code-fold-right" } else { "code-fold-down" }, 12., Theme::text_caption())),
+                    .child(icon(if folded { "code-fold-right" } else { "code-fold-down" }, 12., Theme::icon())),
             )
             .on_mouse_down(
                 MouseButton::Left,
@@ -2193,7 +2193,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                             .when(!folded, |d| {
                                 d.child(
                                     header_btn("code-wrap")
-                                        .child(icon("wrap-text", 16., Theme::text_caption()))
+                                        .child(icon("wrap-text", 16., Theme::icon()))
                                         .child(if wrap { crate::settings::text("取消换行") } else { crate::settings::text("自动换行") })
                                         .child(sep(-9.))
                                         .on_mouse_down(
@@ -2213,7 +2213,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
                             })
                             .child(
                                 header_btn("code-copy")
-                                    .child(icon("copy", 16., Theme::text_caption()))
+                                    .child(icon("copy", 16., Theme::icon()))
                                     .child(crate::settings::tr("复制", "Copy"))
                                     .on_mouse_down(
                                         MouseButton::Left,

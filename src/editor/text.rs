@@ -717,6 +717,13 @@ impl Element for RichTextElement {
         let state: Rc<RefCell<Option<Prepared>>> = Rc::new(RefCell::new(None));
         let font_size = px(self.spec.size);
         let line_height = px(self.spec.line_height);
+        // Linux fallback fonts change during IME composition; keep the title baseline stable.
+        let title_metrics = if cfg!(target_os = "linux") && self.id == crate::editor::core::TITLE {
+            let ts = window.text_system();
+            let id = ts.resolve_font(&font_for(&self.spec, &Marks::default()));
+            // GPUI Linux font metrics use a signed descent; shaped line layouts use a positive distance.
+            Some((ts.ascent(id, font_size), px(f32::from(ts.descent(id, font_size)).abs())))
+        } else { None };
         let mut eq_src: Vec<(usize, ObjSrc)> = vec![];
         let (text, runs) = if self.text.is_empty() {
             match &self.placeholder {
@@ -833,6 +840,13 @@ impl Element for RichTextElement {
                 let line_eqs: Vec<&EqGeom> = eqs.iter().map(|e| &**e).filter(|e| e.ix >= start && e.ix < start + len).collect();
                 if custom {
                     adjust_line(&mut l, spacing, &line_eqs, start, wrap_width);
+                }
+                if let Some((ascent, descent)) = title_metrics {
+                    let src = &l.unwrapped_layout;
+                    let layout = LineLayout { font_size: src.font_size, width: src.width, ascent, descent, runs: src.runs.clone(), len: src.len };
+                    let wrapped = WrappedLineLayout { unwrapped_layout: std::sync::Arc::new(layout), wrap_boundaries: l.wrap_boundaries().into(), wrap_width: l.wrap_width };
+                    let target: &mut std::sync::Arc<WrappedLineLayout> = &mut l;
+                    *target = std::sync::Arc::new(wrapped);
                 }
                 // Row heights: the line box grows to contain equation boxes.
                 let layout = &l.unwrapped_layout;
@@ -968,6 +982,13 @@ impl Element for RichTextElement {
                 }
             }
         }
+        // Text backgrounds sit below selection; glyphs are painted above both.
+        let dx = if self.text.is_empty() { px(self.placeholder_dx) } else { px(0.) };
+        let o = point(bounds.left() + dx, bounds.top());
+        for (hi, (_, line)) in layout.lines.iter().enumerate() {
+            let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
+            let _ = line.paint_background_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
+        }
         if let Some(sel) = &self.selection {
             let rects = if self.text.is_empty() {
                 vec![Bounds::new(bounds.origin, size(px(5.), lh))]
@@ -1014,11 +1035,8 @@ impl Element for RichTextElement {
                 window.paint_quad(fill(eq.view, bg).corner_radii(px(4.)));
             }
         }
-        let dx = if self.text.is_empty() { px(self.placeholder_dx) } else { px(0.) };
         for (hi, (_, line)) in layout.lines.iter().enumerate() {
             let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
-            let o = point(bounds.left() + dx, bounds.top());
-            let _ = line.paint_background_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
             let _ = line.paint_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
         }
         for eq in prepaint.iter() {

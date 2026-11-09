@@ -1,6 +1,8 @@
 #![recursion_limit = "512"]
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+pub(crate) const APP_ID: &str = "com.s1dashu.quietmd";
+
 mod app;
 mod shared_store;
 mod quick_note;
@@ -17,6 +19,7 @@ mod devtools {
     pub fn scripted() -> bool { false }
     pub fn start(_: &mut gpui::Window, _: &mut gpui::App) {}
     pub fn take_pick() -> Option<Vec<std::path::PathBuf>> { None }
+    pub fn file_drag() -> bool { false }
 }
 mod docinfo;
 mod docmenu;
@@ -35,6 +38,11 @@ mod native_header;
 mod printing;
 mod search;
 mod sidebar;
+mod local_files;
+mod sidebar_drag;
+mod home_folder;
+mod folders;
+mod file_history;
 mod settings;
 mod themes;
 mod shortcuts;
@@ -81,6 +89,8 @@ fn open_main_window(scripted: bool, cx: &mut App) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_background: crate::theme::window_background(),
+            app_id: Some(crate::APP_ID.into()),
+            window_decorations: if cfg!(target_os = "linux") { Some(WindowDecorations::Client) } else { None },
             titlebar: Some(TitlebarOptions {
                 title: Some("Quiet.md".into()),
                 appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
@@ -112,6 +122,10 @@ fn main() {
         logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
     }
     let app = Application::new().with_assets(assets::Assets);
+    // Markdown files opened from the Finder or the command line are edited in place.
+    let incoming = local_files::Incoming::from_args();
+    let urls = incoming.clone();
+    app.on_open_urls(move |u| urls.push_urls(u));
     // macOS keeps running after ⌘W closes the last window (quick notes stay
     // available); clicking the Dock icon then brings the main window back.
     app.on_reopen(|cx| if cx.windows().is_empty() { open_main_window(false, cx); });
@@ -119,6 +133,7 @@ fn main() {
         #[cfg(target_os = "macos")]
         set_app_icon();
         editor::math::load_fonts(cx);
+        editor::image::init_pictures(cx);
         input::bind_keys(cx);
         editor::keymap::bind_keys(cx);
         editor::image::bind_keys(cx);
@@ -138,6 +153,7 @@ fn main() {
         app::set_menus(cx);
         update::init(cx);
         open_main_window(scripted, cx);
+        incoming.deliver(cx);
         cx.on_window_closed(move |cx| {
             if (!quick_enabled || !cfg!(target_os = "macos")) && cx.windows().is_empty() {
                 cx.quit();

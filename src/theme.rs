@@ -24,7 +24,8 @@ pub fn glass() -> bool {
         static GLASS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *GLASS.get_or_init(|| windows_build().is_some_and(|b| b >= 22621))
     }
-    #[cfg(not(target_os = "windows"))] { true }
+    #[cfg(target_os = "linux")] { false }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))] { true }
 }
 
 #[cfg(target_os = "windows")]
@@ -297,12 +298,18 @@ pub fn shadow_button() -> Vec<BoxShadow> {
     vec![shadow(0.05, 1., 1.5, 0.)]
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub const UI_FONT: &str = ".SystemUIFont";
-/// SF Mono.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const UI_FONT: &str = "Noto Sans";
+pub const NUMERAL_FONT: &str = if cfg!(any(target_os = "macos", target_os = "windows")) { "Helvetica Neue" } else { UI_FONT };
+/// Platform monospace font.
 #[cfg(target_os = "macos")]
 pub const MONO_FONT: &str = ".AppleSystemUIFontMonospaced";
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
 pub const MONO_FONT: &str = "Consolas";
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub const MONO_FONT: &str = "Noto Sans Mono";
 
 pub struct Theme;
 
@@ -379,12 +386,19 @@ impl Theme {
     pub fn sidebar_hover() -> Hsla { ca(craft::N1000, 0.045) }
     /// Selected sidebar row (measured #DEDEDF).
     pub fn sidebar_selected() -> Hsla { ca(craft::N1000, 0.072) }
+    /// Dragging in the sidebar: the receiving folder's wash, the
+    /// slot the row will land in, and the glow a landed row fades out from.
+    pub fn sidebar_drop() -> Hsla { ca(craft::N1000, 0.05) }
+    pub fn sidebar_drop_slot() -> Hsla { ca(craft::N1000, 0.08) }
+    /// Renaming in the sidebar: the field's thin edge and the soft focus glow around it.
+    pub fn sidebar_field_edge() -> Hsla { ca(craft::B500, 0.6) }
+    pub fn sidebar_field_ring() -> Hsla { ca(craft::B500, 0.16) }
+    pub fn sidebar_landed() -> Hsla { ca(craft::N1000, 0.07) }
     /// Section headers on the sidebar.
     pub fn sidebar_section() -> Hsla { c(0x333739) }
-    /// Chrome glyphs (sidebar rows, header buttons): lighter than text so
-    /// they don't pull the eye from the labels and the page. Inferred: the
-    /// SF Symbols sit near secondary label; this is between N700 and N600.
-    pub fn icon() -> Hsla { ca(craft::N900, 0.6) }
+    /// Normal monochrome icons: #191919 measured from the supplied Claude Code screenshot.
+    /// Keep the existing adaptive tint in dark mode.
+    pub fn icon() -> Hsla { if dark() { ca(craft::N900, 0.6) } else { rgb(0x191919).into() } }
     /// Line above the sidebar footer (1pt, black 3.5%, #E8E8E9 on the sidebar).
     /// Line under the page title.
     /// White pill buttons on the note (back / + / share): hairline.
@@ -401,7 +415,7 @@ impl Theme {
     /// Captions under media and code (weight 300).
     #[allow(dead_code)]
     pub fn caption() -> Hsla { c(0x7e8287) }
-    /// Menu row highlight (native NSMenu: accent, white label).
+    /// The old accent menu highlight; kept as a theme token, menus now hover with `fill_hover`.
     pub fn menu_highlight() -> Hsla { c(craft::B500) }
     /// Menus / popovers body (quick-entry & native menus).
     pub fn popover_bg() -> Hsla { c(0xfafafa) }
@@ -507,7 +521,8 @@ pub const SIDEBAR_MAX: f32 = 800.0;
 /// The editor keeps at least this much room when the sidebar is dragged wider.
 pub const SIDEBAR_MIN_CONTENT: f32 = 540.0;
 /// Left inset of the header controls that sit beside the macOS traffic lights.
-pub const TRAFFIC_LIGHTS_W: f32 = if cfg!(target_os = "macos") { 92.0 } else { 16.0 };
+// On PC, 12pt padding + 4pt margin + half the 28pt button aligns with the sidebar icon at 30pt.
+pub const TRAFFIC_LIGHTS_W: f32 = if cfg!(target_os = "macos") { 92.0 } else { 12.0 };
 
 /// (font size, line height, margin top, margin bottom) per block.
 pub struct BlockMetrics {
