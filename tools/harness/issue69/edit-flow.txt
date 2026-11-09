@@ -1,0 +1,51 @@
+move 300 600
+wait 1000
+click 433 186
+math-check {"active":true,"source":"x^2","focus":true,"head":0}
+shot source-in-place
+key cmd-right
+math-check {"head":3,"reset_renders":true}
+type +y
+math-check {"source":"x^2+y","focus":true,"renders":0,"head":5}
+key shift-left shift-left
+type -z
+math-check {"source":"x^2-z","focus":true,"renders":0}
+mark ni
+math-check {"source":"x^2-zni","marked":true,"focus":true}
+mark 你
+math-check {"source":"x^2-z你","marked":true,"focus":true}
+commit 中文
+math-check {"source":"x^2-z中文","marked":false,"focus":true,"contains":"<latex>x^2-z中文</latex>","renders":0}
+key cmd-z
+math-check {"active":false,"contains":"<latex>x^2</latex>","focus":true}
+key cmd-shift-z
+math-check {"active":false,"contains":"<latex>x^2-z中文</latex>"}
+click 433 186
+key cmd-a
+type x_t
+math-check {"active":true,"source":"x_t","focus":true}
+key escape
+math-check {"active":false,"contains":"<latex>x_t</latex>"}
+key cmd-down
+type $$
+key left
+type X_t
+math-check {"active":true,"source":"X_t","head":3,"focus":true}
+key right
+math-check {"active":false,"contains":"<latex>X_t</latex>","focus":true}
+key left
+type +1
+math-check {"active":true,"source":"X_t+1","focus":true}
+key right
+math-check {"active":false,"contains":"<latex>X_t+1</latex>"}
+key cmd-s
+wait 800
+shot rendered-after-edit
+click 433 186
+math-check {"active":true,"focus":true}
+key cmd-f
+wait 100
+math-check {"active":false,"focus":false}
+key escape
+wait 100
+math-check {"active":false,"focus":true}

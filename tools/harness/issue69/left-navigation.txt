@@ -1,0 +1,108 @@
+move 300 600
+wait 1000
+click 500 186
+key cmd-right
+key left left left left
+math-check {"active":false,"model_head":12}
+key left left
+math-check {"active":false,"model_head":10}
+key left
+math-check {"active":true,"origin":7,"head":3}
+key cmd-a
+key backspace
+math-check {"active": true, "source": "", "head": 0}
+key escape
+key right right
+key left left
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "origin": 7, "head": 0}
+key left
+math-check {"active": false, "model_head": 7}
+key left
+math-check {"active": false, "model_head": 6}
+key right
+math-check {"active": true, "head": 0, "origin": 7}
+key right
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "source": ""}
+key cmd-a
+type x
+math-check {"active": true, "source": "x", "head": 1}
+key escape
+key right right
+key left left
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "origin": 7, "head": 1}
+key left left
+math-check {"active": false, "model_head": 7}
+key left
+math-check {"active": false, "model_head": 6}
+key right
+math-check {"active": true, "head": 0, "origin": 7}
+key right right
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "source": "x"}
+key cmd-a
+type x^2
+math-check {"active": true, "source": "x^2", "head": 3}
+key escape
+key right right
+key left left
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "origin": 7, "head": 3}
+key left left left left
+math-check {"active": false, "model_head": 7}
+key left
+math-check {"active": false, "model_head": 6}
+key right
+math-check {"active": true, "head": 0, "origin": 7}
+key right right right right
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "source": "x^2"}
+key cmd-a
+type 中文😀x
+math-check {"active": true, "source": "中文😀x", "head": 11}
+key escape
+key right right
+key left left
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "origin": 7, "head": 11}
+key left left left left left
+math-check {"active": false, "model_head": 7}
+key left
+math-check {"active": false, "model_head": 6}
+key right
+math-check {"active": true, "head": 0, "origin": 7}
+key right right right right right
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "source": "中文😀x"}
+key cmd-a
+type \frac{中文}{😀}
+math-check {"active": true, "source": "\\frac{中文}{😀}", "head": 19}
+key escape
+key right right
+key left left
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "origin": 7, "head": 19}
+key left left left left left left left left left left left left left
+math-check {"active": false, "model_head": 7}
+key left
+math-check {"active": false, "model_head": 6}
+key right
+math-check {"active": true, "head": 0, "origin": 7}
+key right right right right right right right right right right right right right
+math-check {"active": false, "model_head": 10}
+key left
+math-check {"active": true, "source": "\\frac{中文}{😀}"}
+key escape
+key cmd-s
+wait 800

@@ -12,6 +12,7 @@ mod find;
 mod gap;
 mod grid;
 pub mod image;
+mod inline_math;
 pub mod keymap;
 mod link;
 pub mod links;

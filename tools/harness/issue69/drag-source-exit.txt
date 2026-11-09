@@ -1,0 +1,9 @@
+move 300 600
+wait 1000
+click 433 186
+math-check {"active":true,"source":"x^2","focus":true}
+wait 100
+drag 426 186 440 170
+math-check {"active":false,"model_head":7,"model_anchor":7}
+key left
+math-check {"focus":true,"model_head":6,"contains":"<latex>x^2</latex>"}

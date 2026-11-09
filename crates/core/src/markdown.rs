@@ -55,6 +55,11 @@ pub fn export(doc: &Document, opts: &Options) -> Export {
     Export { text: out, files: w.files, missing: w.missing }
 }
 
+/// Clipboard fragments have no export-only final newline or asset copying.
+pub fn clipboard_text(blocks: &[Block]) -> String {
+    Writer { opts: &Options::default(), files: vec![], missing: 0 }.blocks(blocks)
+}
+
 /// One top-level block as written, and the separator before it.
 struct Piece {
     sep: &'static str,
@@ -479,7 +484,7 @@ fn table(t: &Table, files: &mut impl FnMut(&FileBlock) -> Option<String>) -> Str
     let cols = t.rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
     let mut cell = |c: &TableCell| {
         let parts: Vec<String> = c.blocks.iter().map(|b| inline(&b.text, files)).filter(|s| !s.is_empty()).collect();
-        parts.join("<br>").replace('|', "\\|")
+        parts.join("<br>").replace('\n', "<br>").replace('|', "\\|")
     };
     let mut row = |r: &Vec<TableCell>| {
         let mut cells: Vec<String> = r.iter().map(&mut cell).collect();
@@ -517,6 +522,7 @@ fn escape(s: &str) -> String {
 
 #[derive(PartialEq, Clone, Default)]
 struct Md {
+    equation: bool,
     bold: bool,
     italic: bool,
     strike: bool,
@@ -530,7 +536,11 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
     let mut runs: Vec<(Md, String)> = vec![];
     for (r, m) in t.spans() {
         let s = match m.inline.as_ref().and_then(Inline::equation) {
-            Some(src) => t.text[r].chars().map(|_| format!("${src}$")).collect(),
+            Some(src) => {
+                let multiline = src.contains('\n');
+                let math = if multiline { format!("$$\n{src}\n$$") } else { format!("${src}$") };
+                t.text[r].chars().map(|_| math.clone()).collect::<Vec<_>>().join(if multiline { "\n\n" } else { " " })
+            },
             None => match &m.inline {
                 Some(Inline { kind: InlineKind::File(f), .. }) => t.text[r].chars().map(|_| f.name.clone()).collect(),
                 Some(obj) => {
@@ -547,6 +557,7 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
         };
         let file_link = m.inline.as_ref().and_then(|obj| match &obj.kind { InlineKind::File(f) => files(f), _ => None });
         let md = Md {
+            equation: m.inline.as_ref().and_then(Inline::equation).is_some(),
             bold: m.bold,
             italic: m.italic,
             strike: m.strike,
@@ -555,24 +566,37 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
             link: file_link.or_else(|| m.link.clone().filter(|url| crate::paste::link_ok(url))),
         };
         match runs.last_mut() {
-            Some((last, text)) if *last == md => text.push_str(&s),
+            Some((last, text)) if *last == md && !md.equation => text.push_str(&s),
             _ => runs.push((md, s)),
         }
     }
     let mut out = String::new();
+    let mut display = false;
+    let mut equation = false;
     for (m, s) in runs {
         if s.is_empty() {
             continue;
         }
+        // Display math needs its own block; adjacent inline formulas need a gap.
+        let multiline = m.equation && s.contains('\n');
+        if !out.is_empty() {
+            if display || multiline { out.push_str("\n\n"); }
+            else if equation && m.equation { out.push(' '); }
+        }
+        display = multiline;
+        equation = m.equation;
+        if multiline { out.push_str(&s); continue; }
         // Emphasis markers must hug the text: keep outer spaces outside.
         let body = s.trim();
         let lead = &s[..s.len() - s.trim_start().len()];
         let trail = &s[s.trim_end().len()..];
         if body.is_empty() {
-            out.push_str(&s);
+            out.push_str(&s.replace('\n', "<br>"));
             continue;
         }
-        let mut x = if m.code {
+        let mut x = if m.equation {
+            body.to_string()
+        } else if m.code {
             let tick = if body.contains('`') { "``" } else { "`" };
             format!("{tick}{body}{tick}")
         } else {
@@ -593,11 +617,11 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
         if let Some(url) = &m.link {
             x = format!("[{x}]({})", url.replace(' ', "%20").replace(')', "%29"));
         }
-        out.push_str(lead);
-        out.push_str(&x);
-        out.push_str(trail);
+        let run = format!("{lead}{x}{trail}");
+        if m.equation { out.push_str(&run); }
+        else { out.push_str(&run.replace('\n', "<br>")); }
     }
-    out.replace('\n', "<br>")
+    out
 }
 
 #[cfg(test)]

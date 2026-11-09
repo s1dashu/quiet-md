@@ -1,0 +1,25 @@
+move 300 600
+wait 1000
+click 500 186
+key cmd-down
+type $$$$
+shot raw-dollars
+click 385 222
+math-check {"active":false,"model_head":2}
+type f(x^2)
+math-check {"active":true,"source":"f(x^2)","head":6,"focus":true}
+key right
+math-check {"active":false,"contains":"<latex>f(x^2)</latex>","renderable":true}
+shot dollars-rendered
+key left
+math-check {"active":true,"source":"f(x^2)","head":6,"origin":0}
+key left left left left left left
+math-check {"active":true,"head":0}
+key left
+math-check {"active":false,"model_head":0,"renderable":true}
+key right
+math-check {"active":true,"head":0}
+key right right right right right right right
+math-check {"active":false,"model_head":3,"renderable":true}
+key cmd-s
+wait 800

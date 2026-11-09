@@ -269,11 +269,19 @@ pub fn units(doc: &Document) -> Vec<Unit> {
     out
 }
 
+pub fn char_boundary(s: &str, offset: usize) -> usize {
+    let mut offset = offset.min(s.len());
+    while !s.is_char_boundary(offset) { offset -= 1; }
+    offset
+}
+
 pub fn prev_grapheme(s: &str, offset: usize) -> usize {
+    let offset = char_boundary(s, offset);
     s[..offset].grapheme_indices(true).next_back().map(|(i, _)| i).unwrap_or(0)
 }
 
 pub fn next_grapheme(s: &str, offset: usize) -> usize {
+    let offset = char_boundary(s, offset);
     s[offset..].graphemes(true).next().map(|g| offset + g.len()).unwrap_or(s.len())
 }
 
@@ -1023,6 +1031,8 @@ impl Core {
 
     /// The LaTeX source of the equation at `p`.
     pub fn equation_source(&self, p: Pos) -> Option<String> {
+        let t = self.text_of(p.block)?;
+        if !t.text.get(p.offset..)?.starts_with(EQUATION) { return None; }
         self.object_at(p)?.equation().map(str::to_string)
     }
 
@@ -2809,6 +2819,40 @@ impl Core {
         true
     }
 
+    /// An enclosing dollar pair around the caret, checked only in its hard line.
+    /// The view opens the source buffer at the returned byte offset.
+    pub fn enclosing_equation_shortcut(&mut self) -> Option<(Pos, usize)> {
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() || !self.markdown_enabled(p.block) { return None; }
+        let t = self.text_of(p.block)?;
+        let start = t.text[..p.offset].rfind('\n').map_or(0, |i| i + 1);
+        let end = t.text[p.offset..].find('\n').map_or(t.len(), |i| p.offset + i);
+        for delim in ["$$", "$"] {
+            let Some(open) = t.text[start..p.offset].rfind(delim).map(|i| start + i) else { continue };
+            let Some(close) = t.text[p.offset..end].find(delim).map(|i| p.offset + i) else { continue };
+            if open + delim.len() > p.offset || close < open + delim.len() { continue; }
+            let src = &t.text[open + delim.len()..close];
+            let range = open..close + delim.len();
+            if src.trim().is_empty() || src.contains(['$', '\u{fffc}'])
+                || t.text[..open].chars().next_back().is_some_and(|c| !c.is_whitespace())
+                || t.text[range.end..].chars().next().is_some_and(|c| !c.is_whitespace())
+                || t.slice(range.clone()).runs.iter().any(|r| r.marks.code || r.marks.inline.is_some())
+            { continue; }
+            let offset = p.offset - open - delim.len();
+            let mut marks = t.marks_at(open + delim.len());
+            marks.inline = Some(crate::docxml::to_inline(InlineKind::Equation(src.to_string())));
+            self.checkpoint(EditKind::Other);
+            self.break_coalescing();
+            let mut ins = RichText::default();
+            ins.push(EQUATION, marks);
+            self.text_mut(p.block)?.replace(range, &ins);
+            let pos = Pos::new(p.block, open);
+            self.sel = Selection::caret(Pos::new(p.block, open + EQUATION.len()));
+            return Some((pos, offset));
+        }
+        None
+    }
+
     /// Inline Markdown, run after each typed character: the closing delimiter
     /// turns `**x**`, `__x__`, `*x*`, `_x_`, `***x***`, `~~x~~`, `~x~`
     /// (underline) and `` `x` `` into marks, in a fixed priority order.
@@ -3099,6 +3143,23 @@ impl Core {
             return self.paste_text(&s);
         }
         self.paste_blocks(blocks);
+    }
+
+    /// Markdown for external consumers, with lossless DocxXML for in-app paste.
+    /// Keep `selected_text` as model text: editing callers use its byte offsets.
+    pub fn clipboard_content(&self) -> Option<(String, String)> {
+        let cells = self.cell_sel.is_some();
+        if !self.in_block_mode() && !cells && self.sel.is_collapsed() { return None; }
+        let mut blocks = if cells { self.selected_cells_content() } else { self.selected_blocks_content() };
+        if !self.in_block_mode() && !cells {
+            let (start, end) = self.ordered_in(&self.units());
+            if start.block == TITLE && end.block != TITLE {
+                blocks.insert(0, Block::new(BlockKind::Text, self.doc.title.slice(start.offset..self.doc.title.len())));
+            }
+        }
+        let text = crate::markdown::clipboard_text(&blocks);
+        let xml = crate::docxml::serialize(&Document { blocks, ..Default::default() });
+        Some((text, xml))
     }
 
     /// Selected content as blocks (for internal copy).
@@ -3650,6 +3711,20 @@ mod tests {
                 }
                 None => assert!(!t.contains(EQUATION), "{typed_text}"),
             }
+        }
+    }
+
+    #[test]
+    fn markdown_equation_delimiters_first() {
+        for (delimiters, offset, source) in [("$$", 1, "X_t"), ("$$$$", 2, "\\frac{a}{b}")] {
+            let mut c = doc("<title>T</title><p></p>");
+            let b = id(&c, 1);
+            c.sel = Selection::caret(Pos::new(b, 0));
+            typed(&mut c, delimiters);
+            c.sel = Selection::caret(Pos::new(b, offset));
+            typed(&mut c, source);
+            assert!(c.enclosing_equation_shortcut().is_some());
+            assert_eq!(c.equation_source(Pos::new(b, 0)).as_deref(), Some(source));
         }
     }
 

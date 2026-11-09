@@ -1,0 +1,25 @@
+move 300 600
+wait 1000
+click 500 186
+key cmd-down
+nkey $
+nkey $
+nkey $
+nkey $
+math-check {"active":false,"model_head":4}
+key left left
+nkey f
+nkey (
+nkey x
+nkey ^
+nkey 2
+nkey )
+math-check {"active":true,"source":"f(x^2)","head":6,"focus":true}
+key right
+wait 100
+math-check {"active":false,"renderable":true}
+shot native-dollars-rendered
+key left
+math-check {"active":true,"source":"f(x^2)","head":6}
+key left left left left left left left
+math-check {"active":false,"model_head":0,"renderable":true}

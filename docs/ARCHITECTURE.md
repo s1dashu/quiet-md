@@ -135,10 +135,21 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `table.rs` / `grid.rs` | 表格（界面部分；操作在 core 的 `table_ops.rs`）、分栏 |
 | `image.rs` / `file.rs` / `cover.rs` | 图片、视频或文件、图标与封面 |
 | `math.rs` | 公式（katex-rs 生成 HTML，再自行排版） |
+| `inline_math.rs` | 实验公式源码编辑；沿用 Editor 的焦点和输入接口，只投影当前段落，文档里仍是公式对象 |
 | `link.rs` / `links.rs` | 链接面板与卡片；@文档 与引用列表 |
 | `button.rs` / `countdown.rs` / `reminder.rs` / `subpages.rs` | 按钮、倒计时、日期提醒、子页面列表 |
 | `emoji.rs` / `emoji_picker.rs` | 表情数据与面板 |
 | `catalogue.rs` / `find.rs` / `reading.rs` / `scrollbar.rs` / `caption.rs` | 目录、查找替换、阅读模式与信息行、滚动条、代码块名和图片描述 |
+
+## 复制与 Markdown
+
+普通复制和剪切把选区序列化为 Markdown 文本，公式保留 `$…$`（多行源码为 `$$`）及原始 LaTeX，不再输出模型中的 U+FFFC 占位符。剪贴板同时保留 DocxXML 元数据，应用内粘贴仍恢复原有样式和公式对象。公式源码编辑中的局部复制仍是选中的原始 LaTeX 字符。序列化位于 core，可通过 `cargo test -p fdl_core --test clipboard` 独立验证，不依赖实验开关。
+
+## 实验公式源码编辑
+
+实验公式编辑由 `experimental-inline-math` 编译特性与 `QUIET_MD_INLINE_MATH=1` 同时启用。`fdl_core::editor::equation_edit` 保存仅含源码的临时编辑内核；所有文档更新仍经过 `Core::set_equation_source`，同一会话合并撤销。源码输入期间复用文档行索引和目录缓存，不扫描全文或重新排版正在编辑的公式；退出后刷新编号和查找结果。显示投影不进入 DocxXML。跨公式和正文的选区将公式视为完整对象，公式内部可按字符选择。
+
+公式编辑的布局缓存记录 `EquationProjection` 快照。命中测试、上下与行首尾导航把该帧的投影坐标映回模型坐标，即使源码会话已经关闭也不丢失映射。公式编辑入口只接受对象起点；水平移动按字素边界探测相邻公式，不能固定减去占位符字节数。选区写入及 UTF-8 切片入口同时防护非法字节偏移。 阅读模式不会打开源码编辑会话。
 
 ## 界面语言
 

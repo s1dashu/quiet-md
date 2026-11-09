@@ -434,28 +434,37 @@ mod native {
         }
     }
 
-    /// Key down + up for a lowercase letter, delivered to the view's
+    /// Key down + up for a letter or a formula punctuation key, delivered to the view's
     /// `keyDown:` so it goes through `interpretKeyEvents:` and the input method.
     pub fn key(ns_view: usize, letter: &str) {
         const CODES: &str = "asdfhgzxcv_bqweryt123465=97-80]ou[ip_lj'k;\\,/nm.";
-        let Some(code) = CODES.find(letter) else { return };
+        let (base, shifted) = match letter { "$" => ("4", true), "(" => ("9", true), ")" => ("0", true), "^" => ("6", true), _ => (letter, false) };
+        let Some(code) = CODES.find(base) else { return };
         unsafe {
             let view = ns_view as *mut Object;
             let win: *mut Object = msg_send![view, window];
             let number: isize = msg_send![win, windowNumber];
+            let input: *mut Object = msg_send![view, inputContext];
+            let source: *mut Object = msg_send![input, selectedKeyboardInputSource];
+            if !source.is_null() {
+                let utf8: *const std::ffi::c_char = msg_send![source, UTF8String];
+                if !utf8.is_null() { eprintln!("devtools: native input source {}", std::ffi::CStr::from_ptr(utf8).to_string_lossy()); }
+            }
             let nil: *mut Object = std::ptr::null_mut();
+            let unmodified: *mut Object = msg_send![class!(NSString), alloc];
+            let unmodified: *mut Object = msg_send![unmodified, initWithBytes: base.as_ptr() length: base.len() encoding: 4usize];
             let s: *mut Object = msg_send![class!(NSString), alloc];
             let s: *mut Object = msg_send![s, initWithBytes: letter.as_ptr() length: letter.len() encoding: 4usize];
             for (kind, sel) in [(10u64, true), (11u64, false)] {
                 let ev: *mut Object = msg_send![class!(NSEvent),
                     keyEventWithType: kind
                     location: CGPoint::new(0., 0.)
-                    modifierFlags: 0u64
+                    modifierFlags: if shifted { 1u64 << 17 } else { 0u64 }
                     timestamp: 0f64
                     windowNumber: number
                     context: nil
                     characters: s
-                    charactersIgnoringModifiers: s
+                    charactersIgnoringModifiers: unmodified
                     isARepeat: false
                     keyCode: code as u16];
                 if sel {
@@ -464,6 +473,8 @@ mod native {
                     let _: () = msg_send![view, keyUp: ev];
                 }
             }
+            let _: () = msg_send![s, release];
+            let _: () = msg_send![unmodified, release];
         }
     }
 
@@ -554,6 +565,12 @@ fn mouse_step(view: usize, cmd: &str, n: &[f32]) -> bool {
 
 fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
     match cmd {
+        "math-check" => {
+            let ws = window.root::<crate::app::Workspace>().flatten().expect("workspace");
+            let ed = ws.read(cx).editor.clone().expect("editor");
+            ed.read(cx).check_inline_math(rest, window);
+        }
+
         // Synthesized right-button NSEvents report buttonNumber 0, so GPUI would
         // read them as left clicks; feed the right click to GPUI directly.
         "rclick" => {
