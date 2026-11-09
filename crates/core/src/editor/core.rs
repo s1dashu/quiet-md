@@ -3124,6 +3124,23 @@ impl Core {
         self.paste_blocks(blocks);
     }
 
+    /// Markdown for external consumers, with lossless DocxXML for in-app paste.
+    /// Keep `selected_text` as model text: editing callers use its byte offsets.
+    pub fn clipboard_content(&self) -> Option<(String, String)> {
+        let cells = self.cell_sel.is_some();
+        if !self.in_block_mode() && !cells && self.sel.is_collapsed() { return None; }
+        let mut blocks = if cells { self.selected_cells_content() } else { self.selected_blocks_content() };
+        if !self.in_block_mode() && !cells {
+            let (start, end) = self.ordered_in(&self.units());
+            if start.block == TITLE && end.block != TITLE {
+                blocks.insert(0, Block::new(BlockKind::Text, self.doc.title.slice(start.offset..self.doc.title.len())));
+            }
+        }
+        let text = crate::markdown::clipboard_text(&blocks);
+        let xml = crate::docxml::serialize(&Document { blocks, ..Default::default() });
+        Some((text, xml))
+    }
+
     /// Selected content as blocks (for internal copy).
     pub fn selected_blocks_content(&self) -> Vec<Block> {
         let index = block_index(&self.doc);

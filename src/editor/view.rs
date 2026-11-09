@@ -1777,17 +1777,7 @@ impl Editor {
     }
 
     fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
-        let cells = self.core.cell_sel.is_some();
-        let blocks = if cells { self.core.selected_cells_content() } else { self.core.selected_blocks_content() };
-        let text = if self.core.in_block_mode() || cells {
-            Document { blocks: blocks.clone(), ..Default::default() }.plain_text()
-        } else {
-            if self.core.sel.is_collapsed() {
-                return false;
-            }
-            self.core.selected_text()
-        };
-        let xml = docxml::serialize(&Document { blocks, ..Default::default() });
+        let Some((text, xml)) = self.core.clipboard_content() else { return false };
         cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
         true
     }
