@@ -5,7 +5,7 @@ use crate::app::Workspace;
 use crate::settings::display_title;
 use crate::store::PageWidth;
 use crate::theme::{self, Theme, craft};
-use crate::ui::{icon, popover};
+use crate::ui::popover;
 use gpui::{prelude::FluentBuilder, *};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -32,10 +32,11 @@ fn item_top(k: usize, dividers: usize) -> f32 {
 fn menu_item(id: &'static str, ic: &'static str, label: impl Into<SharedString>, sub: bool, open: bool) -> Stateful<Div> {
     let g = SharedString::from(id);
     crate::ui::menu_row(id, g.clone())
-        .when(open, |d| d.bg(Theme::menu_highlight()).text_color(gpui::white()))
-        .child(if open { icon(ic, 16., gpui::white()) } else { crate::ui::menu_glyph(ic, 16., g.clone()) })
+        // A row whose submenu is open keeps the hover fill.
+        .when(open, |d| d.bg(Theme::fill_hover()))
+        .child(crate::ui::menu_glyph(ic, 16., g.clone()))
         .child(div().flex_1().min_w_0().overflow_hidden().child(crate::ui::menu_label(label, g.clone(), gpui::white())))
-        .when(sub, |d| d.child(if open { icon("chevron-right", 10., gpui::white()) } else { crate::ui::menu_glyph("chevron-right", 10., g) }))
+        .when(sub, |d| d.child(crate::ui::menu_glyph("chevron-right", 10., g)))
 }
 
 /// 下载为's text-only items.
@@ -81,6 +82,7 @@ impl Workspace {
 
     /// 创建副本: "<标题> 副本", opened right away.
     pub fn duplicate_doc(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let file_before = self.store.track_file_changes();
         self.close_doc_menu(cx);
         self.row_menu = None;
         if let Some(new) = self.copy_doc(id, cx) {
@@ -88,18 +90,24 @@ impl Workspace {
             self.sort();
             self.open(&new, window, cx);
         }
+        self.remember_files(file_before, crate::settings::tr("创建副本", "Duplicate"));
         cx.notify();
     }
 
     /// Write "<标题> 副本" of `id` to the library; the caller refreshes the list.
     pub(crate) fn copy_doc(&mut self, id: &str, cx: &mut Context<Self>) -> Option<String> {
+        if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) { return self.copy_folder(id, cx); }
         let mut doc = self.doc_of(id, cx)?;
         let title = crate::localized_format!("{} 副本", "{} copy", display_title(&doc.title.text));
         doc.title = crate::model::RichText::plain(title);
         let width = self.entries.iter().find(|e| e.id == id).map(|e| e.meta.width).unwrap_or_default();
-        match self.store.create_from(&doc) {
+        // A Markdown file copies as Markdown, into the library even from a 本机文件.
+        let made = if self.store.is_markdown(id) { let front = self.store.front_matter_of(id); self.store.create_markdown(&doc, &front) } else { self.store.create_from(&doc) };
+        match made {
             Ok(new) => {
                 let _ = self.store.set_width(&new, width);
+                let parent = self.entries.iter().find(|e| e.id == id).filter(|e| !e.meta.local()).and_then(|e| e.meta.parent.clone());
+                if let Some(parent) = parent { let _ = self.store.set_parent(&new, Some(&parent)); }
                 Some(new)
             }
             Err(e) => {

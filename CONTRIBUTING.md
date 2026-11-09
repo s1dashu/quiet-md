@@ -45,7 +45,7 @@ Most of these, AGENTS.md included, are written in Chinese for now.
 
 Before a release, `scripts/check.sh` must pass and CI must be green on that commit. After packaging, verify the signatures, notarization (macOS) and the SHA-256 of the downloads. The Windows CI build does not replace installing, uninstalling and editing on a real machine.
 
-The declared macOS minimum is 13, not yet verified on real hardware. There is no public package for Intel Macs yet.
+The declared macOS minimum is 13, not yet verified on real hardware. Intel packages can be cross-compiled on Apple Silicon; real Intel hardware validation is still needed.
 
 ### macOS
 
@@ -58,6 +58,17 @@ SIGNING_IDENTITY="Developer ID Application: …" NOTARY_PROFILE="quiet-md" scrip
 ```
 
 The script stops if signing or notarization fails; whatever is left in the failed run's directory must not be shipped.
+
+To build both architectures sequentially on one Apple Silicon Mac, install the Intel Rust target once, then run the same signing and notarization flow for each architecture:
+
+```sh
+rustup target add x86_64-apple-darwin
+export SIGNING_IDENTITY="Developer ID Application: …" NOTARY_PROFILE="quiet-md"
+scripts/release.sh
+MACOS_TARGET=x86_64-apple-darwin scripts/release.sh
+```
+
+Each run keeps its output in a separate `dist-release.*` directory. Intel ZIPs use `macos-x86_64`; Apple Silicon ZIPs keep `macos-arm64`. CI builds both on its existing ARM runner and verifies the binary architectures and signatures. `SIGNING_IDENTITY=-` skips notarization and creates ad-hoc signed `-unsigned.zip` validation packages, which must not be distributed and are rejected by `publish-downloads.sh`.
 
 ### Windows
 
@@ -82,7 +93,7 @@ On every platform, never commit credentials, private keys or certificate files.
 
 ### Uploads and in-app updates
 
-`scripts/publish-downloads.sh <package>…` uploads packages to `v<version>/` and `latest/` on `download.quiet.md`, signs them with minisign, and finally writes `latest/update-<platform>.json` (`macos-arm64`, `windows-x64`). That manifest is what the app reads. It checks 10 seconds after launch and every 12 hours after that, and again when a window comes to the front more than an hour after the last check (this can be turned off in Settings › General); **Check for Updates…** in the menu checks right away. The download starts only when the user clicks. The app verifies the minisign signature (its trusted comment must be the package's file name); on macOS the new package must also be signed by the same team as the running app. It then quits, swaps the package and reopens. See `src/update.rs`.
+`scripts/publish-downloads.sh <package>…` uploads packages to `v<version>/` and `latest/` on `download.quiet.md`, signs them with minisign, and finally writes `latest/update-<platform>.json` (`macos-arm64`, `macos-x86_64`, `windows-x64`). That manifest is what the app reads. It checks 10 seconds after launch and every 12 hours after that, and again when a window comes to the front more than an hour after the last check (this can be turned off in Settings › General); **Check for Updates…** in the menu checks right away. The download starts only when the user clicks. The app verifies the minisign signature (its trusted comment must be the package's file name); on macOS the new package must also be signed by the same team as the running app. It then quits, swaps the package and reopens. See `src/update.rs`.
 
 Generate the update signing key once (`brew install minisign`), keep the private key outside the repository and commit the public key:
 
@@ -100,6 +111,6 @@ For a new version, bump the version in both `Cargo.toml` files together, and wri
 
 Install Rust through rustup, then run `scripts/linux-deps.sh` on Ubuntu/Debian or Arch-based systems. Run `scripts/preview-linux.sh` for an isolated temporary library, or set `QUIET_MD_HOME` to reuse a test library. `scripts/package-linux.sh` produces a tarball and SHA-256 in `dist/linux`; it includes a desktop entry and a 512×512 icon generated with ImageMagick. The binary is dynamically linked; build on the oldest distribution you intend to support and check `runtime-libraries.txt` on the target system.
 
-The Linux build and full checks run on Ubuntu 24.04. Interactive testing has been done on Omarchy 4.5 with Wayland, floating windows and 250% scaling, including Chinese title input. GNOME Wayland, X11 and systems without Noto fonts still need interactive verification; this is not a claim of support for every desktop distribution. Software Vulkan (`vulkan-swrast` on Arch) is useful in VMs or when no hardware Vulkan driver is available. Global quick-note shortcuts and automatic updates are not supported on Linux yet.
+The Linux build and full checks run on Ubuntu 22.04. `scripts/package-appimage.sh` also produces an x86_64 AppImage in `dist/linux`, using a pinned, SHA-256-verified linuxdeploy. It bundles shared dependencies and checks the payload against a glibc 2.35 baseline; graphics drivers remain system-provided. SHA-256 and dependency reports are generated alongside it. AppImage can be run after `chmod +x`; if FUSE is unavailable, use `--appimage-extract-and-run`. Linux updates are manual. Interactive testing has been done on Omarchy 4.5 with Wayland, floating windows and 250% scaling, including Chinese title input. GNOME Wayland, X11 and systems without Noto fonts still need interactive verification; this is not a claim of support for every desktop distribution. Software Vulkan (`vulkan-swrast` on Arch) is useful in VMs or when no hardware Vulkan driver is available. Global quick-note shortcuts and automatic updates are not supported on Linux yet.
 
 Linux support started in [PR #7](https://github.com/s1dashu/quiet-md/pull/7) by [VJ-2303](https://github.com/VJ-2303); maintainer follow-ups add desktop integration and runtime fixes.

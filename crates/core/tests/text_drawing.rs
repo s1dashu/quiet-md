@@ -165,3 +165,22 @@ fn wrapping_drawings_in_different_cells_keeps_the_cells_separate() {
     assert_eq!(t.rows[0][1].blocks.len(), 2);
     assert!(matches!(t.rows[0][1].blocks[1].kind, BlockKind::Quote));
 }
+
+#[test]
+fn markdown_file_saves_preserve_drawings_and_unchanged_source() {
+    let original = "---\ntags: [diagram]\n---\n# Notes\n\n~~~~mermaid\nflowchart LR\nA[中文] --> B\n~~~~\n\nKeep  this spacing.\n";
+    let (front, _) = markdown::front_matter(original);
+    let mut doc = markdown::parse_file(original, "Notes", None);
+    let opts = markdown::Options { original: Some(original), ..Default::default() };
+    assert_eq!(markdown::write_file_with(&doc, front, &opts).text, original);
+    let block = doc.blocks.iter_mut().find(|b| matches!(b.kind, BlockKind::Diagram(_))).unwrap();
+    let BlockKind::Diagram(d) = &mut block.kind else { unreachable!() };
+    d.source.push_str("\nB --> C");
+    let saved = markdown::write_file_with(&doc, front, &opts).text;
+    assert!(saved.starts_with(front));
+    assert!(saved.ends_with("Keep  this spacing.\n"));
+    let reopened = markdown::parse_file(&saved, "Notes", None);
+    let diagram = reopened.blocks.iter().find_map(|b| match &b.kind { BlockKind::Diagram(d) => Some(d), _ => None }).unwrap();
+    assert_eq!(diagram.source, "flowchart LR\nA[中文] --> B\nB --> C");
+    assert_eq!(markdown::write_file_with(&reopened, front, &markdown::Options { original: Some(&saved), ..Default::default() }).text, saved);
+}

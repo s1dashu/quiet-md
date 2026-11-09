@@ -11,7 +11,7 @@ use super::view::{Editor, EditorEvent};
 use crate::settings::display_title;
 use crate::model::{BlockId, DocLink};
 use crate::editor_theme::Theme;
-use crate::editor_ui::{ROW_RADIUS, TipExt, icon, popover, ui_text};
+use crate::editor_ui::{TipExt, icon, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -221,7 +221,7 @@ impl Editor {
         let (p, lh) = self.point_of(Pos::new(m.block, m.trigger))?;
         let q = self.mention_query();
         let results = self.mention_results();
-        let mut list = div().id("mention-list").max_h(px(366.)).overflow_y_scroll().track_scroll(&self.mention_scroll).py(px(5.)).flex().flex_col();
+        let mut list = div().id("mention-list").max_h(px(366.)).overflow_y_scroll().track_scroll(&self.mention_scroll).py(px(crate::editor_ui::MENU_PAD_Y)).flex().flex_col();
         if results.is_empty() {
             list = list.child(div().p(px(16.)).text_size(px(13.)).line_height(px(20.)).text_color(Theme::text_caption()).child(ui_text(crate::settings::text("没有匹配结果，换个关键词试试吧"))));
         }
@@ -258,10 +258,10 @@ impl Editor {
                     .id(("mention", k))
                     .flex_none()
                     .h(px(48.))
-                    .mx(px(5.))
+                    .mx(px(crate::editor_ui::MENU_INSET))
                     .px(px(8.))
                     .py(px(4.))
-                    .rounded(px(ROW_RADIUS))
+                    .rounded(px(crate::ui::ROW_RADIUS))
                     .flex()
                     .items_center()
                     .cursor_pointer()
@@ -307,7 +307,7 @@ impl Editor {
                     ),
             );
         }
-        let el = popover()
+        let el = crate::editor_ui::menu()
             .id("mention-box")
             .occlude()
             .w(px(280.))
@@ -358,7 +358,7 @@ impl Editor {
         let help = div()
             .id("refs-help")
             .ml(px(4.))
-            .child(icon("circle-help", 14., Theme::text_placeholder()))
+            .child(icon("circle-help", 14., Theme::icon()))
             .tip_above(crate::settings::text("本文被以下文档所引用"), None);
         let close = div()
             .id("refs-hide")
@@ -370,7 +370,7 @@ impl Editor {
             .cursor_pointer()
             .hover(|s| s.bg(Theme::fill_hover_strong()))
             .on_click(cx.listener(|_, _, _, cx| cx.emit(EditorEvent::HideRefs)))
-            .child(icon("x", 16., Theme::text_caption()))
+            .child(icon("x", 16., Theme::icon()))
             .tip_above(crate::settings::text("隐藏引用列表"), None);
         let tabs = div()
             .flex()
@@ -422,7 +422,7 @@ impl Editor {
                                 }
                                 cx.notify();
                             }))
-                            .child(icon(if expanded { "triangle-down" } else { "triangle-right" }, 12., Theme::text_caption()))
+                            .child(icon(if expanded { "triangle-down" } else { "triangle-right" }, 12., Theme::icon()))
                             .tip_above(if expanded { crate::settings::text("收起") } else { crate::settings::text("展开") }, None),
                     )
                 })

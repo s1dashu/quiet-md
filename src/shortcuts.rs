@@ -180,6 +180,7 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "ToggleSidebar" => (0, "展开 / 收起侧栏", "Show / hide sidebar"),
         "FocusSearch" => (0, "搜索文档", "Search documents"),
         "ToggleShortcuts" => (0, "查看快捷键", "Show shortcuts"),
+        "OpenFile" => (1, "打开 Markdown 文件", "Open Markdown file"),
         "ImportDoc" => (1, "导入文档", "Import documents"),
         "Save" => (1, "保存文档", "Save document"),
         "EditMode" => (1, "编辑模式", "Edit mode"),
@@ -428,7 +429,7 @@ impl Workspace {
         div().flex_none().flex().items_center().gap(px(8.))
             .when(customized, |d| d.child(crate::settings::link_button("shortcuts-reset-all", tr("全部恢复默认", "Reset all")).on_click(cx.listener(|w, _, _, cx| w.reset_all_shortcuts(cx)))))
             .child(div().w(px(200.)).h(px(28.)).px(px(8.)).flex().items_center().gap(px(6.)).rounded(px(8.)).bg(Theme::fill_hover())
-                .child(crate::ui::icon("search", 14., Theme::text_caption()))
+                .child(crate::ui::icon("search", 14., Theme::icon()))
                 .child(div().flex_1().min_w_0().child(self.settings_filter.clone())))
             .into_any_element()
     }

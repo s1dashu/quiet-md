@@ -386,12 +386,19 @@ impl Theme {
     pub fn sidebar_hover() -> Hsla { ca(craft::N1000, 0.045) }
     /// Selected sidebar row (measured #DEDEDF).
     pub fn sidebar_selected() -> Hsla { ca(craft::N1000, 0.072) }
+    /// Dragging in the sidebar: the receiving folder's wash, the
+    /// slot the row will land in, and the glow a landed row fades out from.
+    pub fn sidebar_drop() -> Hsla { ca(craft::N1000, 0.05) }
+    pub fn sidebar_drop_slot() -> Hsla { ca(craft::N1000, 0.08) }
+    /// Renaming in the sidebar: the field's thin edge and the soft focus glow around it.
+    pub fn sidebar_field_edge() -> Hsla { ca(craft::B500, 0.6) }
+    pub fn sidebar_field_ring() -> Hsla { ca(craft::B500, 0.16) }
+    pub fn sidebar_landed() -> Hsla { ca(craft::N1000, 0.07) }
     /// Section headers on the sidebar.
     pub fn sidebar_section() -> Hsla { c(0x333739) }
-    /// Chrome glyphs (sidebar rows, header buttons): lighter than text so
-    /// they don't pull the eye from the labels and the page. Inferred: the
-    /// SF Symbols sit near secondary label; this is between N700 and N600.
-    pub fn icon() -> Hsla { ca(craft::N900, 0.6) }
+    /// Normal monochrome icons: #191919 measured from the supplied Claude Code screenshot.
+    /// Keep the existing adaptive tint in dark mode.
+    pub fn icon() -> Hsla { if dark() { ca(craft::N900, 0.6) } else { rgb(0x191919).into() } }
     /// Line above the sidebar footer (1pt, black 3.5%, #E8E8E9 on the sidebar).
     /// Line under the page title.
     /// White pill buttons on the note (back / + / share): hairline.
@@ -408,7 +415,7 @@ impl Theme {
     /// Captions under media and code (weight 300).
     #[allow(dead_code)]
     pub fn caption() -> Hsla { c(0x7e8287) }
-    /// Menu row highlight (native NSMenu: accent, white label).
+    /// The old accent menu highlight; kept as a theme token, menus now hover with `fill_hover`.
     pub fn menu_highlight() -> Hsla { c(craft::B500) }
     /// Menus / popovers body (quick-entry & native menus).
     pub fn popover_bg() -> Hsla { c(0xfafafa) }

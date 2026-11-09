@@ -6,7 +6,7 @@ use super::overlays::at;
 use super::view::{Editor, Menu};
 use crate::model::*;
 use crate::editor_theme::{self as theme, Theme, craft};
-use crate::editor_ui::{ROW_RADIUS, TipExt, ToastKind, icon, menu_glyph, menu_row, panel, popover};
+use crate::editor_ui::{ROW_RADIUS, TipExt, ToastKind, icon, menu, menu_glyph, menu_row, panel, popover};
 use gpui::{prelude::FluentBuilder, *};
 use regex::Regex;
 use std::ops::Range;
@@ -469,7 +469,7 @@ impl Editor {
         let more = self.link_ui.more;
         let submenu = more.then(|| {
             let u = url.clone();
-            popover()
+            menu()
                 .id("link-card-more")
                 .occlude()
                 .absolute()
@@ -509,7 +509,7 @@ impl Editor {
             .child(
                 btn("lc-edit")
                     .tip_above(crate::settings::text("编辑链接"), None)
-                    .child(icon("pen-line", 18., Theme::text_code()))
+                    .child(icon("pen-line", 18., Theme::icon()))
                     .on_click(cx.listener(move |e, _, window, cx| {
                         let (b, r) = edit.clone();
                         e.open_link_panel(b, r, false, window, cx);
@@ -518,14 +518,14 @@ impl Editor {
             .child(
                 btn("lc-remove")
                     .tip_above(crate::settings::text("移除链接"), None)
-                    .child(icon("unlink", 18., Theme::text_code()))
+                    .child(icon("unlink", 18., Theme::icon()))
                     .on_click(cx.listener(move |e, _, window, cx| e.remove_link(remove.clone(), window, cx))),
             )
             .child(div().ml(px(8.)).w(px(1.)).h(px(18.)).flex_none().bg(Theme::line_divider()))
             .child(
                 btn("lc-more")
                     .when(more, |d| d.bg(Theme::fill_hover_strong()))
-                    .child(icon("layout-grid", 18., Theme::text_code()))
+                    .child(icon("layout-grid", 18., Theme::icon()))
                     .on_hover(cx.listener(|e, h: &bool, _, cx| e.card_over(1, *h, cx)))
                     .on_click(cx.listener(|e, _, _, cx| {
                         e.link_ui.more = true;
@@ -571,7 +571,7 @@ impl Editor {
 
     /// The toolbar's 更多 menu: 文档库内搜索, 网页搜索.
     pub(super) fn tb_more_menu(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        popover()
+        menu()
             .id("tb-more-menu")
             .occlude()
             .w(px(SUBMENU_W))
@@ -604,8 +604,7 @@ fn encode_query(s: &str) -> String {
     out
 }
 
-/// A native-style menu row (`ui::menu_row`): 16pt glyph, 13pt label, the
-/// accent with a white label and glyph on hover.
+/// The app's menu row (`ui::menu_row`): 16pt glyph, 13pt label, a quiet hover.
 fn menu_item(id: &'static str, ic: &'static str, label: &'static str) -> Stateful<Div> {
     let g = SharedString::from(id);
     menu_row(id, g.clone()).child(menu_glyph(ic, 16., g)).child(div().whitespace_nowrap().child(label))

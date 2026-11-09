@@ -67,7 +67,24 @@ fn button(id: (&'static str, u64), label: &'static str) -> Stateful<Div> {
         .hover(|s| s.bg(Theme::fill_hover())).child(crate::settings::text(label))
 }
 
+fn received_source<'a>(core: &'a super::core::Core, id: BlockId, current: &str) -> Option<&'a str> {
+    match core.kind_of(id) {
+        Some(BlockKind::Diagram(d)) if d.source != current => Some(&d.source),
+        _ => None,
+    }
+}
+
 impl Editor {
+    pub(super) fn receive_diagram_fields(&mut self, cx: &mut Context<Self>) {
+        // The accepted Core includes peer edits and history. Focus must not let
+        // a stale source field overwrite it on the next keystroke.
+        for (id, (field, _)) in &self.diagrams.fields {
+            if let Some(source) = received_source(&self.core, *id, &field.read(cx).text) {
+                field.update(cx, |f, cx| f.set_text(source, cx));
+            }
+        }
+    }
+
     fn save_diagram_layout(&mut self, id: BlockId, coalesce: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only { return }
         let Some(BlockKind::Diagram(d)) = self.core.kind_of(id) else { return };
@@ -356,4 +373,29 @@ fn widget(e: &Editor, id: BlockId, d: &TextDiagram, width: f32, full_height: Opt
         .on_mouse_up(MouseButton::Left, cx.listener(|e: &mut Editor, _, window, cx| e.finish_diagram_drag(window, cx)))
         .on_mouse_up_out(MouseButton::Left, cx.listener(|e: &mut Editor, _, window, cx| e.finish_diagram_drag(window, cx)))
         .child(body).child(toolbar).into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{received_source, TextDiagram};
+    use crate::model::{Block, BlockKind, Document, RichText};
+
+    #[test]
+    fn received_source_tracks_peer_edits_and_history_without_new_edits() {
+        let block = Block::new(BlockKind::Diagram(TextDiagram::new("graph TD; A-->B")), RichText::default());
+        let id = block.id;
+        let mut core = super::super::core::Core::new(Document { blocks: vec![block], ..Default::default() });
+        let old = "graph TD; A-->B";
+        let new = "graph TD; A-->C";
+        assert_eq!(received_source(&core, id, old), None);
+        core.set_diagram(id, TextDiagram::new(new), true);
+        let generation = core.generation;
+        assert_eq!(received_source(&core, id, old), Some(new));
+        assert_eq!(received_source(&core, id, new), None);
+        assert_eq!(core.generation, generation);
+        core.undo();
+        assert_eq!(received_source(&core, id, new), Some(old));
+        core.redo();
+        assert_eq!(received_source(&core, id, old), Some(new));
+    }
 }

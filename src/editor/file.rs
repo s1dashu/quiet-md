@@ -11,6 +11,7 @@ use crate::model::*;
 use crate::store::Store;
 use crate::editor_theme::{self as theme, Theme, craft};
 use crate::editor_ui::{ROW_RADIUS, TipExt, icon, popover};
+use super::image::PictureExt;
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -382,7 +383,7 @@ impl R<'_> {
                     .items_center()
                     .child(div().flex_1().min_w_0().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).text_ellipsis().whitespace_nowrap().overflow_hidden().child(f.name.clone()))
                     .child(div().ml(px(8.)).flex_none().text_size(px(12.)).text_color(Theme::text_caption()).child(if ok { format!("{} / {}", clock(t), clock(d)) } else { crate::settings::text("无法播放").into() }));
-                let icon_c = if ok { Theme::text_code() } else { Theme::text_disabled() };
+                let icon_c = if ok { Theme::icon() } else { Theme::text_disabled() };
                 let play = shell_btn((if playing { "file-pause" } else { "file-play" }, id.0))
                     .tip_above(if playing { crate::settings::text("暂停") } else { crate::settings::text("播放") }, None)
                     .child(icon(if playing { "pause-filled" } else { "play-filled" }, 18., icon_c))
@@ -468,7 +469,7 @@ impl R<'_> {
                         let (tw, th) = ed.img.dims(t).unwrap_or((16., 9.));
                         let full = iw * th / tw.max(1.);
                         let h = full.clamp(if video { 160. } else { 120. }, 600.);
-                        let pic = img(t.clone()).object_fit(if video { ObjectFit::Contain } else { ObjectFit::Fill }).id(("file-thumb", id.0));
+                        let pic = img(t.clone()).doc_picture().object_fit(if video { ObjectFit::Contain } else { ObjectFit::Fill }).id(("file-thumb", id.0));
                         let pic = if video { pic.size_full() } else { pic.absolute().top_0().left_0().w(px(iw)).h(px(full)) };
                         div()
                             .relative()
@@ -558,7 +559,7 @@ impl R<'_> {
                     .cursor_pointer()
                     .hover(|s| s.bg(Theme::fill_hover()))
                     .tip_above(if av { crate::settings::text("播放") } else { crate::settings::text("预览") }, None)
-                    .child(icon(if av { "circle-play" } else { "eye-open" }, 20., if missing { Theme::text_disabled() } else { Theme::text_caption() }))
+                    .child(icon(if av { "circle-play" } else { "eye-open" }, 20., if missing { Theme::text_disabled() } else { Theme::icon() }))
                     .on_mouse_down(MouseButton::Left, l);
                 // The file card: white, hairline, crisp radius 5, the button drop.
                 div()
@@ -774,7 +775,7 @@ impl Editor {
         if preview.is_some_and(|k| k != Kind::Audio) {
             let p = path.clone();
             bar = bar.child(
-                shell_btn("ftb-full").tip_above(crate::settings::text("全屏"), None).child(icon("maximize", 18., Theme::text_code())).on_mouse_down(
+                shell_btn("ftb-full").tip_above(crate::settings::text("全屏"), None).child(icon("maximize", 18., Theme::icon())).on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |e, _, window, cx| {
                         cx.stop_propagation();
@@ -787,7 +788,7 @@ impl Editor {
             n += 1;
         }
         bar = bar
-            .child(shell_btn("ftb-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
+            .child(shell_btn("ftb-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::icon())).on_mouse_down(
                 MouseButton::Left,
                 act(|e, id, _, cx| {
                     if let Some(BlockKind::File(f)) = e.core.kind_of(id).cloned() {
@@ -796,7 +797,7 @@ impl Editor {
                 }),
             ))
             .child(sep())
-            .child(shell_btn("ftb-text").tip_above(crate::settings::text("文本视图"), None).child(icon("view-text", 18., Theme::text_code())).on_mouse_down(
+            .child(shell_btn("ftb-text").tip_above(crate::settings::text("文本视图"), None).child(icon("view-text", 18., Theme::icon())).on_mouse_down(
                 MouseButton::Left,
                 act(|e, id, window, cx| {
                     e.core.file_to_inline(id);
@@ -816,7 +817,7 @@ impl Editor {
                 shell_btn(key)
                     .when(on, |d| d.bg(Theme::fill_turninto_active()))
                     .tip_above(tip, None)
-                    .child(icon(ic, 18., if on { Theme::primary() } else { Theme::text_code() }))
+                    .child(icon(ic, 18., if on { Theme::primary() } else { Theme::icon() }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |e, _, window, cx| {
@@ -861,7 +862,7 @@ impl Editor {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(shell_btn("fcard-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::text_code())).on_mouse_down(
+            .child(shell_btn("fcard-download").tip_above(crate::settings::text("下载"), None).child(icon("download", 18., Theme::icon())).on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
@@ -878,7 +879,7 @@ impl Editor {
             &[("fcard-card", "view-card", "卡片视图", FileView::Card)]
         };
         for &(key, ic, tip, v) in views {
-            bar = bar.child(shell_btn(key).tip_above(tip, None).child(icon(ic, 18., Theme::text_code())).on_mouse_down(
+            bar = bar.child(shell_btn(key).tip_above(tip, None).child(icon(ic, 18., Theme::icon())).on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |e, _, window, cx| {
                     cx.stop_propagation();
