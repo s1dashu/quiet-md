@@ -213,7 +213,7 @@ impl Writer<'_> {
             }
             BlockKind::Table(t) => self.table(t, out),
             BlockKind::Grid => {
-                out.push_str("<div class=\"grid\">");
+                let _ = write!(out, "<div class=\"grid\" style=\"gap:{}px\">", b.grid_gap.unwrap_or(20));
                 let total: f32 = b.children.iter().map(|c| if let BlockKind::Column { ratio } = c.kind { ratio } else { 1. }).sum::<f32>().max(0.01);
                 for col in &b.children {
                     let ratio = if let BlockKind::Column { ratio } = col.kind { ratio } else { 1. };

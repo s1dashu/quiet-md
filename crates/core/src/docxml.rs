@@ -299,6 +299,9 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
         _ if is_inline_object(name) => Block::new(BlockKind::Text, inline_text(std::slice::from_ref(&Node::El(e.clone())))),
         _ => Block::new(BlockKind::Raw { tag: e.name.clone(), xml: serialize_el(e) }, RichText::default()),
     };
+    if matches!(block.kind, BlockKind::Grid) {
+        block.grid_gap = e.attr("data-quiet-gap").and_then(|v| v.parse::<u16>().ok()).map(|v| v.min(80));
+    }
     block.align = parse_align(e);
     // Images are centred by default.
     if e.name == "img" && e.attr("align").is_none() {
@@ -908,7 +911,10 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
         }
         BlockKind::Table(t) => write_table(t, s, depth),
         BlockKind::Grid => {
-            s.push_str("<grid>\n");
+            match b.grid_gap {
+                Some(gap) => s.push_str(&format!("<grid data-quiet-gap=\"{}\">\n", gap)),
+                None => s.push_str("<grid>\n"),
+            }
             for col in &b.children {
                 let ratio = if let BlockKind::Column { ratio } = col.kind { ratio } else { 0.5 };
                 indent(s, depth + 1);
@@ -1097,6 +1103,26 @@ fn serialize_el(e: &Element) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Custom gutters survive XML and undo, while legacy grids keep their default.
+    #[test]
+    fn grid_gap_round_trip_and_undo() {
+        let xml = "<grid><column width-ratio=\"0.5\"><img src=\"a.png\" width=\"160\" height=\"100\"/></column><column width-ratio=\"0.5\"><img src=\"b.png\"/></column></grid>";
+        let doc = parse(xml).unwrap();
+        let id = doc.blocks[0].id;
+        assert_eq!(doc.blocks[0].grid_gap, None);
+        let mut core = crate::editor::core::Core::new(doc);
+        core.set_grid_gap(id, 32);
+        let saved = serialize(&core.doc);
+        assert_eq!(parse(&saved).unwrap().blocks[0].grid_gap, Some(32));
+        assert_eq!(serialize(&parse(&saved).unwrap()), saved);
+        core.undo();
+        assert_eq!(core.doc.blocks[0].grid_gap, None);
+        core.redo();
+        assert_eq!(core.doc.blocks[0].grid_gap, Some(32));
+        core.set_grid_gap(id, u16::MAX);
+        assert_eq!(core.doc.blocks[0].grid_gap, Some(80));
+    }
 
     const SAMPLE: &str = r#"<title>示例 <b>文档</b></title>
 <h1 seq="auto">一级标题</h1>

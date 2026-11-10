@@ -102,6 +102,7 @@ fn hash_block(b: &Block, orders: &rustc_hash::FxHashMap<BlockId, String>, h: &mu
     b.text.text.len().hash(h);
     b.text.runs.len().hash(h);
     b.folded.hash(h);
+    b.grid_gap.hash(h);
     match &b.kind {
         BlockKind::Heading { level, .. } => (level, orders.get(&b.id)).hash(h),
         BlockKind::Code { wrap, .. } => wrap.hash(h),

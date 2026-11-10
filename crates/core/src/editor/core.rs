@@ -2095,6 +2095,15 @@ impl Core {
         self.normalize();
     }
 
+    /// Change a grid's gutter as one undoable edit; ignore non-grid targets.
+    pub fn set_grid_gap(&mut self, grid: BlockId, gap: u16) {
+        let gap = gap.min(80);
+        let Some(b) = self.block(grid) else { return };
+        if !matches!(b.kind, BlockKind::Grid) || b.grid_gap.unwrap_or(20) == gap { return; }
+        self.checkpoint(EditKind::Other);
+        self.block_mut(grid).unwrap().grid_gap = Some(gap);
+    }
+
     pub fn column_ratios(&self, grid: BlockId) -> Vec<f32> {
         self.block(grid)
             .map(|g| g.children.iter().map(|c| if let BlockKind::Column { ratio } = c.kind { ratio } else { 0. }).collect())

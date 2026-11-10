@@ -13,8 +13,6 @@ use rustc_hash::FxHasher;
 use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 
-/// Visual gap between two column boxes.
-const GAP: f32 = 20.;
 /// Narrower containers stack their columns.
 const HORIZONTAL_MIN: f32 = 578.;
 const ANIMATION: Duration = Duration::from_millis(250);
@@ -168,7 +166,8 @@ impl R<'_> {
         let n = b.children.len().max(1);
         let ratios = ed.grid_ratios(b);
         let sum = ratios.iter().sum::<f32>().max(1e-6);
-        let horizontal = env.width >= HORIZONTAL_MIN;
+        // Stack when the requested gutters would leave columns narrower than an image handle.
+        let horizontal = env.width >= HORIZONTAL_MIN.max(f32::from(b.grid_gap.unwrap_or(20)) * (n - 1) as f32 + 36. * n as f32);
         let dragging = ed.col_drag.as_ref().is_some_and(|d| d.grid == b.id);
         // Hovering a gap's circle (above the grid) still counts as hovering the grid.
         let focused = !ed.read_only
@@ -176,7 +175,7 @@ impl R<'_> {
         let group = SharedString::from(format!("grid-{}", b.id.0));
         // A top-level grid's column boxes overhang the text column by 2px.
         let span = env.width + if env.root { 4. } else { 0. };
-        let free = span - GAP * (n - 1) as f32;
+        let free = span - f32::from(b.grid_gap.unwrap_or(20)) * (n - 1) as f32;
         let mut grid = div().relative().group(group.clone()).flex().when(!horizontal, |d| d.flex_col()).when(env.root, |d| d.mx(px(-2.)));
         for (i, c) in b.children.iter().enumerate() {
             let r = ratios.get(i).copied().unwrap_or(0.) / sum;
@@ -336,7 +335,7 @@ impl R<'_> {
             .absolute()
             .top_0()
             .bottom_0()
-            .left(px(4.))
+            .left(px((f32::from(b.grid_gap.unwrap_or(20)) - 12.) / 2.))
             .w(px(12.))
             .cursor_default()
             .opacity(if shown { 1. } else { 0. })
@@ -354,7 +353,23 @@ impl R<'_> {
                     .child(hot_spot),
             )
             .children(circle);
-        let gap = div().id(("gap", key)).w(px(GAP)).flex_none().relative().child(strip);
+        let gap_width = b.grid_gap.unwrap_or(20);
+        let controls = (shown && !last).then(|| {
+            let mut bar = div().absolute().top(px(28.)).left(px(-28.)).flex()
+                .bg(Theme::bg_body()).rounded(px(4.)).text_size(px(12.));
+            for (label, value) in [("−", gap_width.saturating_sub(4)), ("+", (gap_width + 4).min(80))] {
+                bar = bar.child(div().id((label, key)).px(px(8.)).py(px(4.)).cursor_pointer()
+                    .child(label).on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        e.core.set_grid_gap(gid, value);
+                        e.changed(window, cx);
+                    })));
+            }
+            bar.id(("gap-controls", key)).on_hover(cx.listener(set_hover(false)))
+                .tip_above(crate::settings::tr("调整图片 / 分栏间距", "Adjust image / column spacing"), None)
+        });
+        let gap = div().id(("gap", key)).w(px(f32::from(gap_width))).flex_none().relative().child(strip).children(controls);
         if last { gap.absolute().top_0().bottom_0().left(relative(1.)) } else { gap }
     }
 }
