@@ -21,6 +21,7 @@ default-members = [".", "crates/core"]
 
 [dependencies]
 fdl_core = { path = "crates/core" }
+pele-rs = { git = "https://github.com/nexmoe/pele-rs", rev = "06674734b52c31275659d2a38bfadf621210eb98" }
 anyhow = "1.0.104"
 async-lock = "3.4"
 dirs = "7.0.0"

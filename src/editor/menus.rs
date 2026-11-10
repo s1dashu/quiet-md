@@ -20,6 +20,7 @@ pub enum SlashKind {
     Callout,
     Formula,
     Countdown,
+    Diagram,
     Button,
     File,
     Reminder,
@@ -179,6 +180,7 @@ pub const SLASH_ITEMS: &[SlashItem] = &[
         keywords: &["日期提醒", "riqitixing", "rqtx", "reminder", "tixing", "date"],
     },
     SlashItem { kind: SlashKind::Countdown, label: "倒计时", icon: "timer", color: ORANGE, group: 3, keywords: &["倒计时", "djs", "timer", "daojishi", "countdown"] },
+    SlashItem { kind: SlashKind::Diagram, label: "文本绘图", icon: "columns-2", color: TEAL, group: 3, keywords: &["mermaid", "diagram", "chart", "wenbenhuitu", "wbht", "流程图", "时序图", "绘图"] },
 ];
 
 /// What a Markdown file can hold: blocks Markdown writes back as they are.
@@ -371,6 +373,9 @@ mod tests {
 
     #[test]
     fn slash_ranking() {
+        let r = filter_slash("");
+        assert_eq!(SLASH_ITEMS[r[0]].kind, SlashKind::Text);
+        assert!(r.windows(2).all(|p| SLASH_ITEMS[p[0]].group <= SLASH_ITEMS[p[1]].group));
         let r = filter_slash("bg");
         assert_eq!(SLASH_ITEMS[r[0]].label, "表格");
         let r = filter_slash("cy");

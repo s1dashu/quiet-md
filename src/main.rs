@@ -23,6 +23,7 @@ mod devtools {
 }
 mod docinfo;
 mod docmenu;
+mod diagram;
 mod editor;
 mod highlight;
 mod home;

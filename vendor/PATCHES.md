@@ -42,6 +42,10 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 21 | `platform/mac/metal_atlas.rs` | 删除图片时立即移除 tile 索引，再递减所属纹理的引用计数 | 避免共享纹理仍被使用时残留旧索引，导致重复删除或复用失效 tile |
 
 
+| 22 | `gpui.rs`、`svg_renderer.rs` | 公开 `SvgRenderer` / `SvgSize` 并补齐公开 API 文档 | 文本绘图按屏幕像素密度和当前缩放在后台栅格化，避免固定 1× 图片被拉伸 |
+| 23 | `platform.rs`、`platform/{mac,windows,linux}` | 新增 `CursorStyle::ZoomIn`；macOS 15+ 和 Linux 使用系统光标，Windows 和旧 macOS 使用内置放大镜 | 文本绘图悬停时提示点击打开图片预览 |
+| 24 | `svg_renderer.rs`、`Cargo.toml` | 从 SVG 系统字体库移除 LastResort 占位字体，并启用 resvg 的 `raster-images` 功能以绘制字体内的位图字形 | 防止含 emoji 的整行标签被替换成问号方框，并实际显示 Apple Color Emoji 的彩色字形 |
+
 ## taffy 0.9.0
 
 | 文件 | 改动 | 用途 |
