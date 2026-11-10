@@ -608,6 +608,19 @@ impl R<'_> {
                 .absolute()
                 .inset_0()
         });
+        // A separate zoom target keeps selecting and resizing an image predictable.
+        let zoom = (active && hovered && ok && !cropping && !self.ghost).then(|| {
+            div().id(("image-zoom", id.0)).absolute().top(px(8.)).right(px(8.))
+                .size(px(28.)).rounded(px(5.)).bg(Theme::bg_body()).shadow(theme::shadow_menu())
+                .flex().items_center().justify_center().cursor_pointer()
+                .child(icon("zoom-in", 18., Theme::icon()))
+                .tip_above(crate::settings::text("放大"), None)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    e.open_lightbox(id, window, cx);
+                }))
+        });
         let image_box = div()
             .id(("image-box", id.0))
             .relative()
@@ -620,14 +633,19 @@ impl R<'_> {
             .when_some(handles, |d, hs| d.children(hs))
             .children(overlay)
             .children(recorder)
+            .children(zoom)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
-                    // A click on the selected image opens the viewer.
-                    if ev.click_count == 1 && !ev.modifiers.shift && e.img.crop.is_none() && e.image_active(id, e.focus.is_focused(window)) {
+                    if !ev.modifiers.shift && e.img.crop.is_none() {
                         cx.stop_propagation();
                         window.prevent_default();
-                        e.open_lightbox(id, window, cx);
+                        window.focus(&e.focus);
+                        e.core.clear_block_sel();
+                        e.core.cell_sel = None;
+                        e.core.sel = Selection::caret(Pos::new(id, 0));
+                        e.menu = None;
+                        cx.notify();
                     }
                 }),
             );
