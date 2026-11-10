@@ -100,3 +100,5 @@ DocxXML 里没有、本应用自己加的写法。别的工具不认识这些写
 ## Grid spacing
 
 Images can be arranged in standard `<grid>` / `<column width-ratio="…">` containers. Image dimensions remain on each `<img>` block. Quiet.md optionally writes `data-quiet-gap="N"` on a grid to preserve a gutter of 0–80 pixels. Missing or invalid values use the existing 20-pixel gutter. This attribute is a Quiet.md extension, and preservation by Lark or older Quiet.md versions is not guaranteed. HTML and PDF export include the gutter. Markdown export flattens columns as before.
+
+Grid content can also use `data-quiet-valign="center"` or `"bottom"`. Missing and unrecognized values align at the top, and top alignment omits the attribute. Alignment applies to all content in each column, including image captions, and is retained by HTML/PDF export. Like custom gutters, this is a Quiet.md extension with no guaranteed Lark round trip.

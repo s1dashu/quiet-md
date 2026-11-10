@@ -211,6 +211,12 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         20 => table_step(c, rng),
         21 => object_step(c, rng),
+        23 => {
+            let id = c.doc.blocks.iter().find(|b| matches!(b.kind, BlockKind::Grid)).map(|b| b.id).unwrap_or_else(|| any(rng));
+            let align = *rng.pick(&[VerticalAlign::Top, VerticalAlign::Center, VerticalAlign::Bottom]);
+            c.set_grid_vertical_align(id, align);
+            format!("set_grid_vertical_align({id:?}, {align:?})")
+        }
         22 => {
             let id = c.doc.blocks.iter().find(|b| matches!(b.kind, BlockKind::Grid)).map(|b| b.id).unwrap_or_else(|| any(rng));
             let gap = rng.below(81) as u16;

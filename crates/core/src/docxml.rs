@@ -300,6 +300,11 @@ fn parse_block(e: &Element, out: &mut Vec<Block>) {
         _ => Block::new(BlockKind::Raw { tag: e.name.clone(), xml: serialize_el(e) }, RichText::default()),
     };
     if matches!(block.kind, BlockKind::Grid) {
+        block.grid_vertical_align = match e.attr("data-quiet-valign") {
+            Some("center") => VerticalAlign::Center,
+            Some("bottom") => VerticalAlign::Bottom,
+            _ => VerticalAlign::Top,
+        };
         block.grid_gap = e.attr("data-quiet-gap").and_then(|v| v.parse::<u16>().ok()).map(|v| v.min(80));
     }
     block.align = parse_align(e);
@@ -911,10 +916,16 @@ fn write_block(b: &Block, s: &mut String, depth: usize) {
         }
         BlockKind::Table(t) => write_table(t, s, depth),
         BlockKind::Grid => {
-            match b.grid_gap {
-                Some(gap) => s.push_str(&format!("<grid data-quiet-gap=\"{}\">\n", gap)),
-                None => s.push_str("<grid>\n"),
+            s.push_str("<grid");
+            if let Some(gap) = b.grid_gap {
+                s.push_str(&format!(" data-quiet-gap=\"{}\"", gap));
             }
+            match b.grid_vertical_align {
+                VerticalAlign::Top => {},
+                VerticalAlign::Center => s.push_str(" data-quiet-valign=\"center\""),
+                VerticalAlign::Bottom => s.push_str(" data-quiet-valign=\"bottom\""),
+            }
+            s.push_str(">\n");
             for col in &b.children {
                 let ratio = if let BlockKind::Column { ratio } = col.kind { ratio } else { 0.5 };
                 indent(s, depth + 1);
@@ -1122,6 +1133,26 @@ mod tests {
         assert_eq!(core.doc.blocks[0].grid_gap, Some(32));
         core.set_grid_gap(id, u16::MAX);
         assert_eq!(core.doc.blocks[0].grid_gap, Some(80));
+    }
+
+    /// Alignment defaults preserve old XML, and non-default values survive undo and reload.
+    #[test]
+    fn grid_vertical_alignment_round_trip_and_undo() {
+        let doc = parse("<grid><column width-ratio=\"0.5\"><p>Left</p></column><column width-ratio=\"0.5\"><p>Right</p></column></grid>").unwrap();
+        let id = doc.blocks[0].id;
+        let original = serialize(&doc);
+        let mut core = crate::editor::core::Core::new(doc);
+        for align in [VerticalAlign::Center, VerticalAlign::Bottom] {
+            core.set_grid_vertical_align(id, align);
+            let saved = serialize(&core.doc);
+            assert_eq!(parse(&saved).unwrap().blocks[0].grid_vertical_align, align);
+            assert_eq!(serialize(&parse(&saved).unwrap()), saved);
+            core.undo();
+            assert_eq!(serialize(&core.doc), original);
+            core.redo();
+            assert_eq!(serialize(&core.doc), saved);
+            core.undo();
+        }
     }
 
     const SAMPLE: &str = r#"<title>示例 <b>文档</b></title>

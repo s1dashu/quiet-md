@@ -192,7 +192,11 @@ impl R<'_> {
                 .min_w_0()
                 .px(px(2.))
                 .child(if focused { area.bg(Theme::block_bg_area()) } else if ed.read_only { area } else { area.group_hover(group.clone(), |s| s.bg(Theme::block_bg_area())) })
-                .child(self.blocks(&c.children, col_env, cx))
+                .when(horizontal && b.grid_vertical_align != VerticalAlign::Top,
+                    |d| d.child(self.column_space(cid, cx)))
+                .child(self.blocks(&c.children, col_env, cx).flex_none())
+                .when(horizontal && b.grid_vertical_align != VerticalAlign::Bottom,
+                    |d| d.child(self.column_space(cid, cx)))
                 .child(record_bounds(cid, self.bounds.clone()))
                 .when(dragging, |d| {
                     // Above the column's text (z-index 1): the width, as a dark tip.
@@ -215,16 +219,6 @@ impl R<'_> {
                 col.style().flex_basis = Some(px(0.).into());
                 col.style().flex_grow = Some(r);
                 col.style().flex_shrink = Some(1.);
-                // Below the shorter columns' content: a click lands in a trailing empty line.
-                col = col.child(div().flex_1().on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |e, _, window, cx| {
-                        cx.stop_propagation();
-                        e.core.focus_column_end(cid);
-                        window.focus(&e.focus);
-                        e.changed(window, cx);
-                    }),
-                ));
             } else if i > 0 {
                 col = col.mt(px(first_mt));
             }
@@ -234,6 +228,19 @@ impl R<'_> {
             }
         }
         grid.into_any_element()
+    }
+
+    /// Only actual whitespace handles column-end clicks, leaving text hit testing intact.
+    fn column_space(&self, column: BlockId, cx: &mut Context<Editor>) -> Div {
+        div().flex_1().min_h_0().when(!self.ed.read_only, |d| d.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |e, _, window, cx| {
+                cx.stop_propagation();
+                e.core.focus_column_end(column);
+                window.focus(&e.focus);
+                e.changed(window, cx);
+            }),
+        ))
     }
 
     /// The gap after column `i`: a 12px strip with the resize handle and,
@@ -355,7 +362,7 @@ impl R<'_> {
             .children(circle);
         let gap_width = b.grid_gap.unwrap_or(20);
         let controls = (shown && !last).then(|| {
-            let mut bar = div().absolute().top(px(28.)).left(px(-28.)).flex()
+            let mut bar = div().flex().justify_center()
                 .bg(Theme::bg_body()).rounded(px(4.)).text_size(px(12.));
             for (label, value) in [("−", gap_width.saturating_sub(4)), ("+", (gap_width + 4).min(80))] {
                 bar = bar.child(div().id((label, key)).px(px(8.)).py(px(4.)).cursor_pointer()
@@ -366,10 +373,27 @@ impl R<'_> {
                         e.changed(window, cx);
                     })));
             }
-            bar.id(("gap-controls", key)).on_hover(cx.listener(set_hover(false)))
-                .tip_above(crate::settings::tr("调整图片 / 分栏间距", "Adjust image / column spacing"), None)
+            let mut alignment = div().flex();
+            for (label, value) in [
+                (crate::settings::tr("顶部", "Top"), VerticalAlign::Top),
+                (crate::settings::tr("居中", "Center"), VerticalAlign::Center),
+                (crate::settings::tr("底部", "Bottom"), VerticalAlign::Bottom),
+            ] {
+                alignment = alignment.child(div().id((label, key)).px(px(6.)).py(px(4.)).cursor_pointer()
+                    .when(b.grid_vertical_align == value, |d| d.bg(Theme::block_bg_area()).text_color(Theme::primary()))
+                    .child(label).on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        e.core.set_grid_vertical_align(gid, value);
+                        e.changed(window, cx);
+                    })));
+            }
+            div().absolute().top(px(28.)).left(px(-60.)).flex().flex_col()
+                .bg(Theme::bg_body()).rounded(px(4.)).text_size(px(12.))
+                .child(bar).child(alignment).id(("gap-controls", key)).on_hover(cx.listener(set_hover(true)))
+                .tip_above(crate::settings::tr("分栏间距与垂直对齐", "Column spacing and vertical alignment"), None)
         });
-        let gap = div().id(("gap", key)).w(px(f32::from(gap_width))).flex_none().relative().child(strip).children(controls);
+        let gap = div().id(("gap", key)).w(px(f32::from(gap_width))).flex_none().relative().child(strip).children(controls.map(|controls| deferred(controls).with_priority(3)));
         if last { gap.absolute().top_0().bottom_0().left(relative(1.)) } else { gap }
     }
 }

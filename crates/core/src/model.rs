@@ -867,6 +867,15 @@ impl Countdown {
     }
 }
 
+/// Vertical placement of a column's complete content within a grid row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum VerticalAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Block {
     pub id: BlockId,
@@ -882,6 +891,8 @@ pub struct Block {
     pub folded: bool,
     /// Optional Quiet.md grid gutter, in pixels. Missing values use 20px.
     pub grid_gap: Option<u16>,
+    /// Align column contents as a group, including image captions.
+    pub grid_vertical_align: VerticalAlign,
 }
 
 impl Block {
@@ -895,6 +906,7 @@ impl Block {
             children: vec![],
             folded: false,
             grid_gap: None,
+            grid_vertical_align: VerticalAlign::Top,
         }
     }
 

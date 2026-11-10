@@ -2104,6 +2104,14 @@ impl Core {
         self.block_mut(grid).unwrap().grid_gap = Some(gap);
     }
 
+    /// Persist vertical column alignment as a single undoable grid edit.
+    pub fn set_grid_vertical_align(&mut self, grid: BlockId, align: VerticalAlign) {
+        let Some(b) = self.block(grid) else { return };
+        if !matches!(b.kind, BlockKind::Grid) || b.grid_vertical_align == align { return; }
+        self.checkpoint(EditKind::Other);
+        self.block_mut(grid).unwrap().grid_vertical_align = align;
+    }
+
     pub fn column_ratios(&self, grid: BlockId) -> Vec<f32> {
         self.block(grid)
             .map(|g| g.children.iter().map(|c| if let BlockKind::Column { ratio } = c.kind { ratio } else { 0. }).collect())
