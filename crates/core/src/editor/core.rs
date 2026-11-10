@@ -622,6 +622,19 @@ impl Core {
         self.dirty = true;
     }
 
+    /// Take `doc` as the new contents, as one undo step (飞书同步 bringing in
+    /// cloud edits). Blocks it shares with the old contents keep the caret.
+    pub fn replace_document(&mut self, doc: Document) {
+        self.checkpoint(EditKind::Other);
+        self.doc = doc;
+        self.ensure_non_empty();
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.pending_marks = None;
+        self.sel = Selection::caret(self.sel.head);
+        self.fix_selection();
+    }
+
     /// Put `doc` back outside the edit history (阅读模式 refusing an edit).
     pub fn restore(&mut self, doc: Document) {
         self.generation += 1;

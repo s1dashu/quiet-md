@@ -1,5 +1,5 @@
 //! The header "…" menu: page width, find & replace, move, pin, star,
-//! duplicate, 下载为 PDF / Markdown, 打印, document info and delete.
+//! duplicate, 下载为 PDF / Markdown, 飞书同步, 打印, document info and delete.
 
 use crate::app::Workspace;
 use crate::settings::display_title;
@@ -14,6 +14,8 @@ pub enum DocSub {
     Download,
     /// 更多: 显示引用列表.
     More,
+    /// 飞书同步.
+    Feishu,
 }
 
 const MENU_W: f32 = 200.;
@@ -207,6 +209,10 @@ impl Workspace {
                 menu_item("dm-download", "export", crate::settings::text("下载为"), true, sub == Some(DocSub::Download))
                     .on_hover(hover_sub(Some(DocSub::Download))),
             )
+            .child(
+                menu_item("dm-feishu", "restore", crate::settings::text("飞书同步"), true, sub == Some(DocSub::Feishu))
+                    .on_hover(hover_sub(Some(DocSub::Feishu))),
+            )
             .child(divider())
             .when(crate::printing::SUPPORTED, |d| d.child(
                 menu_item("dm-print", "printer", crate::settings::text("打印"), false, false)
@@ -274,7 +280,7 @@ impl Workspace {
                 },
             )),
             Some(DocSub::More) => Some((
-                if crate::printing::SUPPORTED { item_top(9, 6) } else { item_top(8, 5) } - 1. - PAD,
+                if crate::printing::SUPPORTED { item_top(10, 6) } else { item_top(9, 5) } - 1. - PAD,
                 popover()
                     .id("dm-more-menu")
                     .occlude()
@@ -304,6 +310,7 @@ impl Workspace {
                     )
                     .into_any_element(),
             )),
+            Some(DocSub::Feishu) => Some((item_top(7, 3) - 1. - PAD, self.feishu_menu(&id, cx).child(recorder()).into_any_element())),
             None => None,
         };
         if let Some((top, el)) = sub_el {

@@ -283,6 +283,10 @@ pub struct Workspace {
     pub move_dlg: Option<crate::tree::MoveDialog>,
     /// 导出 Markdown 设置.
     pub export_md: Option<crate::transfer::ExportMd>,
+    /// 飞书同步 in progress, by document.
+    pub feishu_busy: HashSet<String>,
+    /// The 关联飞书文档 dialog.
+    pub feishu_dlg: Option<crate::feishu::LinkDialog>,
     /// 编辑 / 阅读 dropdown, and the mode button's last-frame bounds.
     pub mode_menu: bool,
     pub mode_btn_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -455,6 +459,8 @@ impl Workspace {
             expanded: HashSet::new(),
             move_dlg: None,
             export_md: None,
+            feishu_busy: HashSet::default(),
+            feishu_dlg: None,
             focus: cx.focus_handle(),
             save_task: None,
             dirty_since: None,
@@ -603,6 +609,10 @@ impl Workspace {
         self.doc_menu = false;
         self.doc_sub = None;
         self.mode_menu = false;
+        // 飞书同步: a linked document pulls the cloud's edits on opening.
+        if crate::feishu::link_of(&crate::store::Store::root_dir(), id).is_some_and(|l| l.revision > 0) {
+            self.feishu_sync(id, crate::feishu::Mode::Pull, true, window, cx);
+        }
         cx.notify();
         true
     }
@@ -1349,6 +1359,7 @@ impl Render for Workspace {
         };
         let move_dlg = self.render_move_dialog(cx);
         let export_md = self.render_export_md(cx);
+        let feishu_dlg = self.render_feishu_dialog(cx);
         // Only the note stands out: a white plane flush with the window's top,
         // right and bottom edges. The sidebar sits sunken on the window
         // surface beside it; the change of value is the only line between
@@ -1483,6 +1494,7 @@ impl Render for Workspace {
             .children(confirm)
             .children(move_dlg)
             .children(export_md)
+            .children(feishu_dlg)
             .children(search)
             .children(resize_overlay)
             .children(folder_drag_overlay)

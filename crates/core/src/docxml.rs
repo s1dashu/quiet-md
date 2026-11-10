@@ -697,6 +697,25 @@ pub fn serialize(doc: &Document) -> String {
     s
 }
 
+/// Blocks on one line, as a table cell writes them: no layout newlines or
+/// indentation, content newlines as `&#10;`. The cloud keeps layout
+/// whitespace as text, so this is what goes to Feishu (and what `sync`
+/// compares).
+pub fn serialize_blocks_compact(blocks: &[Block]) -> String {
+    let mut s = String::new();
+    let outer = IN_CELL.replace(true);
+    write_blocks(blocks, &mut s, 0);
+    IN_CELL.set(outer);
+    s.replace('\n', "")
+}
+
+/// The title's inline content, as `serialize` writes it between `<title>` tags.
+pub fn serialize_inline(t: &RichText) -> String {
+    let mut s = String::new();
+    write_inline(t, &mut s);
+    s
+}
+
 thread_local! {
     /// Writing a table cell, whose blocks go on one line: content newlines
     /// (code, raw elements) are written as `&#10;` so that dropping the

@@ -211,6 +211,16 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         20 => table_step(c, rng),
         21 => object_step(c, rng),
+        22 if rng.chance(10) => {
+            // 飞书同步: the document comes back re-read, a block or so changed.
+            let mut d = crate::docxml::parse(&crate::docxml::serialize(&c.doc)).unwrap();
+            if !d.blocks.is_empty() && rng.chance(50) {
+                let i = rng.below(d.blocks.len());
+                d.blocks.remove(i);
+            }
+            c.replace_document(d);
+            "replace_document".into()
+        }
         _ => {
             c.trailing_line();
             "trailing_line".into()

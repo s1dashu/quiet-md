@@ -95,7 +95,7 @@ fn file_name(doc: &Document) -> String {
 }
 
 /// The modal mask (the window dimmed) and its dialog.
-fn mask(id: &'static str, dialog: impl IntoElement, close: impl Fn(&mut Workspace, &mut Context<Workspace>) + 'static, cx: &mut Context<Workspace>) -> AnyElement {
+pub(crate) fn mask(id: &'static str, dialog: impl IntoElement, close: impl Fn(&mut Workspace, &mut Context<Workspace>) + 'static, cx: &mut Context<Workspace>) -> AnyElement {
     deferred(
         div()
             .id(id)
