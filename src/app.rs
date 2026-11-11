@@ -183,6 +183,7 @@ pub enum View {
     Folder,
     Trash,
     Settings,
+    DataTable,
 }
 
 /// A confirmation dialog and the pages it is about.
@@ -267,6 +268,8 @@ pub struct Workspace {
     /// The open confirmation dialog.
     pub confirm: Option<Confirm>,
     pub view: View,
+    /// The open 数据表 (data table) page, if any.
+    pub datatable: Option<crate::datatable_view::DataTableView>,
     pub home: crate::home::Home,
     pub settings_scroll: ScrollHandle,
     /// 回收站 rows, refreshed when the page opens or changes.
@@ -440,6 +443,7 @@ impl Workspace {
             batch: None,
             confirm: None,
             view: View::Doc,
+            datatable: None,
             home: Default::default(),
             settings_scroll: ScrollHandle::new(),
             trash: vec![],
@@ -1299,8 +1303,11 @@ impl Render for Workspace {
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus); }
         crate::editor::image::frame_drawn(window);
-        self.native_sidebar.sync(if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
-        let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
+        // 数据表 is a full-screen takeover (like Feishu opening a base): it hides
+        // the app's own sidebar and renders its own internal rail instead.
+        let full_bleed = self.view == View::DataTable;
+        self.native_sidebar.sync(if self.sidebar_open && !full_bleed { self.sidebar_w(window) } else { 0. }, window);
+        let sidebar = if self.sidebar_open && !full_bleed { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
@@ -1346,6 +1353,7 @@ impl Render for Workspace {
             View::Folder => self.render_folder(window, cx),
             View::Trash => self.render_trash(cx),
             View::Settings => self.render_settings(cx),
+            View::DataTable => self.render_datatable(window, cx),
         };
         let move_dlg = self.render_move_dialog(cx);
         let export_md = self.render_export_md(cx);
@@ -1415,6 +1423,11 @@ impl Render for Workspace {
                 cx.notify();
             }))
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
+                // Data-table grid navigation (arrows / Tab / Enter / Space / Esc).
+                if w.datatable_key(ev, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
                 // The theme dropdown: ↑ ↓ preview, ↩ applies, Esc closes it (not 设置).
                 if w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx) {
                     cx.stop_propagation();
