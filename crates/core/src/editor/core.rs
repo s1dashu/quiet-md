@@ -384,10 +384,12 @@ fn keep_outside_history(now: &Document, restored: &mut Document) {
     walk(&mut restored.blocks, &folded);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockSel {
     pub anchor: BlockId,
     pub head: BlockId,
+    /// Explicit image ids for Command-click selection; None denotes a range.
+    pub images: Option<Vec<BlockId>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1932,7 +1934,7 @@ impl Core {
     /// command leaves it out of sight (indenting under a folded section,
     /// lifting a folded heading out of its parent, ...).
     pub fn reveal_caret(&mut self) {
-        let ends = match self.block_sel {
+        let ends = match &self.block_sel {
             Some(bs) => [bs.anchor, bs.head],
             None => [self.sel.anchor.block, self.sel.head.block],
         };
@@ -1945,7 +1947,7 @@ impl Core {
 
     fn fix_selection_after_fold(&mut self, id: BlockId) {
         let us = self.units();
-        if let Some(bs) = self.block_sel {
+        if let Some(bs) = self.block_sel.as_ref() {
             // A block selection reaching into what just got hidden is dropped.
             let shown = self.block_order(true);
             if !shown.contains(&bs.anchor) || !shown.contains(&bs.head) {
@@ -2304,12 +2306,39 @@ impl Core {
         if id == TITLE || self.block(id).is_none() {
             return;
         }
-        self.block_sel = Some(BlockSel { anchor: id, head: id });
+        self.block_sel = Some(BlockSel { anchor: id, head: id, images: None });
         self.cell_sel = None;
     }
 
+    /// Toggle only the clicked image, independent of document or column order.
+    pub fn toggle_image_selection(&mut self, id: BlockId) {
+        if !matches!(self.kind_of(id), Some(BlockKind::Image { .. })) { return; }
+        let mut images = self.block_sel_ids();
+        images.retain(|id| matches!(self.kind_of(*id), Some(BlockKind::Image { .. })));
+        if self.block_sel.is_none() && self.sel.is_collapsed()
+            && matches!(self.kind_of(self.sel.head.block), Some(BlockKind::Image { .. })) {
+            images.push(self.sel.head.block);
+        }
+        if images.contains(&id) { images.retain(|selected| *selected != id); } else { images.push(id); }
+        self.cell_sel = None;
+        self.block_sel = images.first().map(|anchor| BlockSel {
+            anchor: *anchor, head: *images.last().unwrap(), images: Some(images.clone()),
+        });
+        if images.is_empty() {
+            // Keep an unselected image from becoming an implicit caret selection again.
+            self.sel = Selection::caret(Pos::new(TITLE, 0));
+        }
+    }
+
+    /// Extend a block selection from its anchor, or from the current caret block.
+    pub fn extend_block_selection(&mut self, head: BlockId) {
+        let anchor = self.block_sel.as_ref().map_or(self.sel.head.block, |s| s.anchor);
+        if anchor == TITLE || self.block(anchor).is_none() || self.block(head).is_none() { return; }
+        self.select_range(anchor, head);
+    }
+
     fn select_range(&mut self, anchor: BlockId, head: BlockId) {
-        self.block_sel = Some(BlockSel { anchor, head });
+        self.block_sel = Some(BlockSel { anchor, head, images: None });
         self.cell_sel = None;
     }
 
@@ -2419,8 +2448,11 @@ impl Core {
     /// The selected blocks in document order, top-most only. Passing over a
     /// folded heading also takes the blocks it hides.
     pub fn block_sel_ids(&self) -> Vec<BlockId> {
-        let Some(bs) = self.block_sel else { return vec![] };
+        let Some(bs) = self.block_sel.as_ref() else { return vec![] };
         let vis = self.block_order(true);
+        if let Some(images) = &bs.images {
+            return vis.into_iter().filter(|id| images.contains(id)).collect();
+        }
         let (Some(a), Some(h)) = (vis.iter().position(|x| *x == bs.anchor), vis.iter().position(|x| *x == bs.head))
         else {
             return vec![];
@@ -2463,7 +2495,7 @@ impl Core {
     }
 
     pub fn block_sel_move(&mut self, down: bool, extend: bool) {
-        let Some(bs) = self.block_sel else { return };
+        let Some(bs) = self.block_sel.as_ref() else { return };
         let scope = self.table_scope(bs.head);
         let paths = path_index(&self.doc.blocks);
         let vis: Vec<BlockId> = self
@@ -2499,7 +2531,7 @@ impl Core {
 
     /// ← selects the parent (or folds); → selects the first child (or unfolds).
     pub fn block_sel_horizontal(&mut self, right: bool) {
-        let Some(bs) = self.block_sel else { return };
+        let Some(bs) = self.block_sel.as_ref() else { return };
         let id = bs.head;
         let Some(b) = self.block(id) else { return };
         let foldable = self.can_fold(id);
@@ -2530,7 +2562,7 @@ impl Core {
     /// ⌘⇧↑ / ⌘⇧↓: select from the current top-level block (within the
     /// enclosing cell, callout, column or quote) to the start / end.
     pub fn block_sel_to_edge(&mut self, down: bool) {
-        let cur = self.block_sel.map(|b| b.head).unwrap_or(self.sel.head.block);
+        let cur = self.block_sel.as_ref().map(|b| b.head).unwrap_or(self.sel.head.block);
         if cur == TITLE {
             let first = self.doc.blocks.first().map(|b| b.id);
             let last = self.doc.blocks.last().map(|b| b.id);
@@ -3169,7 +3201,17 @@ impl Core {
     pub fn selected_blocks_content(&self) -> Vec<Block> {
         let index = block_index(&self.doc);
         if self.block_sel.is_some() {
-            return self.block_sel_ids().iter().filter_map(|id| index.get(id).map(|b| (*b).clone())).collect();
+            let ids = self.block_sel_ids();
+            let selected: HashSet<_> = ids.iter().copied().collect();
+            let mut emitted = HashSet::default();
+            return ids.into_iter().filter_map(|id| {
+                let grid = self.parent_of(id).filter(|p| matches!(p.kind, BlockKind::Column { .. }))
+                    .and_then(|col| self.parent_of(col.id))
+                    .filter(|g| matches!(g.kind, BlockKind::Grid)
+                        && g.children.iter().all(|col| col.children.iter().all(|b| selected.contains(&b.id))));
+                let id = grid.map_or(id, |g| g.id);
+                emitted.insert(id).then(|| index.get(&id).map(|b| (*b).clone())).flatten()
+            }).collect();
         }
         let us = self.units();
         let pos = unit_positions(&us);
@@ -3432,6 +3474,65 @@ mod tests {
         assert!(c.block(h).unwrap().folded);
         assert_eq!(c.doc.icon.as_deref(), Some("🐱"));
         assert!(xml(&c).contains("<p>a</p>"), "{}", xml(&c));
+    }
+
+    /// Command selection crosses columns without selecting intervening images.
+    #[test]
+    fn image_toggle_selection_is_discrete_and_copies_only_selected() {
+        let mut c = doc("<grid><column width-ratio=\"0.5\"><img src=\"a.png\"/><img src=\"b.png\"/></column><column width-ratio=\"0.5\"><img src=\"c.png\"/><img src=\"d.png\"/></column></grid>");
+        let g = &c.doc.blocks[0];
+        let (a, b, cc, d) = (g.children[0].children[0].id, g.children[0].children[1].id,
+            g.children[1].children[0].id, g.children[1].children[1].id);
+        c.sel = Selection::caret(Pos::new(d, 0));
+        c.toggle_image_selection(b);
+        assert_eq!(c.block_sel_ids(), vec![b, d]);
+        assert_eq!(c.selected_blocks_content().iter().map(|b| b.id).collect::<Vec<_>>(), vec![b, d]);
+        c.toggle_image_selection(cc);
+        c.toggle_image_selection(cc);
+        assert_eq!(c.block_sel_ids(), vec![b, d]);
+        let original = xml(&c);
+        c.delete_selected_blocks();
+        assert!(c.block(a).is_some() && c.block(cc).is_some());
+        assert!(c.block(b).is_none() && c.block(d).is_none());
+        c.undo();
+        assert_eq!(xml(&c), original);
+        c.sel = Selection::caret(Pos::new(d, 0));
+        c.toggle_image_selection(b);
+        c.toggle_image_selection(d);
+        assert_eq!(c.block_sel_ids(), vec![b]);
+        c.toggle_image_selection(b);
+        assert!(c.block_sel.is_none());
+        assert_eq!(c.sel.head.block, TITLE);
+    }
+
+    /// Copying selected images retains complete rows and fresh paste identities.
+    #[test]
+    fn selected_images_copy_single_range_and_row() {
+        let mut c = doc("<img src=\"assets/a.png\" width=\"120\" height=\"80\" caption=\"A\"/><img src=\"assets/b.png\" caption=\"B\"/>");
+        let (a, b) = (c.doc.blocks[0].id, c.doc.blocks[1].id);
+        c.sel = Selection::caret(Pos::new(a, 0));
+        assert_eq!(c.selected_blocks_content()[0].kind, c.block(a).unwrap().kind);
+        c.extend_block_selection(b);
+        assert_eq!(c.block_sel_ids(), vec![a, b]);
+        assert_eq!(c.selected_blocks_content().len(), 2);
+        c.move_image_beside(b, a, false);
+        c.sel = Selection::caret(Pos::new(a, 0));
+        c.extend_block_selection(b);
+        let copied = c.selected_blocks_content();
+        assert_eq!(copied.len(), 1);
+        assert!(matches!(copied[0].kind, BlockKind::Grid));
+        let original = xml(&c);
+        let grid = copied[0].id;
+        c.insert_blocks_at(copied.iter().map(Block::fresh_ids).collect(), grid, DropPlace::After);
+        assert_eq!(c.doc.blocks.len(), 2);
+        let copy = &c.doc.blocks[1];
+        assert_ne!(copy.id, grid);
+        assert_ne!(copy.children[0].children[0].id, a);
+        assert_eq!(copy.children[0].children[0].kind, c.block(a).unwrap().kind);
+        c.undo();
+        assert_eq!(xml(&c), original);
+        c.redo();
+        assert_eq!(c.doc.blocks.len(), 2);
     }
 
     /// Side drops preserve images and captions across new/existing grids and undo.

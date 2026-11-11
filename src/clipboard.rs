@@ -39,3 +39,15 @@ pub fn clipboard_html() -> Option<String> {
 pub fn clipboard_html() -> Option<String> {
     None
 }
+
+/// Internal copies captured during a scripted run, including their XML metadata.
+pub static FAKE_COPIED_CLIPBOARD: std::sync::Mutex<Option<gpui::ClipboardItem>> = std::sync::Mutex::new(None);
+
+/// Write to the isolated pasteboard when a harness fixture has enabled it.
+pub fn write(item: gpui::ClipboardItem, cx: &mut gpui::App) {
+    if FAKE_CLIPBOARD.lock().unwrap().is_some() {
+        *FAKE_COPIED_CLIPBOARD.lock().unwrap() = Some(item);
+    } else {
+        cx.write_to_clipboard(item);
+    }
+}

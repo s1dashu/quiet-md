@@ -75,3 +75,7 @@ python3 tools/harness/compare.py tools/harness/examples/menus.txt <旧版二进�
 - 不用 `open` 命令。
 - 需要选文件时，用 `pick a|b` 代替系统对话框。
 - 不要拿用户的真实文档库当 `lib_dir`。确实需要时只读复制一份，产物里也不要提交用户的内容。
+
+`shift-click x y` and `cmd-click x y` send modifier-aware clicks. After `clip text <file>` enables the isolated pasteboard, `key cmd-c` and `key cmd-x` capture internal XML there, so a subsequent `key cmd-v` can test copy/paste without touching the system clipboard.
+
+`python3 tools/harness/column_text_selection.py` checks that dragging across column text replaces the selected words without adding a paragraph. It covers top, center and bottom alignment using isolated libraries.

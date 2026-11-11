@@ -638,16 +638,20 @@ impl R<'_> {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
-                    if !ev.modifiers.shift && e.img.crop.is_none() {
+                    if e.img.crop.is_none() {
                         cx.stop_propagation();
                         window.prevent_default();
                         window.focus(&e.focus);
-                        e.core.clear_block_sel();
-                        e.core.cell_sel = None;
-                        e.core.sel = Selection::caret(Pos::new(id, 0));
+                        if ev.modifiers.platform {
+                            e.core.toggle_image_selection(id);
+                        } else if !draggable || !e.core.block_sel_ids().contains(&id) {
+                            e.core.clear_block_sel();
+                            e.core.cell_sel = None;
+                            e.core.sel = Selection::caret(Pos::new(id, 0));
+                        }
                         e.menu = None;
                         // Reuse the block drag threshold, drop targets and undo transaction.
-                        if draggable {
+                        if draggable && !ev.modifiers.platform {
                             e.press_handle(id, ev.position);
                         }
                         cx.notify();

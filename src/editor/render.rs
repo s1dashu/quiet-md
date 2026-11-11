@@ -1254,7 +1254,7 @@ impl Editor {
             self.cache.borrow().get(&p.block).map(|l| Bounds::new(l.position_for(p.offset), size(px(2.), l.line_height)))
         };
         let (block, target) = match req {
-            Reveal::Caret => match self.core.block_sel {
+            Reveal::Caret => match &self.core.block_sel {
                 Some(b) => (b.head, self.block_bounds.borrow().get(&b.head).copied()),
                 // A selected image has no text layout: keep its box in view.
                 None => {
