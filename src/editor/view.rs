@@ -1757,7 +1757,8 @@ impl Editor {
         self.changed(window, cx);
     }
 
-    fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Copy selected content for both keyboard and contextual toolbar actions.
+    pub(super) fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
         let cells = self.core.cell_sel.is_some();
         let blocks = if cells { self.core.selected_cells_content() } else { self.core.selected_blocks_content() };
         let selected_image = self.core.sel.is_collapsed()

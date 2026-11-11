@@ -1117,7 +1117,7 @@ impl Editor {
 
     // ---- toolbar
 
-    /// 裁剪 · 重置图片 | 添加描述 | 左 · 中 · 右 above the selected image.
+    /// Crop, caption, alignment and copy actions above the selected image.
     pub(super) fn image_toolbar(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let focused = self.focus.is_focused(window);
         let id = match &self.img.crop {
@@ -1251,6 +1251,24 @@ impl Editor {
             );
             w += 24.;
             n += 1;
+        }
+        if !cropping {
+            bar = bar.child(sep()).child(
+                btn("itb-copy")
+                    .tip_above(crate::settings::text("复制"), Some("⌘C"))
+                    .child(icon("copy", 18., Theme::icon()))
+                    .on_mouse_down(MouseButton::Left, act(|e, id, window, cx| {
+                        window.focus(&e.focus);
+                        e.core.clear_block_sel();
+                        e.core.cell_sel = None;
+                        e.core.sel = Selection::caret(Pos::new(id, 0));
+                        if e.copy_selection(cx) {
+                            e.toast_kind(ToastKind::Success, crate::settings::tr("已复制图片", "Image copied"), cx);
+                        }
+                    })),
+            );
+            w += 25.;
+            n += 2;
         }
         w += (n - 1) as f32 * 8.;
         let x = clampf(f32::from(rect.center().x) - w / 2., f32::from(viewport.left()) + 8., f32::from(viewport.right()) - w - 8.);
