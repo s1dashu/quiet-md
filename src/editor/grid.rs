@@ -31,10 +31,6 @@ fn ratio_of(b: &Block) -> f32 {
     if let BlockKind::Column { ratio } = b.kind { ratio } else { 0. }
 }
 
-fn contains(b: &Block, id: BlockId) -> bool {
-    b.id == id || b.children.iter().any(|c| contains(c, id))
-}
-
 /// The list item showing `id` (the deepest row on its path).
 pub(super) fn item_containing(items: &[Item], blocks: &[Block], id: BlockId) -> Option<usize> {
     let p = super::core::find_path(blocks, id)?;
@@ -170,8 +166,7 @@ impl R<'_> {
         let horizontal = env.width >= HORIZONTAL_MIN.max(f32::from(b.grid_gap.unwrap_or(20)) * (n - 1) as f32 + 36. * n as f32);
         let dragging = ed.col_drag.as_ref().is_some_and(|d| d.grid == b.id);
         // Hovering a gap's circle (above the grid) still counts as hovering the grid.
-        let focused = !ed.read_only
-            && (dragging || ed.gap_hover.is_some_and(|h| h.0 == b.id) || (!ed.core.in_block_mode() && contains(b, ed.core.sel.head.block)));
+        let arranging = !ed.read_only && (dragging || ed.gap_hover.is_some_and(|h| h.0 == b.id));
         let group = SharedString::from(format!("grid-{}", b.id.0));
         // A top-level grid's column boxes overhang the text column by 2px.
         let span = env.width + if env.root { 4. } else { 0. };
@@ -191,7 +186,7 @@ impl R<'_> {
                 .flex_col()
                 .min_w_0()
                 .px(px(2.))
-                .child(if focused { area.bg(Theme::block_bg_area()) } else if ed.read_only { area } else { area.group_hover(group.clone(), |s| s.bg(Theme::block_bg_area())) })
+                .child(if arranging { area.border_1().border_color(Theme::primary()) } else if ed.read_only { area } else { area.group_hover(group.clone(), |s| s.border_1().border_color(Theme::line_border())) })
                 .when(horizontal && b.grid_vertical_align != VerticalAlign::Top,
                     |d| d.child(self.column_space(cid, cx)))
                 .child(self.blocks(&c.children, col_env, cx).flex_none())
