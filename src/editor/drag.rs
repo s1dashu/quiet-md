@@ -507,7 +507,7 @@ impl R<'_> {
     /// keeps its own bar and scroll state).
     pub(super) fn ghost_table(&self, b: &Block, t: &Table, cx: &mut Context<Editor>) -> AnyElement {
         let env = Env { cell: true, root: false, ..TOP };
-        let widths = self.ed.table_widths(b.id, t);
+        let widths = t.col_widths.clone();
         let n = widths.len();
         let mut grid = div().grid().grid_col_widths(widths.clone()).w(px(widths.iter().sum()));
         for (r, c, cell) in t.cells() {

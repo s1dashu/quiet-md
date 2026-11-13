@@ -17,6 +17,8 @@ use std::time::{Duration, Instant};
 
 /// Width of the row bar / height of the column bar.
 const BAR: f32 = 10.;
+const CELL_PAD: f32 = 22.;
+const CHAR_WIDTH: f32 = 7.;
 /// Outer corner radius of the cell grid.
 /// `top: 26px` for the pinned header row.
 const STICKY_TOP: f32 = 26.;
@@ -40,6 +42,7 @@ pub struct TableUi {
     pub scrolled: Option<Instant>,
     /// Each table's sideways scroll and its scrollbar.
     pub hscroll: RefCell<HashMap<BlockId, (ScrollHandle, Rc<super::scrollbar::Scrollbar>)>>,
+    autofit: RefCell<HashMap<BlockId, (u64, f32, Rc<Vec<f32>>)>>,
 }
 
 pub type Stuck = Rc<RefCell<HashMap<BlockId, Bounds<Pixels>>>>;
@@ -73,8 +76,21 @@ impl Drag {
 
 impl Editor {
     /// Column widths a table is drawn with (live while one is dragged).
-    pub(super) fn table_widths(&self, id: BlockId, t: &Table) -> Vec<f32> {
+    pub(super) fn table_widths(&self, id: BlockId, t: &Table, available: f32) -> Vec<f32> {
         let mut w = t.col_widths.clone();
+        if !w.is_empty() && w.iter().all(|x| *x <= Table::MIN_WIDTH) {
+            let key = self.core.generation;
+            if let Some((cached_key, width, cached)) = self.tables.autofit.borrow().get(&id)
+                && *width == available
+                && *cached_key == key
+            {
+                w = cached.as_ref().clone();
+            } else {
+                let fitted = Rc::new(autofit_widths(t, available));
+                w = fitted.as_ref().clone();
+                self.tables.autofit.borrow_mut().insert(id, (key, available, fitted));
+            }
+        }
         if let Some(Drag::Resize { table, col, live, .. }) = &self.tables.drag
             && *table == id
             && let Some(x) = w.get_mut(*col)
@@ -349,6 +365,146 @@ impl Editor {
     }
 }
 
+fn autofit_widths(t: &Table, available: f32) -> Vec<f32> {
+    let ncols = t.ncols();
+    let mut need = vec![0f32; ncols];
+    let mut cells = vec![];
+    for (_, c, cell) in t.cells() {
+        let lines: Vec<usize> = plain_text_of(&cell.blocks).lines().map(text_width).collect();
+        let len = lines.iter().copied().max().unwrap_or(1) as f32;
+        let span = cell.colspan.max(1) as usize;
+        cells.push((c, span, lines));
+        let span = &mut need[c..(c + span).min(ncols)];
+        if span.len() == 1 {
+            span[0] = span[0].max(len);
+        } else {
+            let extra = (len - span.iter().sum::<f32>()).max(0.) / span.len() as f32;
+            span.iter_mut().for_each(|x| *x += extra);
+        }
+    }
+    let desired: Vec<f32> = need.iter().map(|x| (x * CHAR_WIDTH + CELL_PAD).max(Table::MIN_WIDTH)).collect();
+    let room = (available - BAR).max(ncols as f32 * Table::MIN_WIDTH);
+    if desired.iter().sum::<f32>() <= room {
+        return desired;
+    }
+    let min_cap = ((Table::MIN_WIDTH - CELL_PAD) / CHAR_WIDTH).ceil() as usize;
+    let mut caps = vec![min_cap; ncols];
+    let units = ((room - BAR - CELL_PAD * ncols as f32) / CHAR_WIDTH).floor() as usize;
+        let mut budget = units.saturating_sub(min_cap * ncols).min(128);
+    let wraps = |caps: &[usize], c: usize, span: usize, lines: &[usize]| {
+        let cap = caps[c..(c + span).min(caps.len())].iter().sum::<usize>().max(1);
+        lines.iter().map(|len| len.div_ceil(cap).saturating_sub(1)).sum::<usize>()
+    };
+    let mut costs: Vec<usize> = cells.iter().map(|&(c, span, ref lines)| wraps(&caps, c, span, lines)).collect();
+    let mut total: usize = costs.iter().sum();
+    while budget > 0 {
+        let mut best = None;
+        for col in 0..ncols {
+            let mut next = total;
+            for (i, &(c, span, ref lines)) in cells.iter().enumerate() {
+                if (c..c + span).contains(&col) {
+                    let mut trial = caps.clone();
+                    trial[col] += 1;
+                    next -= costs[i];
+                    next += wraps(&trial, c, span, lines);
+                }
+            }
+            if next < total && best.is_none_or(|(_, old)| next < old) {
+                best = Some((col, next));
+            }
+        }
+        let Some((col, next)) = best else { break };
+        caps[col] += 1;
+        for (i, &(c, span, ref lines)) in cells.iter().enumerate() {
+            if (c..c + span).contains(&col) {
+                costs[i] = wraps(&caps, c, span, lines);
+            }
+        }
+        total = next;
+        budget -= 1;
+    }
+    let mut out: Vec<f32> = caps.iter().map(|c| CELL_PAD + *c as f32 * CHAR_WIDTH).collect();
+    let used = BAR + out.iter().sum::<f32>();
+    if let Some(last) = out.last_mut() {
+        *last += (room - used).max(0.);
+    }
+    out
+}
+
+fn plain_text_of(blocks: &[Block]) -> String {
+    fn walk(blocks: &[Block], first: &mut bool, out: &mut String) {
+        for b in blocks {
+            if !b.text.is_empty() {
+                if !*first {
+                    out.push('\n');
+                }
+                *first = false;
+                out.push_str(&b.text.plain_text());
+            }
+            walk(&b.children, first, out);
+        }
+    }
+    let (mut out, mut first) = (String::new(), true);
+    walk(blocks, &mut first, &mut out);
+    out
+}
+
+fn text_width(s: &str) -> usize {
+    s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(s: &str) -> TableCell {
+        TableCell { blocks: vec![Block::text(s)], ..TableCell::empty() }
+    }
+
+    fn table(cols: usize, rows: Vec<Vec<TableCell>>) -> Table {
+        Table { col_widths: vec![Table::MIN_WIDTH; cols], header_rows: 0, header_col: false, rows }
+    }
+
+    #[test]
+    fn autofit_keeps_short_lines_intact() {
+        let t = table(2, vec![vec![cell("两个字"), cell("abc")]]);
+        let w = autofit_widths(&t, 300.);
+        assert_eq!(w, vec![50., 50.]);
+    }
+
+    #[test]
+    fn autofit_counts_wide_characters() {
+        let t = table(2, vec![vec![cell("汉字汉字汉字"), cell("abcdef")]]);
+        let w = autofit_widths(&t, 200.);
+        assert!(w[0] > w[1]);
+    }
+
+    #[test]
+    fn autofit_minimizes_total_wraps() {
+        let t = table(2, vec![vec![cell("两个字"), cell("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]]);
+        let w = autofit_widths(&t, 300.);
+        assert_eq!(w[0], 50.);
+        assert!(w[1] > 50.);
+    }
+
+    #[test]
+    fn autofit_handles_merged_columns() {
+        let mut wide = cell("xxxxxxxxxxxxxxxxxxxxxxx");
+        wide.colspan = 3;
+        let t = table(3, vec![vec![wide, TableCell::covered(), TableCell::covered()], vec![cell("a"), cell("b"), cell("c")]]);
+        let w = autofit_widths(&t, 140.);
+        assert_eq!(w.len(), 3);
+        assert!(w.iter().all(|x| *x >= Table::MIN_WIDTH));
+    }
+
+    #[test]
+    fn autofit_uses_the_longest_line() {
+        let blocks = vec![Block::text("short"), Block::text("aaaaaaaaaaaa")];
+        let t = table(1, vec![vec![TableCell { blocks, ..TableCell::empty() }]]);
+        assert_eq!(autofit_widths(&t, 200.), vec![106.]);
+    }
+}
+
 /// The snapshot under the pointer while lines move: a primary bar with a
 /// 「共 N 行 / 列」 label beside (rows) or below (columns) it.
 fn move_snapshot(cols: bool, n: usize) -> Div {
@@ -476,11 +632,11 @@ impl Element for Sticky {
 }
 
 impl R<'_> {
-    pub(super) fn table(&self, b: &Block, t: &Table, root: bool, cx: &mut Context<Editor>) -> AnyElement {
+    pub(super) fn table(&self, b: &Block, t: &Table, root: bool, available: f32, cx: &mut Context<Editor>) -> AnyElement {
         let ed = self.ed;
         let id = b.id;
         let env = Env { depth: 0, cell: true, color: None, in_callout: false, root: false, column: false, quote: false, width: 0. };
-        let widths = ed.table_widths(id, t);
+        let widths = ed.table_widths(id, t, available);
         let n = widths.len();
         let nrows = t.rows.len();
         let total: f32 = widths.iter().sum();
