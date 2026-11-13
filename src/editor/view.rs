@@ -1900,7 +1900,9 @@ impl Editor {
         let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).filter(|d| !d.blocks.is_empty());
         let html = match &fake {
             Some(f) => f.html.clone(),
-            None if !plain && internal.is_none() && rich_target => crate::clipboard::clipboard_html(),
+            None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_display_math) => {
+                crate::clipboard::clipboard_html()
+            }
             None => None,
         };
         let html = html.filter(|_| !plain && rich_target).map(|h| {

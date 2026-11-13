@@ -3733,6 +3733,19 @@ mod tests {
     }
 
     #[test]
+    fn paste_markdown_display_math_into_nonempty_block() {
+        let mut c = doc("<title>T</title><p>x</p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 1));
+        c.paste_markdown("$$\nV = I R\n$$\nafter");
+        assert_eq!(c.doc.blocks[0].text.text, "x");
+        assert_eq!(c.doc.blocks[1].text.text, EQUATION);
+        let equation = c.doc.blocks.iter().find(|b| b.text.text == EQUATION).unwrap();
+        assert_eq!(c.equation_source(Pos::new(equation.id, 0)).as_deref(), Some("V = I R"));
+        assert!(c.doc.blocks.iter().any(|b| b.text.text == "after"));
+    }
+
+    #[test]
     fn paste_images_at_selection_undo_and_round_trip() {
         for (body, range, before, after) in [
             ("前后", 3..3, "前", "后"),

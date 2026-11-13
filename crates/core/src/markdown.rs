@@ -543,8 +543,13 @@ struct Md {
 fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) -> String {
     // Merge runs that only differ in marks Markdown can't express (colors).
     let mut runs: Vec<(Md, String)> = vec![];
+    let mut display_math = false;
     for (r, m) in t.spans() {
         let s = match m.inline.as_ref().and_then(Inline::equation) {
+            Some(src) if src.contains('\n') => {
+                display_math = true;
+                t.text[r].chars().map(|_| format!("$$\n{src}\n$$")).collect()
+            }
             Some(src) => t.text[r].chars().map(|_| format!("${src}$")).collect(),
             None => match &m.inline {
                 Some(Inline { kind: InlineKind::File(f), .. }) => t.text[r].chars().map(|_| f.name.clone()).collect(),
@@ -583,6 +588,10 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
         let body = s.trim();
         let lead = &s[..s.len() - s.trim_start().len()];
         let trail = &s[s.trim_end().len()..];
+        if s.starts_with("$$\n") && s.ends_with("\n$$") {
+            out.push_str(&s);
+            continue;
+        }
         if body.is_empty() {
             out.push_str(&s);
             continue;
@@ -611,6 +620,9 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
         out.push_str(lead);
         out.push_str(&x);
         out.push_str(trail);
+    }
+    if display_math {
+        return out.replace("$$<br>", "$$\n").replace("<br>$$", "\n$$");
     }
     out.replace('\n', "<br>")
 }
@@ -680,6 +692,23 @@ mod tests {
         let out = write_file(&doc, front_matter(src).0, Some(base));
         assert_eq!(out, src);
         assert_eq!(write_file(&parse_file(&out, "page", Some(base)), front_matter(&out).0, Some(base)), out);
+    }
+
+    #[test]
+    fn display_math_round_trips() {
+        let src = "---\ntitle: x\n---\n\n$$\nV &= I R \\\\\nQ_c &= 2I - I^2\n$$\n";
+        let base = Path::new(if cfg!(windows) { "C:/notes" } else { "/notes" });
+        let doc = parse_file(src, "page", Some(base));
+        assert_eq!(write_file(&doc, front_matter(src).0, Some(base)), src);
+    }
+
+    #[test]
+    fn display_math_export_keeps_surrounding_text() {
+        let mut text = RichText::plain("before ");
+        text.push(crate::editor::core::EQUATION, Marks { inline: Some(crate::docxml::to_inline(InlineKind::Equation("V = I R\nQ = I^2".into()))), ..Default::default() });
+        text.push(" after", Marks::default());
+        let doc = Document { blocks: vec![Block::new(BlockKind::Text, text)], ..Default::default() };
+        assert_eq!(to_markdown(&doc), "before $$\nV = I R\nQ = I^2\n$$ after\n");
     }
 
     fn preserved(original: &str, edit: impl FnOnce(&mut Document)) -> String {

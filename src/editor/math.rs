@@ -18,10 +18,10 @@ pub const SVG_PREFIX: &str = "katex-svg/";
 
 const SIZES: [f32; 11] = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074, 2.488];
 
-/// The test for rendering as a block (display) equation:
-/// `/\\begin\n*\{(equation|split|align|gather|alignat|CD)\}|\\tag/`.
+/// The test for rendering as a block (display) equation: multi-line `$$`
+/// imports, or `/\\begin\n*\{(equation|split|align|gather|alignat|CD)\}|\\tag/`.
 pub fn is_block(src: &str) -> bool {
-    if src.contains("\\tag") {
+    if src.contains('\n') || src.contains("\\tag") {
         return true;
     }
     let mut rest = src;
@@ -1090,6 +1090,11 @@ mod tests {
         assert!(is_block("x\\tag{1}"));
         assert!(!is_block("\\begin{align*}a\\end{align*}"));
         assert!(!is_block("\\frac{a}{b}"));
+    }
+
+    #[test]
+    fn multiline_equations_are_display_math() {
+        assert!(is_block("V &= I R \\\nQ_c &= 2I"));
     }
 
     #[test]
