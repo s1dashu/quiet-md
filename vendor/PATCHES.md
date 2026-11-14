@@ -49,8 +49,9 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 27 | `platform.rs`、`platform/mac/window.rs`、`platform/windows/window.rs`、`window.rs` | `Window::set_window_min_size`：创建后改窗口最小内容尺寸（macOS `setContentMinSize`，Windows 改 `WM_GETMINMAXINFO` 用的 `min_size`；其他平台不变） | 最小宽度 = 文档区最小宽度 + 侧栏宽度，随侧栏开合和拖宽变化 |
 | 28 | `platform.rs`、`platform/mac/window.rs`、`window.rs` | `Window::present_next_frame_in_transaction`：下一帧走 `PlatformWindow::draw_in_transaction`，macOS 上这一帧 `presentsWithTransaction`，和渲染期间改的原生视图在同一个 Core Animation 事务里上屏；其他平台照常 `draw` | 侧栏玻璃（`NSGlassEffectView`）大小或显隐变化的那一帧和 GPUI 画面同时出现；原来画面异步上屏、晚一个刷新，开关侧栏时玻璃先没（先出来），看着像顿了一下 |
 | 29 | `scene.rs` | `insert_primitive` 判断阴影是否落在裁剪区外时，按着色器实际画到的范围（四周各多 3 倍模糊半径）算，原来只看阴影本身的矩形 | 阴影的模糊部分落进裁剪区、矩形本身在区外时不再被丢掉（主页拖入文件时，按连续圆角逐行裁剪的内侧光晕） |
-| 30 | `text_system/line_layout.rs` | `layout_wrapped_line`：文字含从右到左的字符（希伯来、阿拉伯等）且需要折行时，改走 `wrap_bidi`：按阅读顺序取每个字符的宽度来定折行点，每行单独交给平台排版（行内由平台重排），再把各行首尾相接拼成一个布局，折行点放在每行第一个字形上 | 整段一次排版后字形是显示顺序，原来按显示顺序切行，阿拉伯文多行时行序颠倒、从词中间断开；其他文字不走这条路 |
+| 30 | `text_system/line_layout.rs` | `layout_wrapped_line`：文字含从右到左的字符（希伯来、阿拉伯等）且需要折行时，改走 `wrap_bidi`：按阅读顺序取每个字符的宽度来定折行点，每行单独交给平台排版（行内由平台重排），再把各行首尾相接拼成一个布局，折行点放在每行第一个字形上；每行末尾的空格不参与排版 | 整段一次排版后字形是显示顺序，原来按显示顺序切行，阿拉伯文多行时行序颠倒、从词中间断开；其他文字不走这条路 |
 | 31 | `text_system/line_wrapper.rs` | `is_word_char` 把希伯来、阿拉伯、叙利亚、它拿、N'Ko 字母及阿拉伯/希伯来表现形式算作单词字符，并加了测试 | 这些文字用空格分词，按词换行，不再在词中间断开 |
+| 32 | `text_system/line.rs` | `WrappedLine::paint` / `paint_background`：折成多行、且第一个字母属于从右到左文字的段落，默认的左对齐改成右对齐（`rtl_align`）；单行文字、显式指定的对齐和编辑器用的 `paint_rows` 不变 | 阿拉伯文等的多行说明文字贴右边排，符合这些文字的阅读习惯 |
 
 ## taffy 0.9.0
 
