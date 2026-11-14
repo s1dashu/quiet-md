@@ -161,7 +161,7 @@ impl Workspace {
             .child(self.import_button("folder-import", Some(id.clone()), cx))
             .child(crate::ui::header_icon("folder-new", "plus")
                 .child(self.home.track("create-folder"))
-                .when(self.create_menu.is_some(), |d| d.bg(Theme::fill_hover()))
+                .when(self.create_menu.as_ref().is_some_and(|(_, pos)| self.home.anchor("create-folder").is_some_and(|b| point(b.left(), b.bottom() + px(4.)) == *pos)), |d| d.bg(Theme::fill_hover()))
                 .tip(tr("新建", "New"), Some(crate::shortcuts::hint("workspace::NewDoc", "⌘ + N")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| { let pos = w.home.anchor("create-folder").map_or(ev.position(), |b| point(b.left(), b.bottom() + px(4.))); let p = Some(doc.clone()); w.create_menu = if w.create_menu.is_some() { None } else { Some((p, pos)) }; cx.notify(); })))

@@ -359,7 +359,7 @@ impl Workspace {
                 .hover(|s| s.bg(Theme::sidebar_hover()))
                 .child(icon(name, 16., Theme::icon()))
         };
-        let create_open = self.create_menu.is_some();
+        let create_open = matches!(self.create_menu, Some((None, _)));
         let row = div().h(px(SECTION_H)).pl(px(4.)).pt(px(SECTION_TOP)).flex().items_center().group(group.clone());
         if let (1, Some(sel)) = (idx, self.batch.as_ref()) {
             let n = sel.len();
@@ -572,24 +572,36 @@ impl Workspace {
             )
     }
 
-    /// Direct creation actions inside a folder.
+    /// Creation inside a folder: the folder button makes one directly; the plus
+    /// opens the same 新建 menu as 我的文档's, hung from the button.
     fn add_button(&self, e: &Entry, key: &str, folder: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let id = e.id.clone();
+        let slot = format!("add-{key}-{}", e.id);
+        let (record, lookup) = (self.more_bounds.clone(), self.more_bounds.clone());
+        let anchor = |b: Bounds<Pixels>| point(b.left(), b.bottom() + px(4.));
+        let open = !folder && self.create_menu.as_ref().is_some_and(|(p, pos)| p.as_deref() == Some(e.id.as_str()) && self.more_bounds.borrow().get(&slot).is_some_and(|b| anchor(*b) == *pos));
         div()
             .id(SharedString::from(format!("add-{key}-{folder}-{}", e.id)))
+            .relative()
             .size(px(22.))
             .p(px(3.))
             .flex_none()
             .rounded(px(6.))
-            .opacity(self.folder_drag.reveal(&e.id))
+            .opacity(if open { 1. } else { self.folder_drag.reveal(&e.id) })
+            .when(open, |d| d.bg(Theme::sidebar_selected()))
             .hover(|s| s.bg(Theme::sidebar_selected()))
             .child(icon(if folder { "folder-plus" } else { "plus" }, 16., Theme::icon()))
-            .tip(crate::settings::tr(if folder { "新建文件夹" } else { "新建文档" }, if folder { "New folder" } else { "New document" }), None)
+            .when(!folder, |d| { let slot = slot.clone(); d.child(canvas(move |b, _, _| { record.borrow_mut().insert(slot.clone(), b); }, |_, _, _, _| {}).absolute().inset_0()) })
+            .tip(crate::settings::tr(if folder { "新建文件夹" } else { "新建" }, if folder { "New folder" } else { "New" }), None)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |w, _, window, cx| {
+            .on_click(cx.listener(move |w, ev: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 w.row_menu = None;
-                if folder { w.new_folder(Some(id.clone()), window, cx); } else { w.new_child(&id, window, cx); }
+                if folder { w.new_folder(Some(id.clone()), window, cx); }
+                else {
+                    let pos = lookup.borrow().get(&slot).copied().map_or(ev.position(), anchor);
+                    w.create_menu = if open { None } else { Some((Some(id.clone()), pos)) };
+                }
                 cx.notify();
             }))
     }
