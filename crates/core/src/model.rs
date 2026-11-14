@@ -326,6 +326,17 @@ impl RichText {
         out.append(&self.slice(range.end..self.len()));
         *self = out;
     }
+    pub fn replace_text(&mut self, range: Range<usize>, replacement: &str) {
+        let mut out = self.slice(0..range.start);
+        let marks = if let Some((_, marks)) = self.spans().find(|(r, _)| r.start < range.end && r.end > range.start) {
+            marks.clone()
+        } else {
+            self.marks_at(range.start)
+        };
+        out.push(replacement, marks);
+        out.append(&self.slice(range.end..self.len()));
+        *self = out;
+    }
 
     pub fn insert_plain(&mut self, offset: usize, s: &str, marks: Marks) {
         let mut ins = RichText::default();
