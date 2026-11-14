@@ -350,7 +350,7 @@ impl Theme {
     pub fn line_divider() -> Hsla { ca(craft::N1000, 0.06) }
     pub fn line_border() -> Hsla { ca(craft::N1000, 0.08) }
     /// The 0.5pt edge of a 主页 document card, and the ring around it under the pointer.
-    pub fn line_sheet() -> Hsla { ca(craft::N1000, 0.07) }
+    pub fn line_sheet() -> Hsla { ca(craft::N1000, 0.14) }
     pub fn ring_sheet() -> Hsla { ca(craft::N1000, 0.07) }
     pub fn fill_hover() -> Hsla { ca(craft::N1000, 0.045) }
     pub fn fill_hover_strong() -> Hsla { ca(craft::N1000, 0.06) }
