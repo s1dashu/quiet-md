@@ -42,6 +42,7 @@ minisign-verify = "0.3.0"
 log = "0.4"
 sys-locale = "0.3.2"
 jpeg-decoder = { version = "0.3", default-features = false }
+png = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.24"
