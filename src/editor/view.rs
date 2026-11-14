@@ -2598,8 +2598,8 @@ impl Editor {
         if s == "\n" {
             return;
         }
-        self.core.insert_text(&s);
-        if s == " " {
+        self.core.insert_with_typing_rules(&s);
+        if s == " " || s == "　" {
             let _ = self.core.markdown_block_shortcut() || self.core.markdown_divider() || self.core.autolink();
         } else if s == "-" {
             self.core.markdown_divider();

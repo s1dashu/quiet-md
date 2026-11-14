@@ -939,16 +939,108 @@ impl Core {
         self.sel = Selection::caret(Pos::new(p.block, p.offset + s.len()));
     }
 
+    /// Typing rules for Chinese punctuation, pairs and script spacing.
+    pub fn insert_with_typing_rules(&mut self, s: &str) {
+        let id = self.sel.head.block;
+        if id == TITLE || self.is_code(id) || !self.markdown_enabled(id) {
+            return self.insert_text(s);
+        }
+        if !self.sel.is_collapsed() && self.wrap_selection(s) {
+            return;
+        }
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() {
+            return self.insert_text(&spaced_text(&self.text_of(p.block).map(|t| t.text[..p.offset].to_string()).unwrap_or_default(), s));
+        }
+        if let Some(next) = self.jump_over_pair_close(p, s) {
+            self.sel = Selection::caret(Pos::new(p.block, next));
+            return;
+        }
+        let before = self.text_of(p.block).map(|t| t.text[..p.offset].to_string()).unwrap_or_default();
+        if self.insert_punctuation_rule(p, &before, s) {
+            return;
+        }
+        if typing_pairs().into_iter().any(|(_, (open, _))| open == s) {
+            self.checkpoint(EditKind::Other);
+            let (_, (_, close)) = typing_pairs().into_iter().find(|(_, (open, _))| *open == s).unwrap();
+            self.insert_text(&format!("{s}{close}"));
+            self.sel = Selection::caret(Pos::new(p.block, self.sel.head.offset - close.len()));
+            return;
+        }
+        if s == "》" && before.trim_start().is_empty() {
+            self.insert_text("> ");
+            return;
+        }
+        self.insert_text(&spaced_text(&before, s));
+    }
+
+    fn insert_punctuation_rule(&mut self, p: Pos, before: &str, s: &str) -> bool {
+        if let Some(out) = double_punctuation(before, s) {
+            let start = p.offset - s.len();
+            let marks = self.text_of(p.block).unwrap().marks_at(start);
+            let mut ins = RichText::default();
+            ins.push(&out, marks);
+            self.text_mut(p.block).unwrap().replace(start..p.offset + s.len(), &ins);
+            self.sel = Selection::caret(Pos::new(p.block, start + out.len()));
+            return true;
+        }
+        if s == "·" && before.ends_with('·') {
+            self.text_mut(p.block).unwrap().replace(p.offset - s.len()..p.offset + s.len(), &RichText::plain("``"));
+            self.sel = Selection::caret(Pos::new(p.block, p.offset - s.len() + 1));
+            return true;
+        }
+        if s == "·" && before == "`" {
+            self.checkpoint(EditKind::Other);
+            self.break_coalescing();
+            self.turn_one(p.block, BlockKind::Code { lang: "plaintext".into(), caption: None, wrap: false });
+            self.block_mut(p.block).unwrap().text = RichText::default();
+            self.sel = Selection::caret(Pos::new(p.block, 0));
+            return true;
+        }
+        if s == "＊" {
+            return self.normalize_cjk_inline();
+        }
+        false
+    }
+
+    fn wrap_selection(&mut self, s: &str) -> bool {
+        let Some((open, close)) = (match s {
+            "·" => Some(("`", "`")),
+            "【" => Some(("[", "]")),
+            "¥" | "￥" => Some(("$", "$")),
+            "《" => Some(("《", "》")),
+            "（" => Some(("（", "）")),
+            "“" | "”" => Some(("“", "”")),
+            "‘" | "’" => Some(("‘", "’")),
+            _ => None,
+        }) else { return false };
+        let (s, e) = self.ordered();
+        if s.block != e.block { return false; }
+        let Some(content) = self.text_of(s.block).map(|t| t.slice(s.offset..e.offset)) else { return false };
+        let mut ins = RichText::plain(open);
+        ins.append(&content);
+        ins.push(close, Marks::default());
+        self.checkpoint(EditKind::Other);
+        self.break_coalescing();
+        self.text_mut(s.block).unwrap().replace(s.offset..e.offset, &ins);
+        let start = s.offset + open.len();
+        self.sel = Selection { anchor: Pos::new(s.block, start), head: Pos::new(s.block, e.offset + open.len()) };
+        true
+    }
+
+    fn jump_over_pair_close(&self, p: Pos, s: &str) -> Option<usize> {
+        let text = &self.text_of(p.block)?.text;
+        let next = p.offset + s.len();
+        (text.get(p.offset..next) == Some(s)
+            && typing_pairs().into_iter().any(|(_, (_, close))| close == s))
+            .then_some(next)
+    }
+
     /// Replace `range` in the caret block (IME / input handler path).
     pub fn replace_in_block(&mut self, id: BlockId, range: Range<usize>, s: &str) {
         self.checkpoint(EditKind::Typing);
-        let marks = self.text_of(id).map(|t| t.marks_at(range.start)).unwrap_or_default();
-        let marks = self.pending_marks.take().unwrap_or(marks);
-        let marks = if self.is_code(id) || id == TITLE { Marks::default() } else { marks };
         if let Some(t) = self.text_mut(id) {
-            let mut ins = RichText::default();
-            ins.push(s, marks);
-            t.replace(range.start..range.end.min(t.len()), &ins);
+            t.replace_text(range.start..range.end.min(t.len()), s);
         }
         self.sel = Selection::caret(Pos::new(id, range.start + s.len()));
     }
@@ -1272,6 +1364,18 @@ impl Core {
         let p = self.sel.head;
         if p.offset > 0 {
             self.checkpoint(EditKind::Delete);
+            if let Some(t) = self.text_of(p.block)
+                && let Some(close) = typing_pairs().into_iter().find_map(|(open, (_, close))| {
+                    (t.text.get(p.offset..p.offset + close.len()) == Some(close)
+                        && t.text.get(prev_grapheme(&t.text, p.offset)..p.offset) == Some(open))
+                        .then_some(close)
+                })
+            {
+                let start = prev_grapheme(&t.text, p.offset);
+                self.text_mut(p.block).unwrap().replace(start..p.offset + close.len(), &RichText::default());
+                self.sel = Selection::caret(Pos::new(p.block, start));
+                return;
+            }
             let t = self.text_mut(p.block).unwrap();
             let start = prev_grapheme(&t.text, p.offset);
             t.replace(start..p.offset, &RichText::default());
@@ -2720,12 +2824,62 @@ impl Core {
 
     /// Called right after a space was typed.
     pub fn markdown_block_shortcut(&mut self) -> bool {
+        self.normalize_cjk_markdown_prefix();
         self.markdown_block_trigger(false)
+    }
+
+    /// A complete Chinese Markdown prefix becomes its ASCII spelling before
+    /// the existing shortcut consumes it.
+    pub fn normalize_cjk_markdown_prefix(&mut self) -> bool {
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() || !self.markdown_enabled(p.block) {
+            return false;
+        }
+        let Some(text) = self.text_of(p.block).map(|t| t.text.clone()) else { return false };
+        let Some(ascii) = cjk_markdown_prefix(&text[..p.offset]) else { return false };
+        self.text_mut(p.block).unwrap().replace(0..p.offset, &RichText::plain(&ascii));
+        self.sel = Selection::caret(Pos::new(p.block, ascii.len()));
+        true
     }
 
     /// Called on Enter before splitting ("```lang" + Enter makes a code block).
     pub fn markdown_enter_shortcut(&mut self) -> bool {
+        self.normalize_cjk_code_fence();
         self.markdown_divider() || self.markdown_block_trigger(true)
+    }
+
+    pub fn normalize_cjk_inline(&mut self) -> bool {
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() || !self.markdown_enabled(p.block) {
+            return false;
+        }
+        let Some(text) = self.text_of(p.block).cloned() else { return false };
+        if cjk_code_fence(&text.text[..p.offset]).is_some() || cjk_inline_markdown(&text.text[..p.offset]).is_none() {
+            return false;
+        }
+        let old_len = text.len();
+        let mut normalized = RichText::default();
+        let mut at = 0;
+        for run in text.runs {
+            let part = &text.text[at..at + run.len];
+            normalized.push(&normalize_cjk_inline_text(part), run.marks);
+            at += run.len;
+        }
+        let len = normalized.len();
+        self.text_mut(p.block).unwrap().replace(0..old_len, &normalized);
+        self.sel = Selection::caret(Pos::new(p.block, len));
+        self.markdown_inline_shortcut()
+    }
+    pub fn normalize_cjk_code_fence(&mut self) -> bool {
+        let p = self.sel.head;
+        if !self.sel.is_collapsed() || !self.markdown_enabled(p.block) {
+            return false;
+        }
+        let Some(text) = self.text_of(p.block).map(|t| t.text.clone()) else { return false };
+        let Some(ascii) = cjk_code_fence(&text[..p.offset]) else { return false };
+        self.text_mut(p.block).unwrap().replace(0..p.offset, &RichText::plain(&ascii));
+        self.sel = Selection::caret(Pos::new(p.block, ascii.len()));
+        true
     }
 
     fn markdown_block_trigger(&mut self, enter: bool) -> bool {
@@ -3138,6 +3292,87 @@ impl Core {
         }
         out
     }
+}
+
+fn cjk_markdown_prefix(s: &str) -> Option<String> {
+    let (body, space) = match s.strip_suffix(' ') {
+        Some(body) => (body, " "),
+        None => (s.strip_suffix('　')?, " "),
+    };
+    if let Some(num) = body.strip_suffix(['。', '．'])
+        && !num.is_empty()
+        && num.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Some(format!("{num}.{space}"));
+    }
+    let (cjk, ascii) = [
+        ("——", "-"),
+        ("···", "```"),
+        ("＃", "#"),
+        ("－", "-"),
+        ("＞", ">"),
+        ("》", ">"),
+        ("｜", "|"),
+    ]
+    .into_iter()
+    .find(|(cjk, _)| body.starts_with(cjk))?;
+    let repeats = body.chars().count();
+    let one = if cjk == "——" { 1 } else { repeats };
+    (repeats <= 9 && body.chars().step_by(cjk.chars().count()).all(|x| x == cjk.chars().next().unwrap()))
+        .then(|| ascii.repeat(one) + space)
+}
+
+fn cjk_inline_markdown(s: &str) -> Option<()> {
+    for (cjk, _) in [('＊', '*'), ('·', '`')] {
+        if s.matches(cjk).count() == 2
+            && s.contains(cjk)
+        {
+            return Some(());
+        }
+    }
+    None
+}
+
+fn normalize_cjk_inline_text(s: &str) -> String {
+    s.replace('＊', "*").replace('·', "`")
+}
+
+fn cjk_code_fence(s: &str) -> Option<String> {
+    let lang = s.strip_prefix("···")?;
+    (!lang.contains(char::is_whitespace) && !lang.contains('·')).then(|| format!("```{lang}"))
+}
+
+fn typing_pairs() -> [(&'static str, (&'static str, &'static str)); 5] {
+    [("（", ("（", "）")), ("《", ("《", "》")), ("“", ("“", "”")), ("‘", ("‘", "’")), ("【", ("【", "】"))]
+}
+
+fn double_punctuation(before: &str, typed: &str) -> Option<String> {
+    let one = typed.chars().next().filter(|_| typed.chars().count() == 1)?;
+    let out = match one {
+        '。' => ".",
+        '！' => "!",
+        '；' => ";",
+        '，' => ",",
+        '：' => ":",
+        '？' => "?",
+        '》' => ">",
+        '｜' => "|",
+        '＊' => "*",
+        _ => return None,
+    };
+    (before.ends_with(one)).then(|| out.to_string())
+}
+
+fn spaced_text(before: &str, s: &str) -> String {
+    let cjk_latin = before.chars().next_back().is_some_and(is_cjk)
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric());
+    let latin_cjk = before.chars().next_back().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.chars().next().is_some_and(is_cjk);
+    if (cjk_latin || latin_cjk) && !before.ends_with(' ') { format!(" {s}") } else { s.into() }
+}
+
+fn is_cjk(c: char) -> bool {
+    ('\u{4e00}'..='\u{9fff}').contains(&c) || ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{ac00}'..='\u{d7af}').contains(&c)
 }
 
 /// A column goes once its last block does, and the
@@ -3633,6 +3868,143 @@ mod tests {
         assert_eq!(xml(&c), "<title>T</title>\n<h2>a<b>b</b></h2>\n");
         c.undo();
         assert_eq!(c.text_of(b).unwrap().text, "a**b**");
+    }
+
+    #[test]
+    fn markdown_chinese_syntax_becomes_ascii_before_shortcuts() {
+        for (typed_text, expected) in [
+            ("＃＃ ", "<title>T</title>\n<h2></h2>\n"),
+            ("－ ", "<title>T</title>\n<ul>\n  <li></li>\n</ul>\n"),
+            ("—— ", "<title>T</title>\n<ul>\n  <li></li>\n</ul>\n"),
+            ("1。 ", "<title>T</title>\n<ol>\n  <li></li>\n</ol>\n"),
+            ("1． ", "<title>T</title>\n<ol>\n  <li></li>\n</ol>\n"),
+            ("＞ ", "<title>T</title>\n<blockquote>\n  <p></p>\n</blockquote>\n"),
+        ] {
+            let mut c = doc("<title>T</title><p></p>");
+            let b = id(&c, 1);
+            c.sel = Selection::caret(Pos::new(b, 0));
+            for ch in typed_text.chars() {
+                c.insert_text(&ch.to_string());
+                if ch == ' ' || ch == '　' {
+                    c.markdown_block_shortcut();
+                }
+            }
+            c.markdown_block_shortcut();
+            assert_eq!(xml(&c), expected, "{typed_text}");
+        }
+    }
+
+    #[test]
+    fn markdown_chinese_inline_becomes_ascii() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        for ch in "a＊b＊".chars() {
+            c.insert_text(&ch.to_string());
+            c.normalize_cjk_inline();
+        }
+        assert_eq!(xml(&c), "<title>T</title>\n<p>a<em>b</em></p>\n");
+    }
+
+    #[test]
+    fn markdown_chinese_bold_becomes_ascii() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        for ch in "＊＊b＊＊".chars() {
+            c.insert_text(&ch.to_string());
+            c.normalize_cjk_inline();
+        }
+        assert_eq!(xml(&c), "<title>T</title>\n<p><b>b</b></p>\n");
+    }
+
+    #[test]
+    fn markdown_chinese_code_fence_becomes_ascii() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        for ch in "···java".chars() {
+            c.insert_text(&ch.to_string());
+        }
+        assert!(c.markdown_enter_shortcut());
+        assert!(matches!(c.kind_of(b), Some(BlockKind::Code { lang, .. }) if lang == "Java"));
+    }
+
+    #[test]
+    fn typing_rules() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        c.insert_with_typing_rules("中");
+        c.insert_with_typing_rules("a");
+        assert_eq!(c.text_of(b).unwrap().text, "中 a");
+        c.insert_with_typing_rules("，");
+        c.insert_with_typing_rules("，");
+        assert_eq!(c.text_of(b).unwrap().text, "中 a,");
+        c.insert_with_typing_rules("（");
+        assert_eq!(c.text_of(b).unwrap().text, "中 a,（）");
+        assert_eq!(c.sel.head.offset, c.text_of(b).unwrap().text.len() - "）".len());
+        c.insert_with_typing_rules("）");
+        assert_eq!(c.text_of(b).unwrap().text, "中 a,（）");
+        assert_eq!(c.sel.head.offset, c.text_of(b).unwrap().text.len());
+    }
+
+    #[test]
+    fn typing_rules_inline_code_pair_and_fence() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        c.insert_with_typing_rules("·");
+        assert_eq!(c.text_of(b).unwrap().text, "·");
+        c.insert_with_typing_rules("·");
+        assert_eq!(c.text_of(b).unwrap().text, "``");
+        assert_eq!(c.sel.head.offset, 1);
+        c.insert_with_typing_rules("·");
+        assert!(matches!(c.kind_of(b), Some(BlockKind::Code { .. })), "{}", xml(&c));
+    }
+
+    #[test]
+    fn typing_rules_opposite_spacing_and_delete_pair() {
+        let mut c = doc("<title>T</title><p></p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, 0));
+        c.insert_with_typing_rules("a");
+        c.insert_with_typing_rules("中");
+        assert_eq!(c.text_of(b).unwrap().text, "a 中");
+        let zh = c.text_of(b).unwrap().text.len();
+        c.sel = Selection::caret(Pos::new(b, zh));
+        c.insert_with_typing_rules("（");
+        assert_eq!(c.text_of(b).unwrap().text, "a 中（）");
+        let close = c.text_of(b).unwrap().text.len() - "）".len();
+        c.sel = Selection::caret(Pos::new(b, close));
+        c.backspace();
+        assert_eq!(c.text_of(b).unwrap().text, "a 中");
+    }
+
+    #[test]
+    fn typing_rules_wrap_selection() {
+        let mut c = doc("<title>T</title><p><b>x</b>y</p>");
+        let b = id(&c, 1);
+        c.sel = Selection { anchor: Pos::new(b, 0), head: Pos::new(b, 2) };
+        c.insert_with_typing_rules("·");
+        assert_eq!(c.text_of(b).unwrap().text, "`xy`");
+        c.sel = Selection::caret(Pos::new(b, c.text_of(b).unwrap().text.len()));
+        assert!(c.markdown_inline_shortcut());
+        assert!(xml(&c).contains("<code>"), "{}", xml(&c));
+    }
+
+    #[test]
+    fn typing_rules_preserve_marks_and_undo_once() {
+        let mut c = doc("<title>T</title><p><b>a</b>中</p>");
+        let b = id(&c, 1);
+        c.sel = Selection::caret(Pos::new(b, c.text_of(b).unwrap().text.len()));
+        c.insert_with_typing_rules("，");
+        assert_eq!(c.text_of(b).unwrap().text, "a中，");
+        c.insert_with_typing_rules("，");
+        assert_eq!(c.text_of(b).unwrap().text, "a中,");
+        assert!(c.text_of(b).unwrap().runs.iter().any(|r| r.marks.bold));
+        c.undo();
+        assert_eq!(c.text_of(b).unwrap().text, "a中");
     }
 
     #[test]
