@@ -409,7 +409,7 @@ impl Workspace {
             let _task_guard = task_guard;
             let (imported, entries) = task.await;
             let _ = this.update_in(cx, |w, window, cx| {
-                w.sync_peers(cx, &entries, &[]);
+                w.sync_peers(cx, &entries, None);
                 w.entries = entries;
                 w.sort();
                 w.remember_file_changes(imported.changes, crate::settings::tr("导入", "Import"));
@@ -581,7 +581,7 @@ impl Workspace {
             }
             Imported::Done { top, failed, saved, changes } => (top, failed, saved, changes),
         };
-        self.sync_peers(cx, &entries, &[]);
+        self.sync_peers(cx, &entries, None);
         self.entries = entries;
         self.sort();
         self.remember_file_changes(changes, crate::settings::tr("导入文件夹", "Import folder"));

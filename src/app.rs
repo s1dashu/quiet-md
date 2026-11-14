@@ -373,13 +373,15 @@ fn notify_system(title: &str, body: &str) {
 }
 
 impl Workspace {
-    pub(crate) fn sync_peers(&self, cx: &mut Context<Self>, entries: &[Entry], trash: &[crate::store::TrashEntry]) {
+    /// Other active windows take the lists a background write left; `trash`
+    /// only when that write touched it.
+    pub(crate) fn sync_peers(&self, cx: &mut Context<Self>, entries: &[Entry], trash: Option<&[crate::store::TrashEntry]>) {
         let me = cx.entity_id();
         for handle in cx.windows().into_iter().filter_map(|w| w.downcast::<Workspace>()) {
             if !handle.is_active(cx).is_some_and(|yes| yes) || handle.entity(cx).is_ok_and(|e| e.entity_id() == me) { continue }
-            let (entries, trash) = (entries.to_vec(), trash.to_vec());
+            let (entries, trash) = (entries.to_vec(), trash.map(<[_]>::to_vec));
             let _ = handle.update(cx, |ws, _, cx| {
-                ws.entries = entries; ws.trash = trash; ws.sort();
+                ws.entries = entries; if let Some(trash) = trash { ws.trash = trash; } ws.sort();
                 cx.notify();
             });
         }
@@ -457,7 +459,7 @@ impl Workspace {
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
             crate::quick_note::persist(cx);
-            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(false)
+            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
         });
         if !quick { crate::settings::watch_themes(cx); }
         // A file written into the library from outside (a model writing a
@@ -804,7 +806,7 @@ impl Workspace {
                     w.editor = None;
                     w.editor_sub = None;
                 }
-                w.sync_peers(cx, &listed.entries, &listed.trash);
+                w.sync_peers(cx, &listed.entries, Some(&listed.trash));
                 w.entries = listed.entries; w.trash = listed.trash;
                 if w.folder_current.as_ref().is_some_and(|id| done.deleted.contains(id)) {
                     w.folder_current = None;
