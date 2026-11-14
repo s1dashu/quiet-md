@@ -38,6 +38,13 @@ impl SharedStore {
     pub fn save_settings(&self, s: &Settings) -> Result<()> { self.0.borrow_mut().save_settings(s) }
     pub fn scroll_top(&self, id: &str) -> Option<(usize, f32)> { self.0.borrow().scroll_top(id) }
     pub fn remember_scroll(&self, id: &str, top: Option<(usize, f32)>) -> Result<()> { self.0.borrow().remember_scroll(id, top) }
+    pub fn versions(&self, id: &str) -> Vec<fdl_core::versions::Version> { self.0.borrow().versions(id) }
+    pub fn version_diff(&self, id: &str, name: &str, baseline: Option<&str>) -> Result<Vec<fdl_core::diff::Line>> { self.0.borrow().version_diff(id, name, baseline) }
+    pub fn version_document(&self, id: &str, name: &str) -> Result<Document> { self.0.borrow().version_document(id, name) }
+    pub fn set_version_label(&self, id: &str, name: &str, label: Option<&str>) -> Result<()> { self.0.borrow().set_version_label(id, name, label) }
+    pub fn delete_version(&self, id: &str, name: &str) -> Result<()> { self.0.borrow().delete_version(id, name) }
+    pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> { self.0.borrow().restore_version(id, name) }
+    pub fn save_version_now(&self, id: &str) -> Result<bool> { self.0.borrow().save_version_now(id) }
     pub fn rename(&mut self, id: &str, title: &str) -> Result<Meta> { self.0.borrow_mut().rename(id, title) }
     pub fn touch(&mut self, id: &str) -> Option<Meta> { self.0.borrow_mut().touch(id) }
     pub fn create_folder(&mut self, title: &str, parent: Option<&str>) -> Result<String> { self.0.borrow_mut().create_folder(title, parent) }

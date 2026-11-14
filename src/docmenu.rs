@@ -218,6 +218,14 @@ impl Workspace {
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| w.open_doc_info(window, cx))),
             )
+            .child(
+                menu_item("dm-history", "restore", crate::settings::tr("版本历史", "Version history"), false, false)
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(|w, _, window, cx| {
+                        w.close_doc_menu(cx);
+                        if let Some(id) = w.current.clone() { w.open_history(&id, window, cx) }
+                    })),
+            )
             .child(divider())
             // 更多 and 删除 share the last group.
             .child(menu_item("dm-more", "ellipsis", crate::settings::text("更多"), true, sub == Some(DocSub::More)).on_hover(hover_sub(Some(DocSub::More))))
@@ -274,7 +282,7 @@ impl Workspace {
                 },
             )),
             Some(DocSub::More) => Some((
-                if crate::printing::SUPPORTED { item_top(9, 6) } else { item_top(8, 5) } - 1. - PAD,
+                if crate::printing::SUPPORTED { item_top(10, 6) } else { item_top(9, 5) } - 1. - PAD,
                 popover()
                     .id("dm-more-menu")
                     .occlude()

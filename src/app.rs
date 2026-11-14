@@ -262,6 +262,8 @@ pub struct Workspace {
     /// The failed change: (action, message); an empty action is page-wide.
     pub shortcut_error: Option<(String, String)>,
     pub settings_page: crate::settings::Page,
+    /// 版本历史: snapshots kept per document (1–30), cached for the settings page.
+    pub history_limit: u32,
     /// 外观's theme dropdown while open: the theme its preview shows.
     pub theme_menu: Option<String>,
     /// Where the theme dropdown's button was drawn last frame.
@@ -311,6 +313,12 @@ pub struct Workspace {
     /// Last-frame bounds of the open submenu (clicks there keep the menu open).
     pub doc_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     pub doc_info: Option<DocInfo>,
+    /// 版本历史 drawer, open for `HistoryView::id`.
+    pub history: Option<crate::history::HistoryView>,
+    /// A snapshot is on screen: the editor state to put back, and which one.
+    pub preview: Option<crate::history::Preview>,
+    /// 命名版本: the row's name being typed.
+    pub version_rename: Option<crate::history::VersionRename>,
     pub list_scroll: ScrollHandle,
     pub search_scroll: ScrollHandle,
     /// Last-frame bounds of the row menu's 下载 submenu.
@@ -354,7 +362,7 @@ pub struct Workspace {
     dirty_since: Option<Instant>,
     /// The open document has changes not yet on disk (cleared only by a
     /// successful save or by 放弃修改).
-    unsaved: bool,
+    pub(crate) unsaved: bool,
     /// Held back by a failed save: runs after 重试 succeeds or 放弃修改.
     pub(crate) after_save: Option<AfterSave>,
     pub(crate) editor_sub: Option<Subscription>,
@@ -500,13 +508,16 @@ impl Workspace {
             }
         })
         .detach();
-        let sidebar_width = store.settings().sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
+        let settings = store.settings();
+        let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
+        let history_limit = settings.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
             shortcut_recording: None,
             shortcut_strokes: vec![],
             shortcut_error: None,
             settings_page: Default::default(),
+            history_limit,
             theme_menu: None,
             theme_anchor: Default::default(),
             lang_menu: None,
@@ -539,6 +550,9 @@ impl Workspace {
             doc_sub: None,
             doc_sub_bounds: Rc::new(Cell::new(None)),
             doc_info: None,
+            history: None,
+            preview: None,
+            version_rename: None,
             list_scroll: ScrollHandle::new(),
             search_scroll: ScrollHandle::new(),
             row_sub_bounds: Rc::new(Cell::new(None)),
@@ -606,6 +620,9 @@ impl Workspace {
     /// Show `id`; false when it could not be opened (or the open document
     /// could not be saved first, see [`Self::save_before`]).
     pub fn try_open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        // A snapshot is on screen: back to the live document before anything
+        // else touches the editor.
+        if self.history.is_some() { self.close_history(cx); }
         // 阅读位置: remember where the document being left was, before the
         // editor is swapped out.
         self.remember_scroll(cx);
@@ -682,6 +699,16 @@ impl Workspace {
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
+            EditorEvent::HistoryEscape => {
+                // Arrives from inside the editor's own update: leave the
+                // preview (then the drawer) once that finishes.
+                let this = cx.entity();
+                cx.defer(move |cx| {
+                    this.update(cx, |w, cx| {
+                        if w.preview.is_some() { w.exit_preview(cx) } else { w.close_history(cx) }
+                    });
+                });
+            }
             EditorEvent::Duplicate => {
                 if let Some(id) = this.current.clone() {
                     this.duplicate_doc(&id, window, cx);
@@ -865,6 +892,7 @@ impl Workspace {
     /// Switch the main pane to 主页 or 回收站 (or back to the document).
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
+        self.close_history(cx);
         // 阅读位置: leaving the document with ⌘H or 回收站 also counts.
         if view != View::Doc { self.remember_scroll(cx) }
         if view == View::Trash {
@@ -980,7 +1008,10 @@ impl Workspace {
         let _ = self.store.remember_scroll(&id, top);
     }
 
-    fn sync_document(&mut self, window: &Window, cx: &mut Context<Self>) {
+    pub(crate) fn sync_document(&mut self, window: &Window, cx: &mut Context<Self>) {
+        // The previewed snapshot is not the live document: never hand it to a
+        // sibling window.
+        if self.preview.is_some() { return }
         let (Some(id), Some(editor)) = (self.current.clone(), self.editor.clone()) else { return };
         let peers = self.document_peers(&id, window, cx);
         if peers.is_empty() { return; }
@@ -1000,6 +1031,7 @@ impl Workspace {
     }
 
     fn schedule_save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.preview.is_some() { return }
         self.status = SaveStatus::Saving;
         if !self.unsaved || self.dirty_since.is_none() {
             self.dirty_since = Some(Instant::now());
@@ -1046,6 +1078,9 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
+        // 版本历史 preview: the editor holds an older snapshot, so writing it
+        // would overwrite the live document with history.
+        if self.preview.is_some() { return true }
         if !self.unsaved {
             return true;
         }
@@ -1509,6 +1544,7 @@ impl Render for Workspace {
         let search = self.render_search(window, cx);
         let doc_menu = self.render_doc_menu(window, cx);
         let doc_info = self.render_doc_info(cx);
+        let history = self.render_history(cx);
         let confirm = self.render_confirm(cx);
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
@@ -1525,6 +1561,7 @@ impl Render for Workspace {
                 .flex()
                 .flex_col()
                 .child(self.top_bar(f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. }, cx))
+                .children(self.render_history_banner(cx))
                 .child(
                     div()
                         .flex_1()
@@ -1559,7 +1596,8 @@ impl Render for Workspace {
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
                 .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| w.file_dropped(paths, window, cx))))
-            .children(file_drop);
+            .children(file_drop)
+            .children(history);
         div()
             .id("workspace")
             .key_context("Workspace")
@@ -1627,8 +1665,9 @@ impl Render for Workspace {
                     cx.stop_propagation();
                     return;
                 }
-                if ev.keystroke.key == "escape" && (w.doc_info.is_some() || w.doc_menu || w.mode_menu) {
+                if ev.keystroke.key == "escape" && (w.doc_info.is_some() || w.history.is_some() || w.doc_menu || w.mode_menu) {
                     w.doc_info = None;
+                    if w.history.is_some() { w.close_history(cx); }
                     w.mode_menu = false;
                     w.doc_menu = false;
                     w.doc_sub = None;
@@ -1640,6 +1679,14 @@ impl Render for Workspace {
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
                 let undo = ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y");
                 if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
+                // 版本历史: the editor keeps the caret, so Esc has to be taken
+                // before it reaches the read-only key handler.
+                if ev.keystroke.key == "escape" && w.preview.is_some() {
+                    w.exit_preview(cx); cx.stop_propagation(); return;
+                }
+                if ev.keystroke.key == "escape" && w.history.is_some() {
+                    w.close_history(cx); cx.stop_propagation(); return;
+                }
                 if ev.keystroke.key == "escape" && w.has_home_drag() {
                     w.cancel_home_drag(cx); cx.stop_propagation(); return;
                 }

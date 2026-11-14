@@ -42,6 +42,12 @@ main.rs ─ 窗口
    - 两条路径有改动时都发 `EditorEvent::Changed`，同时刷新查找结果、斜杠菜单和 @ 面板。
 4. `Workspace` 收到 `Changed` 后调用 `schedule_save`，500ms 后 `flush()` 写盘。写盘失败时改动保持未保存，顶栏显示错误，切换文档、新建、退出前会询问。保存失败对话框支持重试、重新载入磁盘内容、另存恢复副本；重新载入同时重置编辑器及同文档窗口的状态。退出检查所有窗口，处理单个冲突后重新检查，仍有冲突时不会退出。系统退出阶段仍保存失败的正文存入本地应用数据目录的 `quiet-md/recovery/<文档库标识>/`，下次打开同一文档库时恢复为新文档，不覆盖磁盘原版。
 
+写入成功后 `Store::save_now` 还会用内存里的旧正文在 `history/<id>/` 存一份版本快照：5 分钟节流、每篇文档 1–30 份、全库 200 MiB 上限。快照写入失败只记警告，不影响正文保存。恢复某个版本时先强制给当前正文留一份快照，再走正常的 `save`。
+
+版本历史的界面沿用 Google Docs / 飞书那一套：抽屉在右、正文就地变成所选快照的只读预览、改动是可关掉的高亮层。为此 `Workspace` 多一个 `preview: Option<Preview>`，它持有进入预览前那份完整的 `Core`（文档、光标、选区、撤销栈），返回时整体放回去。预览期间 `flush`、`schedule_save`、`sync_document` 全部短路：编辑器里装的是历史正文，写盘或同步给兄弟窗口都会把它当成当前文档。
+
+差异分两层：`changes.rs` 按块做 LCS，回答「这一版哪些块是新加的、哪些被改写」，用来给正文上色；`diff.rs` 按行做 LCS，只用来算抽屉每行的 `+N 行 −M 行`。规则见 FORMAT.md。
+
 Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机编辑后检查：
 
 - 选区落在可见的光标停靠点上，两端在同一作用域（同一单元格或正文）；
@@ -105,6 +111,9 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `editor/core.rs` | 编辑内核 |
 | `editor/table_ops.rs` | 表格操作和单元格选区（`CellSel`） |
 | `editor/fuzz_tests.rs` | 随机编辑 fuzzer |
+| `versions.rs` | 正文版本快照：目录即索引、节流、配额、回收站联动 |
+| `diff.rs` | 版本间的按行 LCS 差异（无第三方依赖） |
+| `changes.rs` | 版本间的块级 LCS：哪些块是新加的、哪些被改写，用来给快照上色 |
 
 应用顶层（`src/`）：
 
@@ -124,6 +133,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `highlight.rs` | 代码高亮 |
 | `assets.rs` | 编进二进制的图标、字体、封面图库 |
 | `devtools.rs` | 脚本驱动，只在 `--features devtools` 构建里编入（见 tools/harness/README.md） |
+| `history.rs` | 版本历史抽屉：按天分组的列表、正文就地只读预览、显示改动、命名版本、恢复 / 另存 / 删除 |
 
 编辑器（`src/editor/`）：
 

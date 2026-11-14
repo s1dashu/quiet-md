@@ -187,6 +187,14 @@ pub struct Settings {
     /// state, not document metadata.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub scroll_top: HashMap<String, [f32; 2]>,
+    /// 版本历史: snapshots kept per document (1–30). None is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_limit: Option<u32>,
+}
+
+impl Settings {
+    pub fn history_limit(&self) -> u32 { crate::versions::clamp_limit(self.history_limit.unwrap_or(crate::versions::DEFAULT_LIMIT)) }
+    pub fn set_history_limit(&mut self, n: u32) { self.history_limit = Some(crate::versions::clamp_limit(n)); }
 }
 
 /// A document in the 回收站, as kept in `.quiet/trash/index.json`.
@@ -391,7 +399,7 @@ static ROOT: std::sync::RwLock<Option<PathBuf>> = std::sync::RwLock::new(None);
 
 /// Write `bytes` to `path` through a temporary file, so a crash leaves
 /// either the old or the new contents.
-fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> { write_atomic_then(path, bytes, true) }
+pub(crate) fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> { write_atomic_then(path, bytes, true) }
 
 /// `write_atomic`; without `sync_dir` the folder's entry is left for the
 /// caller to sync (a batch syncs each folder once, before its index).
@@ -730,6 +738,9 @@ impl Store {
     }
 
     /// Where the library keeps its own files: `.quiet/`, the top in the old layout.
+    /// 版本历史 lives in `.quiet/` in either layout, so a library that has
+    /// not moved to folders yet never grows a visible `history/` folder.
+    fn history_base(&self) -> PathBuf { self.root.join(INTERNAL) }
     fn internal(&self) -> PathBuf { if self.flat { self.root.clone() } else { self.root.join(INTERNAL) } }
     fn index_file(&self) -> PathBuf { self.internal().join("index.json") }
     fn trash_index_file(&self) -> PathBuf { self.internal().join("trash").join("index.json") }
@@ -1386,6 +1397,18 @@ impl Store {
                 }
             }
             self.write_file(&self.path(id), xml.as_bytes())?;
+            // The previous text is already in `disk`: a snapshot costs no
+            // extra read. History is best-effort — it never fails the save.
+            if let Some(previous) = disk.as_deref()
+                && previous != xml.as_str()
+                && !self.index.get(id).is_some_and(Meta::local)
+            {
+                let ext = if self.is_markdown(id) { "md" } else { "xml" };
+                let limit = self.settings().history_limit();
+                if let Err(e) = crate::versions::snapshot(&self.history_base(), id, ext, previous, crate::time::now_ms(), limit, false) {
+                    self.warnings.push(format!("保存版本历史失败：{e}"));
+                }
+            }
         }
         self.loaded.borrow_mut().insert(id.to_string(), if same { disk.unwrap_or(xml) } else { xml });
         let title = doc.title.text.trim().to_string();
@@ -1572,6 +1595,7 @@ impl Store {
             let from = self.path(id);
             let folder = self.index.get(id).is_some_and(|m| m.folder.is_some());
             if (!folder || from.is_dir()) && let Err(e) = std::fs::rename(&from, target) { failed = Some((n, e)); break; }
+            if !folder { crate::versions::move_to_trash(&self.history_base(), id); }
             self.index.remove(id);
             self.loaded.borrow_mut().remove(id);
             if record { self.record_file_change(id, before); }
@@ -1676,8 +1700,8 @@ impl Store {
             let p = self.trash_path(&id);
             let r = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
             match r {
-                Ok(()) => { self.trash.remove(&id); dirty = true; }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => { self.trash.remove(&id); dirty = true; }
+                Ok(()) => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => { self.trash.remove(&id); dirty = true; crate::versions::purge(&self.history_base(), &id); }
                 Err(e) => self.warnings.push(format!("无法清理过期回收站文档 {id}：{e}")),
             }
         }
@@ -1745,6 +1769,7 @@ impl Store {
             }
             let _ = markdown;
             self.trash.remove(id);
+            if !folder { crate::versions::restore_from_trash(&self.history_base(), id); }
             self.save_index()?;
             self.record_file_change(id, None);
             return Ok(());
@@ -1776,6 +1801,7 @@ impl Store {
         self.index.insert(id.to_string(), meta);
         derive_tree(&mut self.index);
         self.trash.remove(id);
+        crate::versions::restore_from_trash(&self.history_base(), id);
         if let Some(doc) = doc {
             let out = self.serialize_doc(id, &doc, None);
             if text.as_deref() != Some(out.as_str()) && let Err(e) = write_atomic(&self.path(id), out.as_bytes()) {
@@ -1803,6 +1829,7 @@ impl Store {
                 Err(e) => return Err(e.into()),
             }
             self.trash.remove(&k);
+            crate::versions::purge(&self.history_base(), &k);
         }
         self.save_trash()
     }
@@ -1841,6 +1868,60 @@ impl Store {
             m.catalogue_closed = !pinned;
         }
         self.save_index()
+    }
+
+    /// 版本历史: snapshots of one document, newest first.
+    pub fn versions(&self, id: &str) -> Vec<crate::versions::Version> { crate::versions::list(&self.history_base(), id, false) }
+
+    pub fn version_text(&self, id: &str, name: &str) -> Result<String> { crate::versions::read(&self.history_base(), id, name, false) }
+
+    pub fn delete_version(&self, id: &str, name: &str) -> Result<()> { crate::versions::remove(&self.history_base(), id, name, false) }
+
+    /// Parse a snapshot into a document, for 另存副本.
+    pub fn version_document(&self, id: &str, name: &str) -> Result<Document> {
+        let text = self.version_text(id, name)?;
+        self.parse_doc(id, &text)
+    }
+
+    /// Diff a snapshot against a baseline. `None` is the document on disk
+    /// now; `Some(other)` compares two snapshots. Lines are ordered by time,
+    /// so `-` is always "only in the earlier version". The unchanged lines
+    /// are kept, so the same list doubles as a read-only preview.
+    pub fn version_diff(&self, id: &str, name: &str, baseline: Option<&str>) -> Result<Vec<crate::diff::Line>> {
+        let a = self.version_text(id, name)?;
+        let a_ms = crate::versions::stamp(name).unwrap_or(0);
+        let (b, b_ms) = match baseline {
+            Some(other) => (self.version_text(id, other)?, crate::versions::stamp(other).unwrap_or(0)),
+            None => (std::fs::read_to_string(self.path(id))?, u64::MAX),
+        };
+        let (old, new) = if a_ms <= b_ms { (a.as_str(), b.as_str()) } else { (b.as_str(), a.as_str()) };
+        Ok(crate::diff::diff(old, new, self.is_markdown(id)))
+    }
+
+    /// 命名版本: set or clear a snapshot's name.
+    pub fn set_version_label(&self, id: &str, name: &str, label: Option<&str>) -> Result<()> {
+        crate::versions::set_label(&self.history_base(), id, name, label, false)
+    }
+
+    /// Restore never loses the present: the current on-disk text becomes a
+    /// snapshot first, then the chosen version is parsed for `save` to write.
+    pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> {
+        let text = self.version_text(id, name)?;
+        let current = std::fs::read_to_string(self.path(id)).unwrap_or_default();
+        let ext = if self.is_markdown(id) { "md" } else { "xml" };
+        let _ = crate::versions::snapshot(&self.history_base(), id, ext, &current, crate::time::now_ms(), self.settings().history_limit(), true);
+        self.parse_doc(id, &text)
+    }
+
+    /// 手动保存版本: bypass the interval, still capped by the retention limit.
+    /// `false` means the text matched the newest snapshot, so nothing was
+    /// written — the caller can say so instead of silently doing nothing.
+    pub fn save_version_now(&self, id: &str) -> Result<bool> {
+        let text = std::fs::read_to_string(self.path(id))?;
+        let ext = if self.is_markdown(id) { "md" } else { "xml" };
+        let before = self.versions(id).len();
+        crate::versions::snapshot(&self.history_base(), id, ext, &text, crate::time::now_ms(), self.settings().history_limit(), true)?;
+        Ok(self.versions(id).len() > before)
     }
 
     pub fn settings(&self) -> Settings {
@@ -1973,6 +2054,61 @@ mod tests {
 
     fn doc(title: &str) -> Document {
         Document { title: crate::model::RichText::plain(title), ..Default::default() }
+    }
+
+    fn doc_with(title: &str, body: &str) -> Document {
+        let mut d = doc(title);
+        d.blocks.push(crate::model::Block::text(body));
+        d
+    }
+
+    #[test]
+    fn saves_keep_previous_versions_and_follow_the_trash() {
+        let lib = Lib::new("versions");
+        let mut s = lib.open();
+        let id = s.create_from(&doc_with("first", "alpha")).unwrap();
+        s.load_for_edit(&id, false).unwrap();
+        s.save(&id, &doc_with("second", "beta")).unwrap();
+        assert_eq!(s.versions(&id).len(), 1);
+        // Snapshots stay in `.quiet/`: never a folder in the sidebar or the Finder,
+        // and still found after the retitle renamed the file.
+        assert!(lib.0.join(".quiet").join("history").join(&id).is_dir());
+        assert_eq!(s.list().iter().map(|e| e.id.clone()).collect::<Vec<_>>(), std::slice::from_ref(&id));
+        let name = s.versions(&id)[0].name.clone();
+        assert_eq!(s.version_text(&id, &name).unwrap(), docxml::serialize(&doc_with("first", "alpha")));
+        // Saving identical content again must not create another file.
+        s.save(&id, &doc_with("second", "beta")).unwrap();
+        assert_eq!(s.versions(&id).len(), 1);
+        // The diff compares the reader's text, not the XML tags.
+        let d = s.version_diff(&id, &name, None).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        // Two snapshots compare directly, always in time order: the older
+        // text is removed, the newer one added, whichever was picked first.
+        s.save_version_now(&id).unwrap();
+        let v = s.versions(&id);
+        assert_eq!(v.len(), 2);
+        // The same text again reports "nothing written" instead of piling up.
+        assert!(!s.save_version_now(&id).unwrap());
+        assert_eq!(s.versions(&id).len(), 2);
+        let d = s.version_diff(&id, &v[0].name, Some(&v[1].name)).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        let d = s.version_diff(&id, &v[1].name, Some(&v[0].name)).unwrap();
+        assert!(d.iter().any(|l| l.text == "alpha" && l.kind == crate::diff::Kind::Removed));
+        assert!(d.iter().any(|l| l.text == "beta" && l.kind == crate::diff::Kind::Added));
+        // Restoring first leaves a snapshot of the present.
+        let restored = s.restore_version(&id, &name).unwrap();
+        assert_eq!(restored.title.text, "first");
+        s.save(&id, &restored).unwrap();
+        assert!(s.versions(&id).len() >= 2);
+        s.delete(&id, None).unwrap();
+        assert!(s.versions(&id).is_empty());
+        assert!(lib.0.join(".quiet").join("history-trash").join(&id).is_dir());
+        s.restore(&id).unwrap();
+        assert!(!s.versions(&id).is_empty());
+        s.delete(&id, None).unwrap();
+        s.purge(&id).unwrap();
     }
 
     #[test]
