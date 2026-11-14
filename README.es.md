@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · Español
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · Español · <a href="README.fr.md">Français</a>
 </p>
 
 <p align="center">
@@ -74,7 +74,7 @@ También puedes descargarla desde [Quiet.md](https://quiet.md/?lang=en). Todas l
 
 En el primer arranque eliges el idioma, dónde guardar la biblioteca y el atajo de notas rápidas, y puedes copiar tus notas de Obsidian, Logseq, iA Writer o Typora. Una biblioteca vacía recibe la guía **Getting started**: un recorrido de diez minutos por las funciones principales. Nunca sobrescribe las notas que ya tengas.
 
-La interfaz está disponible en inglés, chino simplificado, japonés, coreano y español.
+La interfaz está disponible en inglés, chino simplificado, japonés, coreano, español y francés.
 
 ## Rendimiento
 
