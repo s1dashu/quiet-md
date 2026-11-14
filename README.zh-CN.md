@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · 简体中文 · <a href="README.ja.md">日本語</a>
+  <a href="README.md">English</a> · 简体中文 · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a>
 </p>
 
 <p align="center">
@@ -45,7 +45,7 @@
 
 **⚡ 快，原生的那种快。** 整个界面由 Rust 和 [GPUI](https://www.gpui.rs/) 直接用 GPU 绘制，没有 WebView、没有 Electron。百万字文档实测中，输入、删除和滚动的帧处理 P95 均低于 6 ms。
 
-**🔒 本地优先，文件归你。** 没有账号，没有云端，默认不联网。文档库就是电脑上的一个普通文件夹，每篇笔记是一个 XML 文件。用 Git、iCloud、坚果云或任何同步工具管理都可以，哪天不用了，文件也还在。
+**🔒 本地优先，文件归你。** 没有账号，没有云端，默认不联网。文档库就是电脑上的一个普通文件夹：侧栏里的文件夹就是真实的文件夹，每篇笔记是一个以标题命名的文件（`.xml`，Markdown 文档是 `.md`）。用 Git、iCloud、坚果云或任何同步工具管理都可以，哪天不用了，文件也还在。
 
 **📝 兼容飞书 DocxXML，完整的富文本编辑器。** 笔记直接以飞书文档的 DocxXML 格式保存，从飞书复制粘贴、导入导出都能保留结构。标题、待办、表格、分栏、高亮块、代码、公式、图片和附件，写文档常用的块都有。
 
@@ -62,7 +62,7 @@
 | 平台 | 安装包 | 系统要求 |
 |---|---|---|
 | **macOS**（Apple Silicon） | [quiet-md-macos-arm64.zip](https://download.quiet.md/latest/quiet-md-macos-arm64.zip) | macOS 13 及以上 |
-| **Windows**（x64） | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 2004 及以上 |
+| **Windows**（x64） | [quiet-md-windows-x64-setup.exe](https://download.quiet.md/latest/quiet-md-windows-x64-setup.exe) | Windows 10 1809 及以上 |
 | **Linux**（x86_64，实验性） | [quiet-md-x86_64.AppImage](https://download.quiet.md/latest/quiet-md-x86_64.AppImage) | glibc 2.35 及以上（Ubuntu 22.04 及更新） |
 | **macOS**（Intel） | [quiet-md-macos-x86_64.zip](https://download.quiet.md/latest/quiet-md-macos-x86_64.zip) | macOS 13 及以上 |
 
@@ -72,7 +72,9 @@
 
 也可以在官网 [Quiet.md](https://quiet.md) 下载。所有版本和 SHA-256 校验值见 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)。
 
-首次启动会在空文档库里放一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。
+首次启动时可以选择界面语言、文档库位置和随手记快捷键，并可从 Obsidian、Logseq、iA Writer、Typora 复制已有笔记进来。空文档库里会放一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。
+
+界面支持简体中文、英文、日文、韩文、西班牙文、法文和阿拉伯文。
 
 ## 性能
 
@@ -99,7 +101,7 @@
 - **编辑**：标题、有序 / 无序列表、待办、引用、代码块（语法高亮）、LaTeX 公式、表格（可合并单元格）、高亮块、分栏、图片、附件、封面。支持 `#`、`-`、`[]`、`>` 等 Markdown 快捷输入和 `/` 斜杠菜单。
 - **版本历史**：保存时自动留下正文快照，每篇默认 20 份（设置 › 文档库里可设为 1–30 份）。右侧抽屉按天列出，点一份即在正文处只读预览那一版，新增与改写的块会着色，可一键恢复，也可以给重要的版本起名字。
 - **整理**：文档树、置顶、收藏、全文搜索、回收站。
-- **导入导出**：导入 Markdown 和飞书 DocxXML；导出 Markdown、PDF，也可以直接打印。从飞书或网页粘贴时保留结构。
+- **导入导出**：导入 Markdown 文件夹（含 Obsidian 的图片嵌入和 callout）和飞书 DocxXML；导出 Markdown、PDF，也可以直接打印。可以把文件从访达拖到主页，或直接拖进侧栏的文件夹。从飞书或网页粘贴时保留结构。
 - **快捷键**：按 `⌘ /`（Windows 上是 `Ctrl+/`）查看全部快捷键，每一个都能改。快捷键在 Windows 上用 Ctrl 代替 ⌘、Alt 代替 ⌥，应用里和「开始指南」里都按当前系统显示。
 - **主题**：内置 Craft、飞书、Notion、Obsidian 四套风格，也可以用 CSS 自己写，见 [docs/THEMES.md](docs/THEMES.md)。
 
@@ -111,6 +113,8 @@
 
 ## 近期更新
 
+- **0.1.12**（11 月 14 日）：可以把文件从访达、或从「本机文件」直接拖进侧栏的文件夹或两行之间，拖入时整个页面都是放置区；主页卡片改为连续圆角；新增「在访达中打开」；面包屑从「我的文档」开始；窗口最小宽度给文档区留足空间；全屏时侧栏用不透明底色。修复在文件夹里新建文档时可能卡死的问题。
+- **0.1.11**（11 月 13 日）：文档库改为真实文件夹，文件以标题命名，旧文档库自动迁移并留有备份；全新的首次启动，可设置语言、文档库位置和随手记快捷键，并从 Obsidian 等 Markdown 应用导入笔记；新增日语、西班牙语和韩语界面；Markdown 支持块级公式；文档回到上次的阅读位置；启动更快、内存更省。
 - **0.1.10**（11 月 10 日）：新建菜单可选择文档类型，宽表格支持横向滚动，Markdown 表格保存列对齐，长输入框跟随光标滚动。
 - **0.1.9**（11 月 8 日）：修复 macOS ⌘Q 无法退出、Windows 窗口按钮无响应，以及文字背景色遮挡选区的问题。
 - **0.1.8**（11 月 9 日）：支持本机 Markdown 原地编辑、保留 `.md` 的文件夹导入、多级文件夹与拖动/撤销；优化图片和预览内存占用，修复表格调宽跳页，统一菜单样式；首次启动选择系统支持的语言，新增实验性 Linux AppImage 打包。

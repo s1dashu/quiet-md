@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.10"
+  #define AppVersion "0.1.12"
 #endif
 #ifndef AppSource
   #define AppSource "..\..\target\release"
@@ -19,7 +19,7 @@ DisableReadyPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-MinVersion=10.0.19041
+MinVersion=10.0.17763
 OutputDir=..\..\dist\windows
 OutputBaseFilename=quiet-md-{#AppVersion}-windows-x64-setup
 SetupIconFile=..\..\assets\branding\app-icon.ico

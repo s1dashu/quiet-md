@@ -290,6 +290,13 @@ impl Workspace {
                     .px(px(5.))
                     .py(px(PAD))
                     .child(recorder())
+                    .child(sub_item("dm-copy-md", crate::settings::text("复制为 Markdown")).on_click(cx.listener(|w, _, _, cx| {
+                        w.close_doc_menu(cx);
+                        if let Some(ed) = w.editor.clone() {
+                            ed.update(cx, |e, cx| e.copy_markdown(cx));
+                            w.show_toast(crate::settings::text("已复制为 Markdown"), cx);
+                        }
+                    })))
                     .child(
                         sub_item("dm-refs", crate::settings::text("显示引用列表"))
                             .justify_between()

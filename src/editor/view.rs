@@ -1853,6 +1853,24 @@ impl Editor {
         true
     }
 
+    /// 复制为 Markdown (#60): the selection, or the whole document when
+    /// nothing is selected, as Markdown text only.
+    pub fn copy_markdown(&mut self, cx: &mut Context<Self>) {
+        let cells = self.core.cell_sel.is_some();
+        let whole = !cells && !self.core.in_block_mode() && self.core.sel.is_collapsed();
+        let blocks = if cells { self.core.selected_cells_content() } else if whole { self.core.doc.blocks.clone() } else { self.core.selected_blocks_content() };
+        // A Markdown file's title is its file name, not a line in it.
+        let title = (whole && !self.markdown).then(|| self.core.doc.title.plain_text());
+        let text = crate::markdown::clipboard(title.as_deref(), &blocks, &crate::store::Store::root_dir());
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+    }
+
+    fn on_copy_markdown(&mut self, _: &k::CopyMarkdown, window: &mut Window, cx: &mut Context<Self>) {
+        if self.guard(window, cx) {
+            self.copy_markdown(cx);
+        }
+    }
+
     fn on_copy(&mut self, _: &k::Copy, window: &mut Window, cx: &mut Context<Self>) {
         if !self.guard(window, cx) {
             return;
@@ -1919,7 +1937,9 @@ impl Editor {
         let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).filter(|d| !d.blocks.is_empty());
         let html = match &fake {
             Some(f) => f.html.clone(),
-            None if !plain && internal.is_none() && rich_target => crate::clipboard::clipboard_html(),
+            None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
+                crate::clipboard::clipboard_html()
+            }
             None => None,
         };
         let html = html.filter(|_| !plain && rich_target).map(|h| {
@@ -2206,6 +2226,7 @@ impl Editor {
             .on_action(guard(cx, Self::on_escape))
             .on_action(guard(cx, Self::on_select_all))
             .on_action(guard(cx, Self::on_copy))
+            .on_action(guard(cx, Self::on_copy_markdown))
             .on_action(guard(cx, Self::on_cut))
             .on_action(guard(cx, Self::on_paste))
             .on_action(guard(cx, Self::on_paste_plain))

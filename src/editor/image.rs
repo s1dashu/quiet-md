@@ -171,21 +171,32 @@ pub struct ImageUi {
 
 type Decoded = Result<Arc<RenderImage>, ImageCacheError>;
 
-struct Slot { image: Option<Decoded>, used: Instant, windows: HashMap<WindowId, Instant>, generation: Arc<()>, waiters: Vec<EntityId> }
+/// One decode of `path` (a file may be decoded at several sizes). `ready`:
+/// when the pixels arrived; `whole`: shown in a window that doesn't report
+/// its frames, so its pixels are kept.
+struct Slot { path: Option<Arc<Path>>, image: Option<Decoded>, used: Instant, windows: HashMap<WindowId, Instant>, generation: Arc<()>, waiters: Vec<EntityId>, ready: Option<Instant>, whole: bool }
 
 /// Decoded document pictures (editor and Home cards). gpui's global asset
 /// cache keeps every image it has decoded until the app quits; this one lets go
 /// of pictures unused for 30 seconds, or sooner when the offscreen cache
-/// exceeds 64 MiB, freeing their pixels and atlas textures.
+/// exceeds 64 MiB, freeing their pixels and atlas textures. Pictures are
+/// decoded at the size they are shown (`picture`), not at the file's, and
+/// once on screen keep only their atlas texture (`RenderImage::hollow`).
 pub struct DocImages(Rc<RefCell<HashMap<Resource, Slot>>>, u8);
 
 thread_local! {
     static PICTURES: std::cell::OnceCell<Entity<DocImages>> = const { std::cell::OnceCell::new() };
     /// When each window last drew a frame.
     static FRAMES: RefCell<HashMap<WindowId, Instant>> = RefCell::default();
+    /// The scale factor of the window being drawn.
+    static SCALE: std::cell::Cell<f32> = const { std::cell::Cell::new(2.) };
+    /// File and size behind each `picture` key.
+    static KEYS: RefCell<HashMap<SharedUri, (Arc<Path>, u32)>> = RefCell::default();
 }
 
 static DECODERS: async_lock::Semaphore = async_lock::Semaphore::new(2);
+/// A decode finished since the last sweep (its buffers are freed by now).
+static DECODED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const UNUSED: Duration = Duration::from_secs(30);
 
@@ -201,61 +212,177 @@ pub fn init_pictures(cx: &mut App) {
 }
 
 /// Called once per frame from the window root.
-pub fn frame_drawn(window: &Window) {
+pub fn frame_drawn(window: &mut Window, cx: &mut App) {
     FRAMES.with(|f| f.borrow_mut().insert(window.window_handle().window_id(), Instant::now()));
-}
-
-pub trait PictureExt { fn doc_picture(self) -> Self; }
-
-impl PictureExt for Img {
-    /// Loads through the shared picture cache instead of the global one.
-    fn doc_picture(self) -> Self {
-        match PICTURES.with(|p| p.get().cloned()) { Some(e) => self.image_cache(&e).load_visible_only(), None => self }
+    SCALE.with(|s| s.set(window.scale_factor()));
+    // Hollow pictures this window couldn't draw (a new window, or its atlas
+    // was rebuilt): decode them again.
+    let missing = window.take_missing_images();
+    if missing.is_empty() { return }
+    let Some(e) = PICTURES.with(|p| p.get().cloned()) else { return };
+    let map = e.read(cx).0.clone();
+    let mut map = map.borrow_mut();
+    let keys: Vec<Resource> = map.iter().filter(|(_, s)| matches!(&s.image, Some(Ok(im)) if im.is_hollow() && missing.contains(&im.id))).map(|(r, _)| r.clone()).collect();
+    for r in keys {
+        if let Some(Slot { image: Some(Ok(im)), .. }) = map.remove(&r) { cx.defer(move |cx| cx.drop_image(im, None)); }
     }
 }
 
+/// devtools: take every hollow picture out of this window's atlas and draw a
+/// frame, as a rebuilt atlas (Windows device loss) would. Returns how many.
+#[cfg(feature = "devtools")]
+pub fn forget_uploads(window: &mut Window, cx: &mut App) -> usize {
+    let Some(e) = PICTURES.with(|p| p.get().cloned()) else { return 0 };
+    let map = e.read(cx).0.clone();
+    let ims: Vec<_> = map.borrow().values().filter_map(|s| match &s.image { Some(Ok(im)) if im.is_hollow() => Some(im.clone()), _ => None }).collect();
+    for im in &ims { let _ = window.drop_image(im.clone()); }
+    window.refresh();
+    ims.len()
+}
+
+/// Device pixels to decode for a long edge of `px`: rounded up to a step, so
+/// resizing an image re-decodes it now and then, not every frame. 0 is the
+/// file's own size.
+fn cap(px: f32) -> u32 {
+    if px.is_nan() || px <= 0. || px >= 8192. { return 0 }
+    let step = if px <= 1024. { 128. } else { 512. };
+    ((px / step).ceil() * step) as u32
+}
+
+/// A document picture, decoded for a long edge of `long` logical pixels in the
+/// window being drawn (0: the file's full size, for the viewer). Layout still
+/// sees the file's own pixel size.
+pub fn picture(path: &Path, long: f32) -> Img {
+    let cap = cap(long * SCALE.with(|s| s.get()));
+    let uri = SharedUri::from(format!("docpic:{cap}:{}", path.display()));
+    KEYS.with(|k| { k.borrow_mut().entry(uri.clone()).or_insert_with(|| (Arc::from(path), cap)); });
+    let im = img(uri);
+    match PICTURES.with(|p| p.get().cloned()) { Some(e) => im.image_cache(&e).load_visible_only(), None => im }
+}
+
+/// Decodes `path` with its long edge at most `cap` pixels (0: as is). The
+/// shrunken image keeps the file's size for layout through its scale factor.
+fn decode(path: &Path, cap: u32) -> Decoded {
+    let bytes = std::fs::read(path)?;
+    let format = image::guess_format(&bytes)?;
+    let jpeg = if format == image::ImageFormat::Jpeg && cap > 0 {
+        std::panic::catch_unwind(|| decode_jpeg(&bytes, cap)).ok().flatten()
+    } else { None };
+    let (im, w, h) = match jpeg {
+        Some(j) => j,
+        None => { let im = image::load_from_memory_with_format(&bytes, format)?; let (w, h) = (im.width(), im.height()); (im, w, h) }
+    };
+    drop(bytes);
+    let long = w.max(h);
+    // Shrink before adding alpha: a JPEG decodes to 3 bytes a pixel.
+    let im = if cap > 0 && im.width().max(im.height()) > cap {
+        let k = cap as f64 / long as f64;
+        let small = im.thumbnail_exact(((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1));
+        drop(im);
+        small
+    } else { im };
+    let mut rgba = im.into_rgba8();
+    for px in rgba.as_chunks_mut::<4>().0 { px.swap(0, 2); }
+    let scale = rgba.width() as f32 / w.max(1) as f32;
+    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)]).with_scale_factor(scale)))
+}
+
+/// A JPEG shrunk while it decodes (the IDCT outputs 1/2, 1/4 or 1/8 of each
+/// block), so a photo never sits in memory at full size. With the file's own
+/// size; None for what is left to `image` (CMYK, 16-bit).
+fn decode_jpeg(bytes: &[u8], cap: u32) -> Option<(image::DynamicImage, u32, u32)> {
+    use jpeg_decoder::{Decoder, PixelFormat};
+    let mut d = Decoder::new(bytes);
+    d.read_info().ok()?;
+    let info = d.info()?;
+    let (w, h) = (info.width as u32, info.height as u32);
+    if w.max(h) > cap {
+        // The IDCT only halves; a step up to 15% under the cap is close enough
+        // (a 4032 px photo at a 2048 cap decodes at 2016, not in full).
+        let k = cap as f64 * 0.85 / w.max(h) as f64;
+        d.scale(((w as f64 * k).ceil() as u16).max(1), ((h as f64 * k).ceil() as u16).max(1)).ok()?;
+    }
+    let pixels = d.decode().ok()?;
+    let out = d.info()?;
+    let (ow, oh) = (out.width as u32, out.height as u32);
+    let im = match out.pixel_format {
+        PixelFormat::RGB24 => image::DynamicImage::ImageRgb8(image::RgbImage::from_raw(ow, oh, pixels)?),
+        PixelFormat::L8 => image::DynamicImage::ImageLuma8(image::GrayImage::from_raw(ow, oh, pixels)?),
+        _ => return None,
+    };
+    Some((im, w, h))
+}
+
 impl DocImages {
-    /// Protects pictures used by any live window; ages out the rest in LRU order.
+    /// Protects pictures used by any live window; ages out the rest in LRU
+    /// order. A decode at another size of a picture on screen goes at once.
     fn sweep(&mut self, cx: &mut App) {
         let now = Instant::now();
         let live = cx.windows();
+        let mut hollowed = 0;
         let gone: Vec<Arc<RenderImage>> = FRAMES.with(|f| {
             let mut f = f.borrow_mut();
             f.retain(|id, _| live.iter().any(|w| w.window_id() == *id));
             let mut map = self.0.borrow_mut();
             let mut cold = Vec::new();
+            let mut on_screen = std::collections::HashSet::new();
             let mut bytes = 0usize;
             for (r, s) in map.iter_mut() {
                 s.windows.retain(|id, _| f.contains_key(id));
                 let shown = s.windows.iter().any(|(id, used)| f.get(id).is_some_and(|t| used >= t));
-                if shown { continue }
+                if shown {
+                    if let (Some(p), Some(Ok(_))) = (&s.path, &s.image) { on_screen.insert(p.clone()); }
+                    // Drawn by every window since the pixels arrived: they are
+                    // in the atlases, which never read them again.
+                    if let (Some(Ok(im)), Some(ready)) = (&s.image, s.ready)
+                        && !s.whole && !s.windows.is_empty() && s.windows.values().all(|used| *used > ready)
+                        && let Some(h) = im.hollow() {
+                        hollowed += 1;
+                        s.image = Some(Ok(Arc::new(h)));
+                    }
+                    continue
+                }
                 let size = match &s.image {
                     Some(Ok(im)) => (0..im.frame_count()).map(|i| im.as_bytes(i).map_or(0, |bytes| bytes.len())).sum(),
                     _ => 0,
                 };
                 bytes += size;
-                cold.push((r.clone(), s.used, size));
+                cold.push((r.clone(), s.used, size, s.path.clone()));
             }
-            cold.sort_by_key(|(_, used, _)| *used);
+            cold.sort_by_key(|(_, used, _, _)| *used);
             let mut out = Vec::new();
-            for (r, used, size) in cold {
-                if now - used < UNUSED && bytes <= 64 * 1024 * 1024 { continue }
+            for (r, used, size, path) in cold {
+                let superseded = path.is_some_and(|p| on_screen.contains(&p));
+                if !superseded && now - used < UNUSED && bytes <= 64 * 1024 * 1024 { continue }
                 bytes = bytes.saturating_sub(size);
                 if let Some(Slot { image: Some(Ok(im)), .. }) = map.remove(&r) { out.push(im); }
             }
             out
         });
-        if !gone.is_empty() { self.1 = 3; }
+        if !gone.is_empty() || hollowed > 0 || DECODED.swap(false, std::sync::atomic::Ordering::Relaxed) { self.1 = 3; }
         for im in gone { cx.drop_image(im, None); }
         // Command buffers can release their last references after this sweep.
         if self.1 > 0 { self.1 -= 1; release_freed(); }
     }
 
-    /// Forgets one picture, so the next frame decodes it again.
-    fn remove(r: &Resource, cx: &mut App) {
+    /// Forgets every decode of one file, so the next frame decodes it again.
+    fn remove(path: &Path, cx: &mut App) {
         let Some(e) = PICTURES.with(|p| p.get().cloned()) else { return };
         let map = e.read(cx).0.clone();
-        if let Some(Slot { image: Some(Ok(im)), .. }) = map.borrow_mut().remove(r) { cx.defer(move |cx| cx.drop_image(im, None)); }
+        let mut map = map.borrow_mut();
+        let keys: Vec<Resource> = map.iter().filter(|(_, s)| s.path.as_deref() == Some(path)).map(|(r, _)| r.clone()).collect();
+        for r in keys {
+            if let Some(Slot { image: Some(Ok(im)), .. }) = map.remove(&r) { cx.defer(move |cx| cx.drop_image(im, None)); }
+        }
+    }
+
+    /// While a picture decodes at a new size, another size of it stands in.
+    fn stand_in(map: &mut HashMap<Resource, Slot>, path: &Option<Arc<Path>>, window: Option<(WindowId, Instant)>) -> Option<Decoded> {
+        let path = path.as_ref()?;
+        let s = map.values_mut().filter(|s| s.path.as_ref() == Some(path) && matches!(s.image, Some(Ok(_))))
+            .max_by_key(|s| s.image.as_ref().and_then(|i| i.as_ref().ok()).map_or(0, |i| i.size(0).width.0))?;
+        if let Some((id, t)) = window { s.used = t; s.windows.insert(id, t); }
+        s.image.clone()
     }
 }
 
@@ -269,40 +396,65 @@ fn release_freed() {
     }
 }
 
+fn key_of(r: &Resource) -> Option<(Arc<Path>, u32)> {
+    let Resource::Uri(u) = r else { return None };
+    KEYS.with(|k| k.borrow().get(u).cloned())
+}
+
 impl ImageCache for DocImages {
-    fn peek(&self, r: &Resource) -> Option<Decoded> { self.0.borrow().get(r).and_then(|s| s.image.clone()) }
+    fn peek(&self, r: &Resource) -> Option<Decoded> {
+        let mut map = self.0.borrow_mut();
+        if let Some(Some(d)) = map.get(r).map(|s| s.image.clone()) { return Some(d) }
+        let path = map.get(r).map_or_else(|| key_of(r).map(|k| k.0), |s| s.path.clone());
+        Self::stand_in(&mut map, &path, None)
+    }
     fn load(&mut self, r: &Resource, window: &mut Window, cx: &mut App) -> Option<Decoded> {
         let id = window.window_handle().window_id();
-        if let Some(s) = self.0.borrow_mut().get_mut(r) {
-            s.used = Instant::now();
-            s.windows.insert(id, s.used);
-            if s.image.is_none() && !s.waiters.contains(&window.current_view()) { s.waiters.push(window.current_view()); }
-            return s.image.clone();
-        }
         let now = Instant::now();
-        let generation = Arc::new(());
-        self.0.borrow_mut().insert(r.clone(), Slot { image: None, used: now, windows: HashMap::from([(id, now)]), generation: generation.clone(), waiters: vec![window.current_view()] });
-        let generation = Arc::downgrade(&generation);
-        let queued = generation.clone();
-        let fut = <ImgResourceLoader as Asset>::load(r.clone(), cx);
-        let task = cx.background_executor().spawn(async move {
-            let _permit = DECODERS.acquire().await;
-            if queued.strong_count() == 0 { return None }
-            Some(fut.await)
-        });
-        let (map, r) = (self.0.clone(), r.clone());
-        cx.spawn(async move |cx| {
-            let Some(d) = task.await else { return };
-            // Still wanted (not removed for a retry meanwhile)?
-            if let Some(s) = map.borrow_mut().get_mut(&r)
-                && generation.ptr_eq(&Arc::downgrade(&s.generation)) {
-                s.image = Some(d);
-                let _ = cx.update(|cx| { for view in s.waiters.drain(..) { cx.notify(view); } });
-            }
-            // Decoding leaves big freed buffers behind (the file, RGB rows).
-            release_freed();
-        }).detach();
-        None
+        let untracked = FRAMES.with(|f| !f.borrow().contains_key(&id));
+        if let Some(s) = self.0.borrow_mut().get_mut(r) {
+            s.used = now;
+            s.windows.insert(id, s.used);
+            s.whole |= untracked;
+            if s.image.is_some() { return s.image.clone() }
+            if !s.waiters.contains(&window.current_view()) { s.waiters.push(window.current_view()); }
+        } else {
+            let key = key_of(r);
+            let generation = Arc::new(());
+            self.0.borrow_mut().insert(r.clone(), Slot { path: key.as_ref().map(|k| k.0.clone()), image: None, used: now, windows: HashMap::from([(id, now)]), generation: generation.clone(), waiters: vec![window.current_view()], ready: None, whole: untracked });
+            let generation = Arc::downgrade(&generation);
+            let queued = generation.clone();
+            // Animated GIFs keep all their frames at full size (gpui's loader).
+            let gif = key.as_ref().is_some_and(|(p, _)| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif")));
+            let job = match key {
+                Some((p, c)) if !gif => Err((p, c)),
+                Some((p, _)) => Ok(<ImgResourceLoader as Asset>::load(Resource::Path(p), cx)),
+                None => Ok(<ImgResourceLoader as Asset>::load(r.clone(), cx)),
+            };
+            let task = cx.background_executor().spawn(async move {
+                let _permit = DECODERS.acquire().await;
+                if queued.strong_count() == 0 { return None }
+                let d = match job { Ok(fut) => fut.await, Err((p, c)) => decode(&p, c) };
+                DECODED.store(true, std::sync::atomic::Ordering::Relaxed);
+                Some(d)
+            });
+            let (map, r) = (self.0.clone(), r.clone());
+            cx.spawn(async move |cx| {
+                let Some(d) = task.await else { return };
+                // Still wanted (not removed for a retry meanwhile)?
+                if let Some(s) = map.borrow_mut().get_mut(&r)
+                    && generation.ptr_eq(&Arc::downgrade(&s.generation)) {
+                    s.image = Some(d);
+                    s.ready = Some(Instant::now());
+                    let _ = cx.update(|cx| { for view in s.waiters.drain(..) { cx.notify(view); } });
+                }
+                // Decoding leaves big freed buffers behind (the file, RGB rows).
+                release_freed();
+            }).detach();
+        }
+        let mut map = self.0.borrow_mut();
+        let path = map.get(r).and_then(|s| s.path.clone());
+        Self::stand_in(&mut map, &path, Some((id, now)))
     }
 }
 
@@ -542,8 +694,7 @@ impl R<'_> {
                     .inset_0()
                     .overflow_hidden()
                     .child(
-                        img(p)
-                            .doc_picture()
+                        picture(&p, iw.max(ih))
                             .absolute()
                             .left(px(ix))
                             .top(px(iy))
@@ -839,7 +990,7 @@ impl Editor {
         let p = if src.starts_with("http://") || src.starts_with("https://") { Some(self.img.remote_path(src)) } else { image_path(src) };
         if let Some(p) = p {
             self.img.dims.borrow_mut().remove(&p);
-            DocImages::remove(&Resource::from(p), cx);
+            DocImages::remove(&p, cx);
         }
         self.img.generation += 1;
         cx.notify();
@@ -1579,8 +1730,7 @@ impl Editor {
                 .overflow_hidden()
                 .bg(gpui::white())
                 .child(
-                    img(path)
-                        .doc_picture()
+                    picture(&path, fw.max(fh))
                         .absolute()
                         .left(px(-crop[0] * fw))
                         .top(px(-crop[1] * fh))
@@ -2074,8 +2224,43 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_image_data, BAD_DIMS};
+    use super::{cap, clipboard_image_data, decode, BAD_DIMS};
     use gpui::ImageFormat;
+
+    fn photo(dir: &std::path::Path, w: u32, h: u32) -> std::path::PathBuf {
+        let p = dir.join(format!("{w}x{h}.jpg"));
+        let im = image::RgbImage::from_fn(w, h, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x + y) % 239) as u8]));
+        image::DynamicImage::ImageRgb8(im).save_with_format(&p, image::ImageFormat::Jpeg).unwrap();
+        p
+    }
+
+    #[test]
+    fn caps_round_up_in_steps() {
+        assert_eq!((cap(0.), cap(1.), cap(386.), cap(1380.), cap(2017.), cap(9000.)), (0, 128, 512, 1536, 2048, 0));
+    }
+
+    /// Shrunk at decode (the JPEG at most 15% under the cap), never above it;
+    /// the hollow copy keeps id and size.
+    #[test]
+    fn pictures_decode_at_their_shown_size() {
+        let dir = std::env::temp_dir().join(format!("qmd-pic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = photo(&dir, 4032, 3024);
+        for (c, long) in [(2048, 2016), (512, 504), (384, 384)] {
+            let im = decode(&p, c).unwrap();
+            let s = im.size(0);
+            assert_eq!(s.width.0 as u32, long, "cap {c}");
+            assert!(s.width.0 as u32 <= c && s.width.0 as f32 >= c as f32 * 0.85);
+            let h = im.hollow().unwrap();
+            assert!(h.is_hollow() && h.id == im.id && h.size(0) == s && h.as_bytes(0).is_none());
+        }
+        // 0 keeps every pixel; a PNG shrinks through `image`.
+        assert_eq!(decode(&p, 0).unwrap().size(0).width.0, 4032);
+        let png = dir.join("wide.png");
+        image::RgbaImage::new(3000, 1000).save(&png).unwrap();
+        assert_eq!(decode(&png, 1024).unwrap().size(0).width.0, 1024);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn clipboard_tiff_preserves_pixels_as_png() {

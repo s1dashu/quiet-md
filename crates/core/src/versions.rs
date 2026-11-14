@@ -1,5 +1,5 @@
 //! Per-document version history. A snapshot is the previous on-disk text of
-//! a document, kept verbatim under `history/<id>/`. The directory is its own
+//! a document, kept verbatim under `.quiet/history/<id>/`. The directory is its own
 //! index: no global manifest to merge, back up or corrupt. Older builds do
 //! not read this directory, so the layout needs no FORMAT bump.
 
@@ -32,8 +32,10 @@ pub struct Version {
 /// Longest label kept; longer input is cut rather than refused.
 pub const MAX_LABEL: usize = 40;
 
+// `root` is the library's `.quiet/`; the 回收站's snapshots sit beside, not
+// inside, `trash/`, whose entries are trashed documents.
 fn history_root(root: &Path) -> PathBuf { root.join("history") }
-fn trash_root(root: &Path) -> PathBuf { root.join("trash").join("history") }
+fn trash_root(root: &Path) -> PathBuf { root.join("history-trash") }
 fn base(root: &Path, trashed: bool) -> PathBuf { if trashed { trash_root(root) } else { history_root(root) } }
 
 /// A snapshot's label file: `<snapshot>.name`, next to the snapshot.

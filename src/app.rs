@@ -23,7 +23,7 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
 actions!(workspace, [NewDoc, OpenFile, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
-    HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
+    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
 
 /// The menu bar, in the interface language.
 pub fn set_menus(cx: &mut App) {
@@ -70,6 +70,7 @@ pub fn set_menus(cx: &mut App) {
                     MenuItem::separator(),
                     MenuItem::os_action(tr("剪切", "Cut"), k::Cut, OsAction::Cut),
                     MenuItem::os_action(tr("拷贝", "Copy"), k::Copy, OsAction::Copy),
+                    MenuItem::action(tr("拷贝为 Markdown", "Copy as Markdown"), k::CopyMarkdown),
                     MenuItem::os_action(tr("粘贴", "Paste"), k::Paste, OsAction::Paste),
                     MenuItem::os_action(tr("全选", "Select All"), k::SelectAll, OsAction::SelectAll),
                 ]
@@ -95,6 +96,8 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-n", NewDoc, None),
         KeyBinding::new("cmd-shift-n", crate::quick_note::QuickNew, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
+        // For trying the first-launch pages; not listed in Settings › Shortcuts.
+        KeyBinding::new("cmd-alt-shift-o", ReplayOnboarding, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-o", OpenFile, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
@@ -153,6 +156,30 @@ pub fn quit(cx: &mut App) {
     }
 }
 
+/// 更改文档库: open documents are saved first (as for 退出), the folder is
+/// set up as a library if it isn't one, the current preferences go with
+/// it when it has none, and the app restarts into it. The old library
+/// stays where it is. Call it outside any window update (`cx.defer`).
+pub fn switch_library(root: std::path::PathBuf, cx: &mut App) {
+    let ready = cx
+        .windows()
+        .into_iter()
+        .filter_map(|w| w.downcast::<Workspace>())
+        .map(|w| { let again = root.clone(); w.update(cx, |ws, _, cx| ws.save_before(cx, move |_, _, cx| cx.defer(move |cx| switch_library(again, cx)))).unwrap_or(false) })
+        .fold(true, |ready, saved| ready & saved);
+    if !ready { return }
+    let prefs = crate::store::Store::internal_dir().join("preferences.json");
+    let set = crate::guides::initialize(&root).and_then(|_| crate::store::Store::set_root_dir(root.clone()));
+    if let Err(e) = set {
+        let msg = format!("{}{e}", crate::settings::tr("无法在这里创建文档库：", "Couldn't create the library here: "));
+        if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()) { let _ = ws.update(cx, |w, _, cx| w.show_toast(&msg, cx)); }
+        return;
+    }
+    let mine = crate::store::Store::internal_dir().join("preferences.json");
+    if !mine.exists() { let _ = std::fs::create_dir_all(mine.parent().unwrap()).and_then(|_| std::fs::copy(&prefs, &mine)); }
+    cx.restart();
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum SaveStatus {
     /// Freshly opened, nothing saved this session: show the modification time.
@@ -201,10 +228,25 @@ pub enum Confirm {
     /// The open document could not be written before it was to be replaced
     /// (another document, 新建, 退出): 重试 / 放弃修改, then carry on.
     SaveFailed,
+    /// The library should move to real folders, and the user is asked first
+    /// (it is synced, or used from another computer): 改用文件夹 / 稍后.
+    Migrate(crate::store::ConsentReason),
+    /// 设置 › 文档库 › 更改…: open this folder as the library (#94), after a restart.
+    SwitchLibrary(std::path::PathBuf),
+    /// Dropped on the sidebar from outside: import it into the library there?
+    Import { what: DropImport, target: crate::sidebar_drop::SidebarDropAt },
 }
+
+/// What a sidebar drop would import: files and folders from the Finder, or a 本机文件.
+#[derive(Clone, Debug)]
+pub enum DropImport { Files(Vec<std::path::PathBuf>), Local(String) }
 
 /// What to do once the open document is safely on disk (or its changes given up).
 pub type AfterSave = Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)>;
+
+#[derive(Default)]
+struct ListedDocs { entries: Vec<crate::store::Entry>, trash: Vec<crate::store::TrashEntry>, warnings: Vec<String> }
+struct DeletedDocs { deleted: Vec<String>, errors: Vec<String>, changes: Vec<crate::store::FileDelta> }
 
 /// Inline 重命名 of a sidebar row.
 pub struct Rename {
@@ -226,6 +268,13 @@ pub struct Workspace {
     pub theme_menu: Option<String>,
     /// Where the theme dropdown's button was drawn last frame.
     pub theme_anchor: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// 通用's language dropdown while open: the highlighted language.
+    pub lang_menu: Option<crate::settings::Lang>,
+    pub lang_anchor: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// 通用's other dropdowns (快捷新建, 网页搜索, 打开链接): the open one, and
+    /// where each button was drawn last frame.
+    pub pref_menu: Option<crate::settings::PrefMenu>,
+    pub pref_anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<&'static str, Bounds<Pixels>>>>,
     /// 快捷键's filter field.
     pub settings_filter: Entity<TextField>,
     native_sidebar: crate::native_header::NativeSidebar,
@@ -241,10 +290,14 @@ pub struct Workspace {
     pub sidebar_width: f32,
     /// The resize handle is being dragged.
     pub sidebar_drag: bool,
+    /// The window's minimum width as last given to it (`DOC_MIN_W` plus the sidebar).
+    min_w: f32,
     pub folder_current: Option<String>,
     pub create_menu: Option<(Option<String>, Point<Pixels>)>,
     /// The header's 导入 menu: the folder it imports into, and where it hangs.
     pub import_menu: Option<(Option<String>, Point<Pixels>)>,
+    /// The header's … menu on Home (None) or a folder page: where it hangs.
+    pub place_menu: Option<(Option<String>, Point<Pixels>)>,
     pub folder_drag: crate::sidebar_drag::SidebarDrag,
     /// The search dialog (command-center style) is open.
     pub search_open: bool,
@@ -274,6 +327,8 @@ pub struct Workspace {
     pub batch: Option<Vec<String>>,
     /// The open confirmation dialog.
     pub confirm: Option<Confirm>,
+    /// The first-launch pages laid over the window again (⌘⌥⇧O, Settings › About).
+    pub onboarding: Option<Entity<crate::onboarding::Onboarding>>,
     pub view: View,
     pub home: crate::home::Home,
     pub settings_scroll: ScrollHandle,
@@ -288,6 +343,8 @@ pub struct Workspace {
     pub folded: [bool; 3],
     /// Expanded pages of the 我的文档 tree.
     pub expanded: HashSet<String>,
+    /// Where a drag from outside the tree (the Finder, 本机文件) would land in the sidebar.
+    pub sidebar_drop: Option<crate::sidebar_drop::SidebarDropAt>,
     pub move_dlg: Option<crate::tree::MoveDialog>,
     /// 导出 Markdown 设置.
     pub export_md: Option<crate::transfer::ExportMd>,
@@ -324,6 +381,20 @@ fn notify_system(title: &str, body: &str) {
 }
 
 impl Workspace {
+    /// Other active windows take the lists a background write left; `trash`
+    /// only when that write touched it.
+    pub(crate) fn sync_peers(&self, cx: &mut Context<Self>, entries: &[Entry], trash: Option<&[crate::store::TrashEntry]>) {
+        let me = cx.entity_id();
+        for handle in cx.windows().into_iter().filter_map(|w| w.downcast::<Workspace>()) {
+            if !handle.is_active(cx).is_some_and(|yes| yes) || handle.entity(cx).is_ok_and(|e| e.entity_id() == me) { continue }
+            let (entries, trash) = (entries.to_vec(), trash.map(<[_]>::to_vec));
+            let _ = handle.update(cx, |ws, _, cx| {
+                ws.entries = entries; if let Some(trash) = trash { ws.trash = trash; } ws.sort();
+                cx.notify();
+            });
+        }
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_window(false, window, cx)
     }
@@ -357,8 +428,12 @@ impl Workspace {
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() { if let Some(id) = &this.current { crate::quick_note::used(id, cx); } this.entries = this.store.list(); this.sort(); crate::update::check_if_stale(cx); cx.notify(); }
-                else { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
+                if window.is_window_active() {
+                    if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); }
+                    crate::update::check_if_stale(cx); cx.notify();
+                }
+                else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
             }),
             cx.subscribe_in(&search, window, |this, _, ev: &TextFieldEvent, window, cx| {
                 match ev {
@@ -382,7 +457,7 @@ impl Workspace {
             // go through `save_before` and ask when the save fails.
             cx.on_app_quit(|this, cx| {
                 crate::quick_note::persist(cx);
-                if !this.flush(cx) && let Some(ed) = &this.editor
+                if !this.store.file_task_busy() && !this.flush(cx) && let Some(ed) = &this.editor
                     && let Err(error) = this.store.recover_later(&ed.read(cx).core.doc) {
                     crate::logging::write(&format!("Could not preserve unsaved document: {error:#}"));
                 }
@@ -395,6 +470,30 @@ impl Workspace {
             this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
         });
         if !quick { crate::settings::watch_themes(cx); }
+        // A file written into the library from outside (a model writing a
+        // note, say) joins it without going away and back: the library's
+        // shape is compared every couple of seconds and the list re-read only
+        // when it changed.
+        cx.spawn(async move |this, cx| {
+            let bg = cx.background_executor().clone();
+            let shape = || bg.spawn(async { crate::store::Store::shape_at(&crate::store::Store::root_dir()) });
+            let mut last = shape().await;
+            loop {
+                bg.timer(Duration::from_secs(2)).await;
+                let now = shape().await;
+                if now == last { continue }
+                let reloaded = this.update(cx, |w, cx| {
+                    // Not mid-rename: the row under the field would be rebuilt.
+                    if w.rename.is_some() || w.move_dlg.is_some() || w.store.file_task_busy() { return false }
+                    w.entries = w.store.list();
+                    w.sort();
+                    cx.notify();
+                    true
+                });
+                match reloaded { Ok(true) => last = now, Ok(false) => {}, Err(_) => break }
+            }
+        })
+        .detach();
         // 日期提醒: post what fell due since the last look (not what was
         // missed while the app was closed).
         cx.spawn(async |this, cx| {
@@ -421,6 +520,10 @@ impl Workspace {
             history_limit,
             theme_menu: None,
             theme_anchor: Default::default(),
+            lang_menu: None,
+            lang_anchor: Default::default(),
+            pref_menu: None,
+            pref_anchors: Default::default(),
             settings_filter,
             store,
             entries,
@@ -430,10 +533,12 @@ impl Workspace {
             search_sel: None,
             sidebar_open: !quick,
             sidebar_width,
+            min_w: 0.,
             sidebar_drag: false,
             folder_current: None,
             create_menu: None,
             import_menu: None,
+            place_menu: None,
             folder_drag: Default::default(),
             search_open: false,
             status: SaveStatus::Idle,
@@ -453,6 +558,7 @@ impl Workspace {
             row_sub_bounds: Rc::new(Cell::new(None)),
             batch: None,
             confirm: None,
+            onboarding: None,
             view: View::Doc,
             home: Default::default(),
             settings_scroll: ScrollHandle::new(),
@@ -467,6 +573,7 @@ impl Workspace {
             shortcuts: false,
             folded: [false; 3],
             expanded: HashSet::new(),
+            sidebar_drop: None,
             move_dlg: None,
             export_md: None,
             focus: cx.focus_handle(),
@@ -658,6 +765,7 @@ impl Workspace {
 
     /// Move documents to the trash; if the open one goes, open the next.
     pub fn delete_docs(&mut self, ids: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
         // A page goes with its child pages: each topmost page is
         // trashed as one item that carries its subtree.
         let tree = crate::tree::Tree::new(&self.entries);
@@ -690,57 +798,68 @@ impl Workspace {
                 return;
             }
         }
-        let file_before = self.store.track_file_changes();
-        let mut deleted = vec![];
-        let mut errors = vec![];
-        for (id, root) in &groups {
-            // Do not split a subtree when its root could not be deleted.
-            if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
-            match self.store.delete(id, root.as_deref()) {
-                Ok(()) => deleted.push(id.clone()),
-                Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let mut writer = self.store.tree_writer();
+        let task = cx.background_executor().spawn(async move {
+            let journal = writer.track_file_changes();
+            let mut deleted = vec![];
+            let mut errors = vec![];
+            let batch = writer.begin_batch().is_ok();
+            for (id, root) in &groups {
+                if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
+                match writer.delete(id, root.as_deref()) {
+                    Ok(()) => deleted.push(id.clone()),
+                    Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+                }
             }
-        }
-        if self.current.as_ref().is_some_and(|c| deleted.contains(c)) {
-            self.save_task = None;
-            self.unsaved = false;
-            self.current = None;
-            self.editor = None;
-            self.editor_sub = None;
-        }
-        self.entries.retain(|e| !deleted.contains(&e.id));
-        if self.folder_current.as_ref().is_some_and(|id| deleted.contains(id)) {
-            self.folder_current = None;
-            if self.view == View::Folder { self.view = View::Home; }
-        }
-        if let Some(b) = self.batch.as_mut() {
-            b.retain(|id| !deleted.contains(id));
-        }
+            if batch && let Err(e) = writer.end_batch() {
+                errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string())));
+            }
+            let warnings = writer.take_warnings();
+            let listed = ListedDocs { entries: writer.list(), trash: writer.list_trash(), warnings };
+            (DeletedDocs { deleted, errors, changes: journal.take() }, listed)
+        });
+        self.batch = None;
         self.row_menu = None;
-        if self.current.is_none() && self.view != View::Folder {
-            // Stay on 主页 / 回收站 if that's where the delete came from.
-            // The last document gone leaves the library empty (主页's empty
-            // state), not a new 未命名 document.
-            let view = self.view;
-            match self.entries.first().map(|e| e.id.clone()) {
-                Some(next) => { self.open(&next, window, cx); self.view = view; }
-                None => self.view = if view == View::Doc { View::Home } else { view },
-            }
-        }
-        self.remember_files(file_before, crate::settings::tr("删除", "Delete"));
-        self.sync_sub_pages(cx);
-        if self.view == View::Trash {
-            self.trash = self.store.list_trash();
-        }
-        errors.extend(self.store.take_warnings().iter().map(|s| crate::settings::diagnostic(s)));
-        if errors.is_empty() {
-            self.show_toast(crate::settings::text("删除成功"), cx);
-        } else {
-            let msg = errors.join("；");
-            self.show_toast_kind(ToastKind::Error, &msg, cx);
-            self.status = SaveStatus::Failed(msg);
-        }
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let _task_guard = task_guard;
+            let (done, listed) = task.await;
+            let _ = this.update_in(cx, |w, window, cx| {
+                if w.current.as_ref().is_some_and(|c| done.deleted.contains(c)) {
+                    w.save_task = None;
+                    w.unsaved = false;
+                    w.current = None;
+                    w.editor = None;
+                    w.editor_sub = None;
+                }
+                w.sync_peers(cx, &listed.entries, Some(&listed.trash));
+                w.entries = listed.entries; w.trash = listed.trash;
+                if w.folder_current.as_ref().is_some_and(|id| done.deleted.contains(id)) {
+                    w.folder_current = None;
+                    if w.view == View::Folder { w.view = View::Home; }
+                }
+                w.row_menu = None;
+                if w.current.is_none() && w.view != View::Folder {
+                    let view = w.view;
+                    match w.entries.first().map(|e| e.id.clone()) {
+                        Some(next) => { w.open(&next, window, cx); w.view = view; }
+                        None => w.view = if view == View::Doc { View::Home } else { view },
+                    }
+                }
+                w.remember_file_changes(done.changes, crate::settings::tr("删除", "Delete"));
+                w.sync_sub_pages(cx);
+                let mut errors = done.errors;
+                errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
+                if errors.is_empty() { w.show_toast(crate::settings::text("删除成功"), cx); }
+                else {
+                    let msg = errors.join("；");
+                    w.show_toast_kind(ToastKind::Error, &msg, cx);
+                    w.status = SaveStatus::Failed(msg);
+                }
+                cx.notify();
+            });
+        }).detach();
     }
 
     pub fn toggle_pin(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -783,6 +902,8 @@ impl Workspace {
         self.row_menu = None;
         self.trash_menu = None;
         self.theme_menu = None;
+        self.lang_menu = None;
+        self.pref_menu = None;
         self.home.sort_menu = false;
         cx.notify();
     }
@@ -930,6 +1051,9 @@ impl Workspace {
         }
         self.save_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(delay).await;
+            while this.update(cx, |w, _| w.store.file_task_busy()).unwrap_or(false) {
+                cx.background_executor().timer(Duration::from_millis(50)).await;
+            }
             let _ = this.update(cx, |w, cx| w.flush(cx));
         }));
         cx.notify();
@@ -996,7 +1120,25 @@ impl Workspace {
     /// Save the open document before something replaces it. When the save
     /// fails nothing is replaced: the 保存失败 dialog offers 重试 / 放弃修改
     /// and runs `then` after either.
+    /// 改用文件夹: move the library to real folders, then reopen the main
+    /// window on it at the same place (documents get new ids in the new layout).
+    pub(crate) fn migrate_library(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.save_before(cx, |w, window, cx| w.migrate_library(window, cx)) { return }
+        let root = crate::store::Store::root_dir();
+        let moved = crate::store::Store::migrate(&root).and_then(|r| Ok((r, crate::store::Store::open_at(root.clone())?)));
+        match moved {
+            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("没能改为真实文件夹，文档库保持原样：{}", "Couldn't move to real folders; the library is unchanged: {}", crate::settings::diagnostic(&e.to_string())), cx),
+            Ok((report, store)) => {
+                self.store.with(|s| *s = store);
+                crate::changelog::migrated(&report);
+                crate::open_main_window(crate::devtools::scripted(), Some(window.bounds()), cx);
+                window.remove_window();
+            }
+        }
+    }
+
     pub fn save_before(&mut self, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> bool {
+        if self.store.file_task_busy() { return false; }
         if self.flush(cx) {
             return true;
         }
@@ -1160,7 +1302,8 @@ impl Workspace {
             .on_click(cx.listener(|w, _, window, cx| w.open_search(window, cx))))
     }
 
-    fn top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// `pane_w`: the width the header spans, to fold the breadcrumbs when narrow.
+    fn top_bar(&self, pane_w: f32, cx: &mut Context<Self>) -> impl IntoElement {
         let title = self
             .editor
             .as_ref()
@@ -1182,6 +1325,15 @@ impl Workspace {
             .unwrap_or_default();
         let mut crumbs: Vec<AnyElement> = vec![];
         let sep = || div().mx(px(3.)).flex_none().child(icon("chevron-right", 12., Theme::icon())).into_any_element();
+        // Every path starts at the library, as a folder page's does.
+        if self.current.is_some() {
+            crumbs.push(div().id("crumb-library").no_drag().flex_none().px(px(4.)).rounded(px(4.)).cursor_pointer()
+                .whitespace_nowrap().text_color(Theme::text_caption()).hover(|s| s.text_color(Theme::primary_500()))
+                .child(ui_text(crate::settings::tr("我的文档", "My documents").to_string()))
+                .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx)))
+                .into_any_element());
+            crumbs.push(sep());
+        }
         for (i, (id, name, em)) in chain.iter().enumerate() {
             if chain.len() > 2 && i > 0 && i < chain.len() - 1 {
                 if i == 1 {
@@ -1227,6 +1379,19 @@ impl Workspace {
                     .into_any_element(),
             );
             crumbs.push(sep());
+        }
+        // Too narrow for the path: it folds into one "…" (the path on hover),
+        // and the title keeps the room. Left: the sidebar's buttons when it is
+        // closed; right: the three actions.
+        let left = if self.sidebar_open { 18. } else { theme::TRAFFIC_LIGHTS_W + 4. + 28. + 4. + 28. + 25. };
+        let room = pane_w - left - crate::ui::header_right_inset() - 3. * HEADER_ACTIONS_H - 8. - 16.;
+        if room < 360. && !crumbs.is_empty() {
+            let path: Vec<&str> = std::iter::once(crate::settings::tr("我的文档", "My documents")).chain(chain.iter().map(|c| c.1.as_str())).collect();
+            crumbs = vec![
+                div().id("crumb-more").no_drag().flex_none().size(px(20.)).flex().items_center().justify_center().rounded(px(4.))
+                    .text_color(Theme::text_caption()).tip(&path.join(" / "), None).child("…").into_any_element(),
+                sep(),
+            ];
         }
         let record_more = self.more_btn_bounds.clone();
         div()
@@ -1281,6 +1446,7 @@ impl Workspace {
                         div()
                             .h(px(20.))
                             .min_w_0()
+                            .overflow_hidden()
                             .flex()
                             .items_center()
                             .text_size(px(13.))
@@ -1342,6 +1508,9 @@ impl Workspace {
 
 /// Header and action group share an 8px top/right inset.
 pub const HEADER_H: f32 = 48.;
+/// The narrowest the main pane (document, Home, settings) gets: the window's
+/// minimum width is this plus the open sidebar.
+pub const DOC_MIN_W: f32 = 480.;
 pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
 
 impl Render for Workspace {
@@ -1349,8 +1518,19 @@ impl Render for Workspace {
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus); }
-        crate::editor::image::frame_drawn(window);
-        self.native_sidebar.sync(if self.sidebar_open { self.sidebar_w(window) } else { 0. }, window);
+        crate::editor::image::frame_drawn(window, cx);
+        // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
+        crate::theme::set_fullscreen(window.is_fullscreen());
+        self.native_sidebar.sync(if self.sidebar_open && !crate::theme::fullscreen() { self.sidebar_w(window) } else { 0. }, window);
+        // The pane keeps its minimum beside the sidebar: opening the sidebar in
+        // a narrow window widens the window rather than squeezing the note.
+        let min_w = DOC_MIN_W + if self.sidebar_open { self.sidebar_w(window) } else { 0. };
+        if min_w != self.min_w {
+            self.min_w = min_w;
+            window.set_window_min_size(size(px(min_w), px(480.)));
+            let vs = window.viewport_size();
+            if f32::from(vs.width) < min_w - 0.5 && !window.is_fullscreen() { window.resize(size(px(min_w), vs.height)); }
+        }
         let sidebar = if self.sidebar_open { Some(if matches!(self.view, View::Settings | View::Trash) { self.render_settings_sidebar(window, cx) } else { self.render_sidebar(window, cx) }) } else { None };
         let row_menu = self.render_row_menu(window, cx);
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
@@ -1360,6 +1540,7 @@ impl Render for Workspace {
         let file_drop = self.render_file_drop(window, cx);
         let create_menu = self.render_create_menu(cx);
         let import_menu = self.render_import_menu(cx);
+        let place_menu = self.render_place_menu(cx);
         let search = self.render_search(window, cx);
         let doc_menu = self.render_doc_menu(window, cx);
         let doc_info = self.render_doc_info(cx);
@@ -1368,6 +1549,8 @@ impl Render for Workspace {
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
+        let lang_menu = self.render_lang_menu(cx);
+        let pref_menu = self.render_pref_menu(cx);
         let toast = self.render_toast(window);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -1377,7 +1560,7 @@ impl Render for Workspace {
                 .h_full()
                 .flex()
                 .flex_col()
-                .child(self.top_bar(cx))
+                .child(self.top_bar(f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. }, cx))
                 .children(self.render_history_banner(cx))
                 .child(
                     div()
@@ -1446,6 +1629,7 @@ impl Render for Workspace {
             .on_action(|_: &Zoom, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())
             .on_action(cx.listener(|w, _: &OpenSettings, _, cx| w.show_view(View::Settings, cx)))
+            .on_action(cx.listener(|w, _: &ReplayOnboarding, window, cx| w.replay_onboarding(window, cx)))
             .on_action(cx.listener(|w, _: &OpenAbout, _, cx| w.open_settings(crate::settings::Page::About, cx)))
             .on_action(cx.listener(|w, _: &CheckForUpdates, _, cx| { w.open_settings(crate::settings::Page::About, cx); crate::update::check(true, cx); }))
             .on_action(cx.listener(|w, _: &GoHome, _, cx| w.show_view(View::Home, cx)))
@@ -1470,7 +1654,8 @@ impl Render for Workspace {
             }))
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
                 // The theme dropdown: ↑ ↓ preview, ↩ applies, Esc closes it (not 设置).
-                if w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx) {
+                if (w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx)) || (w.lang_menu.is_some() && w.lang_menu_key(&ev.keystroke.key, cx))
+                    || (w.pref_menu.is_some() && w.pref_menu_key(&ev.keystroke.key, cx)) {
                     cx.stop_propagation();
                     return;
                 }
@@ -1492,7 +1677,8 @@ impl Render for Workspace {
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
-                if w.file_history.busy && !(ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y")) { cx.stop_propagation(); return; }
+                let undo = ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y");
+                if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 // 版本历史: the editor keeps the caret, so Esc has to be taken
                 // before it reaches the read-only key handler.
                 if ev.keystroke.key == "escape" && w.preview.is_some() {
@@ -1543,19 +1729,41 @@ impl Render for Workspace {
             .children(trash_menu)
             .children(home_menus)
             .children(theme_menu)
+            .children(lang_menu)
+            .children(pref_menu)
             .children(confirm)
             .children(move_dlg)
             .children(export_md)
             .children(search)
             .children(resize_overlay)
             .children(folder_drag_overlay)
-            .when(self.file_history.busy, |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
+            .when(self.file_history.busy || self.store.file_task_busy(), |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())).with_priority(20)))
             .children(home_drag_overlay)
             .children(create_menu)
             .children(import_menu)
+            .children(place_menu)
             .children(toast)
+            // Over everything, toasts included, until its last page is done.
+            .when_some(self.onboarding.clone(), |d, o| d.child(deferred(div().id("onboarding-cover").absolute().inset_0().occlude().child(o)).with_priority(30)))
+    }
+}
+
+impl Workspace {
+    /// Lay the first-launch pages over this window; finishing them uncovers it.
+    pub(crate) fn replay_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.onboarding.is_some() { return }
+        let o = cx.new(|cx| crate::onboarding::Onboarding::replay(window, cx));
+        cx.subscribe_in(&o, window, |w, _, _: &crate::onboarding::Done, window, cx| {
+            w.onboarding = None;
+            // The language may have changed on the first page.
+            crate::settings::refresh_all(w, cx);
+            window.focus(&w.focus);
+            cx.notify();
+        }).detach();
+        self.onboarding = Some(o);
+        cx.notify();
     }
 }
 
@@ -1584,7 +1792,7 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
                 ws.unsaved = true;
             }).unwrap();
             if name != "C" {
-                std::fs::write(crate::store::Store::root_dir().join("docs").join(format!("{id}.xml")), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
+                std::fs::write(store.file_path(&id).unwrap(), crate::docxml::serialize(&doc(&format!("disk-{name}")))).unwrap();
             }
             windows.push((handle, id));
         }

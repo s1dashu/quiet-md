@@ -36,11 +36,13 @@ pub fn absorb(blocks: &mut [Block], root: &Path) -> usize {
         let BlockKind::Image { src_kind, src, .. } = &mut b.kind else { continue };
         let Some((bytes, ext)) = inline_image(src) else { continue };
         let name = format!("b64-{:016x}.{ext}", hash(&bytes));
-        let path = root.join("assets").join(&name);
-        if !path.is_file() && std::fs::write(&path, &bytes).is_err() {
+        // The library's asset folder for its layout (`.assets`, or `assets` before real folders).
+        let dir = crate::store::Store::assets_in(root);
+        let path = dir.join(&name);
+        if !path.is_file() && (std::fs::create_dir_all(&dir).is_err() || std::fs::write(&path, &bytes).is_err()) {
             continue;
         }
-        *src = format!("assets/{name}");
+        *src = format!("{}/{name}", dir.file_name().unwrap_or_default().to_string_lossy());
         *src_kind = "src".into();
         n += 1;
     }
@@ -125,20 +127,19 @@ mod tests {
     #[test]
     fn inline_images_become_assets_once() {
         let root = std::env::temp_dir().join(format!("quiet-b64-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(root.join("assets")).unwrap();
         let bytes = b"\x89PNG\r\n\x1a\npayload";
         let mut blocks = vec![image_block(&png(bytes))];
 
         assert_eq!(absorb(&mut blocks, &root), 1);
         let src = src_of(&blocks[0]).to_string();
-        assert!(src.starts_with("assets/b64-") && src.ends_with(".png"), "{src}");
+        assert!(src.starts_with(".assets/b64-") && src.ends_with(".png"), "{src}");
         assert_eq!(std::fs::read(root.join(&src)).unwrap(), bytes);
 
         // Opening the file again reuses the same asset instead of a new copy.
         let mut again = vec![image_block(&png(bytes))];
         assert_eq!(absorb(&mut again, &root), 1);
         assert_eq!(src_of(&again[0]), src);
-        assert_eq!(std::fs::read_dir(root.join("assets")).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(root.join(".assets")).unwrap().count(), 1);
         std::fs::remove_dir_all(&root).unwrap();
     }
 

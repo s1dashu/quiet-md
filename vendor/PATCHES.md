@@ -41,7 +41,17 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 20 | `elements/img.rs`、`elements/image_cache.rs` | 图片缓存增加不触发加载的 `peek`；显式尺寸图片可选择延迟到可见区域绘制时才解码 | 卡片裁剪范围之外的图片不再预先解码；原始像素、尺寸和动图播放保持不变 |
 | 21 | `platform/mac/metal_atlas.rs` | 删除图片时立即移除 tile 索引，再递减所属纹理的引用计数 | 避免共享纹理仍被使用时残留旧索引，导致重复删除或复用失效 tile |
 | 22 | `platform/mac/platform.rs` | 读取剪贴板时同时保留文字和一种图片格式（优先 PNG），跳过空图片数据 | 截图工具同时提供文字和图片时，正文可选择图片，文本输入框仍可读取文字 |
+| 23 | `text_system/line_wrapper.rs` | `is_word_char` 把韩文（谚文字母、兼容字母、音节及半角谚文）算作单词字符；上游测试原本断言它不是 | 韩文用空格分词，界面文字按词（어절）换行，不再在词中间断开；超出一行的长词仍按字符断开 |
+| 24 | `assets.rs`、`window.rs` | `RenderImage::with_scale_factor`；`RenderImage::hollow` 生成同 id、同尺寸、不带像素的空壳；`paint_image` 遇到 atlas 里没有的空壳时跳过、记下并请求下一帧，由 `Window::take_missing_images` 取走 | 文档图片按显示尺寸解码后，布局仍按原图尺寸；已上传到 atlas 的图片不再在内存里留一份像素（docs/MEMORY.md） |
+| 25 | `platform/windows/directx_renderer.rs`、`directx_atlas.rs`、`platform.rs`、`events.rs`、`window.rs` | GPU 设备丢失时：resize 失败后 render target 为 `None`，绘制前先重做（原来 `pre_draw` 直接 unwrap 崩溃，旧 back buffer 还会被二次释放）；渲染器恢复失败可重试，已释放的设备和资源只释放一次，期间不绘制、不 resize，恢复时按窗口当前大小建交换链，下一帧再试；atlas 查不到纹理时跳过这批 sprite；重建 DirectX 设备失败时不再把丢失的设备当新设备发给窗口，下一次 vsync 重试；恢复后重新设置窗口的亚克力模糊（驱动重启后会丢，侧栏后面的窗口不再被模糊） | 显卡驱动重启、睡眠唤醒、驱动更新后应用不崩溃，恢复后正常显示 |
+| 26 | `window.rs` | `Window::replace_root` 同时更新窗口句柄记录的根视图类型（`handle.state_type` 和 `App::window_handles` 里那一份） | 首次启动的引导页走完后，在同一个窗口里换成主界面；原来换了根视图后 `downcast::<新类型>()` 仍然失败，按主界面找窗口的地方找不到它 |
 
+| 27 | `platform.rs`、`platform/mac/window.rs`、`platform/windows/window.rs`、`window.rs` | `Window::set_window_min_size`：创建后改窗口最小内容尺寸（macOS `setContentMinSize`，Windows 改 `WM_GETMINMAXINFO` 用的 `min_size`；其他平台不变） | 最小宽度 = 文档区最小宽度 + 侧栏宽度，随侧栏开合和拖宽变化 |
+| 28 | `platform.rs`、`platform/mac/window.rs`、`window.rs` | `Window::present_next_frame_in_transaction`：下一帧走 `PlatformWindow::draw_in_transaction`，macOS 上这一帧 `presentsWithTransaction`，和渲染期间改的原生视图在同一个 Core Animation 事务里上屏；其他平台照常 `draw` | 侧栏玻璃（`NSGlassEffectView`）大小或显隐变化的那一帧和 GPUI 画面同时出现；原来画面异步上屏、晚一个刷新，开关侧栏时玻璃先没（先出来），看着像顿了一下 |
+| 29 | `scene.rs` | `insert_primitive` 判断阴影是否落在裁剪区外时，按着色器实际画到的范围（四周各多 3 倍模糊半径）算，原来只看阴影本身的矩形 | 阴影的模糊部分落进裁剪区、矩形本身在区外时不再被丢掉（主页拖入文件时，按连续圆角逐行裁剪的内侧光晕） |
+| 30 | `text_system/line_layout.rs` | `layout_wrapped_line`：文字含从右到左的字符（希伯来、阿拉伯等）且需要折行时，改走 `wrap_bidi`：按阅读顺序取每个字符的宽度来定折行点，每行单独交给平台排版（行内由平台重排），再把各行首尾相接拼成一个布局，折行点放在每行第一个字形上；每行末尾的空格不参与排版 | 整段一次排版后字形是显示顺序，原来按显示顺序切行，阿拉伯文多行时行序颠倒、从词中间断开；其他文字不走这条路 |
+| 31 | `text_system/line_wrapper.rs` | `is_word_char` 把希伯来、阿拉伯、叙利亚、它拿、N'Ko 字母及阿拉伯/希伯来表现形式算作单词字符，并加了测试 | 这些文字用空格分词，按词换行，不再在词中间断开 |
+| 32 | `text_system/line.rs` | `WrappedLine::paint` / `paint_background`：折成多行、且第一个字母属于从右到左文字的段落，默认的左对齐改成右对齐（`rtl_align`）；单行文字、显式指定的对齐和编辑器用的 `paint_rows` 不变 | 阿拉伯文等的多行说明文字贴右边排，符合这些文字的阅读习惯 |
 
 ## taffy 0.9.0
 
