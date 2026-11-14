@@ -14,10 +14,21 @@ use gpui::{prelude::FluentBuilder, *};
 const ROW_MENU_W: f32 = 180.;
 const ROW_ITEM: f32 = crate::ui::MENU_ROW_H;
 const ROW_DIVIDER: f32 = 11.;
+const ROW_ITEMS: usize = 9;
+const ROW_DIVIDERS: usize = 2;
+const DOWNLOAD_INDEX: usize = 5;
+const DIVIDERS_BEFORE_DOWNLOAD: usize = 1;
 
-fn row_menu_height(items: usize, dividers: usize) -> f32 {
+const fn row_menu_height(items: usize, dividers: usize) -> f32 {
     2. + crate::ui::MENU_PAD_Y * 2. + items as f32 * ROW_ITEM + dividers as f32 * ROW_DIVIDER
 }
+
+const fn row_sub_top(menu_top: f32) -> f32 {
+    menu_top + DOWNLOAD_INDEX as f32 * ROW_ITEM + DIVIDERS_BEFORE_DOWNLOAD as f32 * ROW_DIVIDER
+}
+
+const _: () = assert!(row_menu_height(ROW_ITEMS, ROW_DIVIDERS) == 324.);
+const _: () = assert!(row_sub_top(0.) == 171.);
 
 /// Sidebar geometry (measured from the window edge), shared by the
 /// document sidebar and 设置's: selection pills start 14pt in, every row is
@@ -745,7 +756,7 @@ impl Workspace {
                 }
             })
         };
-        let (dup, mv, pin, star, dl, ren, del) = (m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone());
+        let (dup, mv, path, pin, star, dl, ren, del) = (m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone(), m.id.clone());
         let pdf = m.id.clone();
         let new_window = m.id.clone();
         let sub_bounds = self.row_sub_bounds.clone();
@@ -784,6 +795,17 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _, window, cx| w.open_move(vec![mv.clone()], window, cx))),
             )
             .child(
+                item("rm-path", "copy", crate::settings::text("复制文件地址"))
+                    .on_hover(set_sub(false))
+                    .on_click(cx.listener(move |w, _, _, cx| {
+                        w.row_menu = None;
+                        if let Some(path) = w.store.file_path(&path) {
+                            cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
+                            w.show_toast(crate::settings::text("已复制文件地址"), cx);
+                        }
+                    })),
+            )
+            .child(
                 item("rm-pin", if pinned { "pin-off" } else { "pin" }, if pinned { crate::settings::text("从“置顶”移除") } else { crate::settings::text("添加到“置顶”") })
                     .on_hover(set_sub(false))
                     .on_click(cx.listener(move |w, _, _, cx| w.toggle_pin(&pin, cx))),
@@ -812,7 +834,7 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _, _, cx| w.ask_delete(&del, cx))),
             );
         let vh = f32::from(window.viewport_size().height);
-        let menu_h = row_menu_height(8, 2);
+        let menu_h = row_menu_height(ROW_ITEMS, ROW_DIVIDERS);
         // From the "…" button: hang 2px below it, or sit 2px above it when
         // there's no room below. From a right-click: at the pointer.
         let (origin, corner) = if m.pos.x < px(0.) {
@@ -837,8 +859,8 @@ impl Workspace {
         if m.sub {
             let record = self.row_sub_bounds.clone();
             record.set(None);
-            // Level the submenu's first item with 下载 (the 5th item, after one divider).
-            let top = menu_top + 4. * ROW_ITEM + ROW_DIVIDER;
+            // Level the submenu's first item with 下载.
+            let top = row_sub_top(menu_top);
             let left = match corner {
                 Corner::TopRight | Corner::BottomRight => origin.x - px(ROW_MENU_W),
                 _ => origin.x,
