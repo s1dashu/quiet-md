@@ -1260,7 +1260,7 @@ fn pipe_table_widths(rows: &[Vec<TableCell>], ncols: usize) -> Vec<f32> {
 }
 
 fn is_boundary(c: Option<char>) -> bool {
-    c.is_none_or(char::is_whitespace)
+    c.is_none_or(|c| c.is_whitespace() || "，。；：！？、）】》”’".contains(c))
 }
 
 fn math_boundary(c: Option<char>) -> bool {
@@ -1670,6 +1670,13 @@ mod tests {
         let t = super::md_inline("存储。$10 亿页 \\\\times 500k = 500 TB$。");
         let equations: Vec<_> = t.spans().filter_map(|(_, m)| m.inline.as_ref().and_then(|i| i.equation().map(str::to_string))).collect();
         assert_eq!(equations, vec!["10 亿页 \\times 500k = 500 TB"]);
+    }
+
+    #[test]
+    fn emphasis_after_chinese_punctuation() {
+        let t = super::md_inline("中文，_强调_，后续");
+        assert_eq!(t.text, "中文，强调，后续");
+        assert!(t.spans().any(|(_, m)| m.italic), "{t:?}");
     }
 
     #[test]
