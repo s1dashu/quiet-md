@@ -468,7 +468,9 @@ impl Workspace {
         self.folder_drag.parents = self.entries.iter().filter_map(|e| e.meta.parent.clone()).collect();
         let high = crate::settings::motion_high();
         // The visible list's bottom edge, in this list's coordinates (last frame's layout).
-        let vis_bottom = self.folder_drag.bounds.get().map_or(f32::MAX, |b| f32::from(self.list_scroll.bounds().bottom() - b.top()));
+        let visible = self.folder_drag.bounds.get();
+        let vis_bottom = visible.map_or(f32::MAX, |b| f32::from(self.list_scroll.bounds().bottom() - b.top()));
+        let vis_top = visible.map_or(f32::MIN, |_| -f32::from(self.list_scroll.offset().y));
         // ---- Step every spring; nothing below this block mutates.
         let fd = &mut self.folder_drag;
         let index: HashMap<&str, usize> = rows.iter().enumerate().map(|(i, r)| (r.entry.id.as_str(), i)).collect();
@@ -663,6 +665,7 @@ impl Workspace {
         let extra: f32 = fd.drawers.iter().map(|d| if d.opening { d.h - d.rows.len() as f32 * PITCH } else { d.h }).sum();
         fd.drawers.retain(|d| !d.done);
         let drawn: Vec<[f32; 3]> = (0..rows.len()).map(|i| { let p = fd.springs[&rows[i].entry.id].p; [p[0], p[1] + shift[i], p[2]] }).collect();
+        let on_screen = |y: f32| y + crate::sidebar::ROW_H >= vis_top && y <= vis_bottom;
         // The receiving folder's wash springs to its subtree's bounds and fades in and out.
         let zone = receiving.zip(receiving_end).map(|(start, end)| {
             let top = drawn[start][1];
@@ -735,6 +738,7 @@ impl Workspace {
         }
         for (r, [x, y, w], band, a) in &closing {
             if band.1 - band.0 < 0.5 { continue; }
+            if !on_screen(*y) { continue; }
             let el = div().id(SharedString::from(format!("fclose-{}", r.entry.id))).h(row_h).opacity(*a).text_color(Theme::sidebar_text())
                 .child(row_face(&r.entry, self.expanded.contains(&r.entry.id)));
             container = container.child(clipped(el, *x, *y - 4. * (1. - a), *w, Some(*band)));
@@ -753,10 +757,12 @@ impl Workspace {
         }
         if let Some(pill) = &fd.pill {
             let [x, y, w] = pill.pos.p;
+            if on_screen(y) {
             let i = index.get(pill.id.as_str()).copied();
             let show = fd.fx.get(&pill.id).map_or(1., |f| f.show.unit()) * i.map_or(1., |i| reveal[i]);
             let el = div().id("sidebar-pill").h(row_h).rounded(radius).bg(Theme::sidebar_selected().opacity(show));
             container = container.child(clipped(el, x, y, w, i.and_then(|i| clip[i]).filter(|_| !pill.travel)));
+            }
         }
         if let Some((s, a)) = &fd.slot {
             let [x, y, w] = s.p;
@@ -777,6 +783,7 @@ impl Workspace {
             // A landing card is never clipped: it is still above the list.
             let band = clip[i].filter(|_| lift < 0.005);
             if band.is_some_and(|(lo, hi)| hi - lo < 0.5 || y >= hi || y + PITCH <= lo) { continue; }
+            if !on_screen(y) { continue; }
             let a = reveal[i];
             let hid = id.clone();
             let el = div().id(SharedString::from(format!("frow-{id}"))).h(row_h)
