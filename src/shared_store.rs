@@ -52,6 +52,5 @@ impl SharedStore {
     pub fn open_local(&mut self, path: &std::path::Path) -> Result<String> { self.0.borrow_mut().open_local(path) }
     pub fn local_path(&self, id: &str) -> Option<std::path::PathBuf> { self.0.borrow().local_path(id) }
     pub fn folder_dir(&self, id: Option<&str>) -> Option<std::path::PathBuf> { self.0.borrow().folder_dir(id) }
-    #[cfg(feature = "devtools")]
     pub fn file_path(&self, id: &str) -> Option<std::path::PathBuf> { self.0.borrow().file_path(id) }
 }
