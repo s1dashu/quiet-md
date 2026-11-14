@@ -64,6 +64,20 @@ gpui = { path = "vendor/gpui" }
 taffy = { path = "vendor/taffy" }
 xattr = { path = "vendor/xattr" }
 
+# Shipped packages (scripts/release.sh and the other packaging scripts) build
+# with `--profile dist` into target/dist: whole-program LTO and no symbol table,
+# a third smaller than `release`. `release` stays the quick everyday build that
+# tests, the harness and the preview use. Line tables go to a separate file
+# (quiet_md.dSYM, .pdb, .dwp) that release.sh keeps beside the package, so
+# the raw addresses a panic logs can still be resolved (src/logging.rs).
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
 # `objc`'s msg_send! checks `feature = "cargo-clippy"`, which rustc no longer
 # knows about.
 [workspace.lints.rust]

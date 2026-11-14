@@ -31,7 +31,7 @@ use super::*;
 /// Ordered-dither frames, each the XOR of the one before, stacked in one
 /// greyscale PNG (palette index × 17) under a first row holding the palette
 /// as RGB bytes. Made from a generated clip by the intro script.
-const FILM: &[u8] = include_bytes!("../assets/onboarding/intro.png");
+const FILM: &str = "onboarding/intro.png";
 const FILM_W: usize = 400;
 const FILM_H: usize = 225;
 pub const FILM_FPS: f32 = 12.;
@@ -39,7 +39,7 @@ pub const FILM_FPS: f32 = 12.;
 pub struct Film { pub frames: Vec<Vec<u8>>, pub colors: Vec<Hsla> }
 
 pub fn decode() -> Option<Film> {
-    let img = image::load_from_memory_with_format(FILM, image::ImageFormat::Png).ok()?.into_luma8();
+    let img = image::load_from_memory_with_format(crate::assets::get(FILM)?, image::ImageFormat::Png).ok()?.into_luma8();
     if img.width() as usize != FILM_W { return None }
     let raw = img.as_raw();
     let colors = raw[..48].chunks(3).map(|c| Hsla::from(rgb(u32::from_be_bytes([0, c[0], c[1], c[2]])))).collect();

@@ -2,7 +2,7 @@
   #define AppVersion "0.1.12"
 #endif
 #ifndef AppSource
-  #define AppSource "..\..\target\release"
+  #define AppSource "..\..\target\dist"
 #endif
 
 [Setup]
