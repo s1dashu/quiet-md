@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · 日本語 · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a>
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a> · 日本語 · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a>
 </p>
 
 <p align="center">
@@ -74,7 +74,7 @@
 
 初回の起動時に、表示言語、ライブラリの場所、クイックノートのショートカットを選び、Obsidian、Logseq、iA Writer、Typora のノートをコピーして取り込めます。空のライブラリには **Getting started** ガイドが入ります。主な機能を 10 分で紹介するツアーです。既存のノートが上書きされることはありません。
 
-インターフェースは英語、簡体字中国語、日本語、韓国語、スペイン語で利用できます。
+インターフェースは英語、簡体字中国語、日本語、韓国語、スペイン語、フランス語で利用できます。
 
 ## パフォーマンス
 

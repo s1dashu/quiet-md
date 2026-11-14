@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a>
+  English · <a href="README.zh-CN.md">简体中文</a> · <a href="README.ja.md">日本語</a> · <a href="README.ko.md">한국어</a> · <a href="README.es.md">Español</a> · <a href="README.fr.md">Français</a>
 </p>
 
 <p align="center">
@@ -74,7 +74,7 @@ You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release 
 
 On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
 
-The interface is available in English, Simplified Chinese, Japanese, Korean and Spanish.
+The interface is available in English, Simplified Chinese, Japanese, Korean, Spanish and French.
 
 ## Performance
 
