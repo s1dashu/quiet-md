@@ -785,10 +785,28 @@ pub fn markdown_inline_lines(text: &str) -> Vec<Block> {
     out
 }
 
-pub fn has_display_math(text: &str) -> bool {
+pub fn has_math(text: &str) -> bool {
     let text = text.replace("\r\n", "\n").replace('\r', "\n");
     let lines: Vec<&str> = text.trim_end_matches('\n').split('\n').collect();
-    (0..lines.len()).any(|i| display_math(&lines[i..]).is_some())
+    let mut in_fence = None;
+    for (i, line) in lines.iter().enumerate() {
+        if let Some((open, n, _)) = in_fence {
+            if let Some((close, n2, rest)) = fence(line) && close == open && n2 >= n && rest.is_empty() {
+                in_fence = None;
+            }
+            continue;
+        }
+        if let Some((open, n, _)) = fence(line) {
+            in_fence = Some((open, n, ""));
+            continue;
+        }
+        let math = (line.trim_start().starts_with("$$") && display_math(&lines[i..]).is_some())
+            || md_inline(&tabs(line)).runs.iter().any(|r| r.marks.inline.is_some());
+        if math {
+            return true;
+        }
+    }
+    false
 }
 
 /// Runs of tabs become one space.
@@ -916,7 +934,7 @@ fn display_math(lines: &[&str]) -> Option<(Block, usize)> {
         *parts.last_mut().unwrap() = last;
         (parts.join("\n"), end + 1)
     };
-    src = src.trim().to_string();
+    src = markdown_equation_source(src.trim());
     if src.is_empty() {
         return None;
     }
@@ -1242,7 +1260,32 @@ fn pipe_table_widths(rows: &[Vec<TableCell>], ncols: usize) -> Vec<f32> {
 }
 
 fn is_boundary(c: Option<char>) -> bool {
-    c.is_none_or(|c| c.is_whitespace() || "，。；：！？、）】》”’".contains(c))
+    c.is_none_or(char::is_whitespace)
+}
+
+fn math_boundary(c: Option<char>) -> bool {
+    c.is_none_or(|c| c.is_whitespace() || c.is_ascii_punctuation() || "，。；：！？、（）【】《》“”‘’".contains(c))
+}
+
+pub fn markdown_equation_source(src: &str) -> String {
+    let bytes = src.as_bytes();
+    let mut out = String::with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'\\') && bytes.get(i + 2).is_some_and(u8::is_ascii_alphabetic) {
+            out.push('\\');
+            i += 2;
+        } else {
+            let c = src[i..].chars().next().unwrap();
+            out.push(c);
+            i += c.len_utf8();
+        }
+    }
+    out
+}
+
+pub fn is_numeric_math(src: &str) -> bool {
+    src.contains('\\') || src.contains('=') || src.contains('+') || src.contains('/') || src.contains("×") || src.contains("÷")
 }
 
 /// Inline Markdown: code spans, equations, links, bare URLs and the emphasis
@@ -1288,7 +1331,7 @@ pub fn md_inline(s: &str) -> RichText {
             continue;
         }
         // Equations: `$$x$$` and `$x$` with whitespace/line boundaries.
-        if c == '$' && is_boundary(prev) {
+        if c == '$' && math_boundary(prev) {
             let mut done = false;
             for delim in ["$$", "$"] {
                 if !rest.starts_with(delim) || rest[delim.len()..].starts_with('$') {
@@ -1298,13 +1341,13 @@ pub fn md_inline(s: &str) -> RichText {
                 let Some(end) = body.find(delim) else { continue };
                 let inner = &body[..end];
                 let after = body[end + delim.len()..].chars().next();
-                // `$` before a digit is money, not math.
-                let digit = delim == "$" && inner.starts_with(|c: char| c.is_ascii_digit());
-                if digit || inner.trim().is_empty() || inner.starts_with(' ') || !is_boundary(after) || after == Some('$') {
+                // A lone number after `$` is money; operators make it math.
+                let digit = delim == "$" && inner.starts_with(|c: char| c.is_ascii_digit()) && !is_numeric_math(inner);
+                if digit || inner.trim().is_empty() || inner.starts_with(' ') || !math_boundary(after) || after == Some('$') {
                     continue;
                 }
                 flush(&mut plain, &mut out);
-                out.push(crate::editor::core::EQUATION, Marks { inline: Some(crate::docxml::to_inline(InlineKind::Equation(inner.to_string()))), ..Marks::default() });
+                out.push(crate::editor::core::EQUATION, Marks { inline: Some(crate::docxml::to_inline(InlineKind::Equation(markdown_equation_source(inner)))), ..Marks::default() });
                 i += delim.len() * 2 + end;
                 done = true;
                 break;
@@ -1607,12 +1650,33 @@ mod tests {
     }
 
     #[test]
-    fn detects_display_math() {
-        assert!(super::has_display_math("$$\nx\n$$"));
-        assert!(super::has_display_math("$$x$$"));
-        assert!(super::has_display_math("$$\n&=b\nQ\\_c$$"));
-        assert!(!super::has_display_math("$$\nx"));
-        assert!(!super::has_display_math("costs $$5"));
+    fn detects_math() {
+        assert!(super::has_math("$$\nx\n$$"));
+        assert!(super::has_math("$$x$$"));
+        assert!(super::has_math("存储。$1{,}000 / 30 = 33{,}000{,}000$。"));
+        assert!(!super::has_math("$$\nx"));
+        assert!(!super::has_math("costs $5"));
+        assert!(!super::has_math("```\n$1 / 2 = 3$\n```"));
+    }
+
+    #[test]
+    fn math_detection_ignores_unclosed_fences() {
+        assert!(super::has_math("```rust\n$1 / 2 = 3$\n```\n$1 / 2 = 3$"));
+        assert!(!super::has_math("```math\n$1 / 2 = 3$\n```math"));
+    }
+
+    #[test]
+    fn markdown_math_from_chat_latex() {
+        let t = super::md_inline("存储。$10 亿页 \\\\times 500k = 500 TB$。");
+        let equations: Vec<_> = t.spans().filter_map(|(_, m)| m.inline.as_ref().and_then(|i| i.equation().map(str::to_string))).collect();
+        assert_eq!(equations, vec!["10 亿页 \\times 500k = 500 TB"]);
+    }
+
+    #[test]
+    fn math_delimiters_and_latex_line_breaks() {
+        let t = super::md_inline("Total: $x / 2$; tax($7$) not math, matrix $a \\\\ b$ is.");
+        let equations: Vec<_> = t.spans().filter_map(|(_, m)| m.inline.as_ref().and_then(|i| i.equation().map(str::to_string))).collect();
+        assert_eq!(equations, vec!["x / 2", "a \\\\ b"]);
     }
 
     #[test]
