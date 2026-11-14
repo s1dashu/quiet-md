@@ -115,3 +115,9 @@ DocxXML 里没有、本应用自己加的写法。别的工具不认识这些写
 系统退出阶段保存失败时，正文另存至系统本地应用数据目录的 `quiet-md/recovery/<文档库标识>/`。下次打开同一文档库时创建恢复副本，成功写入后移除恢复文件。它是退出失败时的恢复措施，不是完整版本历史。
 
 导出本地资源时检查规范化路径，拒绝文档库外的文件和越界符号链接。HTML 内嵌图片读取上限为 20 MiB，Markdown 复制的单个资源上限为 256 MiB；缺失、被拒绝或超限的 Markdown 资源会计入导出警告。行内附件与块附件均导出为链接并复制文件。
+
+## Grid spacing
+
+Images can be arranged in standard `<grid>` / `<column width-ratio="…">` containers. Image dimensions remain on each `<img>` block. Quiet.md optionally writes `data-quiet-gap="N"` on a grid to preserve a gutter of 0–80 pixels. Missing or invalid values use the existing 20-pixel gutter. This attribute is a Quiet.md extension, and preservation by Lark or older Quiet.md versions is not guaranteed. HTML and PDF export include the gutter. Markdown export flattens columns as before.
+
+Grid content can also use `data-quiet-valign="center"` or `"bottom"`. Missing and unrecognized values align at the top, and top alignment omits the attribute. Alignment applies to all content in each column, including image captions, and is retained by HTML/PDF export. Like custom gutters, this is a Quiet.md extension with no guaranteed Lark round trip.

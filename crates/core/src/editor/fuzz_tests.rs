@@ -116,7 +116,7 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(24) {
+    match rng.below(29) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -211,7 +211,35 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         20 => table_step(c, rng),
         21 => object_step(c, rng),
+        26 => {
+            let id = any(rng);
+            c.toggle_image_selection(id);
+            format!("toggle_image_selection({id:?})")
+        }
+        25 => {
+            let head = any(rng);
+            c.extend_block_selection(head);
+            format!("extend_block_selection({head:?})")
+        }
+        24 => {
+            let (image, target) = (any(rng), any(rng));
+            let before = rng.chance(50);
+            c.move_image_beside(image, target, before);
+            format!("move_image_beside({image:?}, {target:?}, {before})")
+        }
+        23 => {
+            let id = c.doc.blocks.iter().find(|b| matches!(b.kind, BlockKind::Grid)).map(|b| b.id).unwrap_or_else(|| any(rng));
+            let align = *rng.pick(&[VerticalAlign::Top, VerticalAlign::Center, VerticalAlign::Bottom]);
+            c.set_grid_vertical_align(id, align);
+            format!("set_grid_vertical_align({id:?}, {align:?})")
+        }
         22 => {
+            let id = c.doc.blocks.iter().find(|b| matches!(b.kind, BlockKind::Grid)).map(|b| b.id).unwrap_or_else(|| any(rng));
+            let gap = rng.below(81) as u16;
+            c.set_grid_gap(id, gap);
+            format!("set_grid_gap({id:?}, {gap})")
+        }
+        28 => {
             if c.sel.head.block != TITLE && !c.is_code(c.sel.head.block) {
                 let images = parse("<title></title><img src=\"screenshot.png\"/><p></p>").unwrap();
                 c.paste_blocks(images.blocks);
@@ -444,7 +472,7 @@ fn check(c: &Core) -> Result<(), String> {
     check_text(&c.doc.title, "title")?;
     check_blocks(&c.doc.blocks, None, &mut HashSet::new())?;
     let us = c.units();
-    if let Some(bs) = c.block_sel {
+    if let Some(bs) = &c.block_sel {
         // Block mode: the text selection is not shown; its ends are.
         for id in [bs.anchor, bs.head] {
             if c.block(id).is_none() || c.is_hidden(id) {

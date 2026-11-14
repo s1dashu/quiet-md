@@ -1818,10 +1818,13 @@ impl Editor {
         self.changed(window, cx);
     }
 
-    fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
+    /// Copy selected content for both keyboard and contextual toolbar actions.
+    pub(super) fn copy_selection(&mut self, cx: &mut Context<Self>) -> bool {
         let cells = self.core.cell_sel.is_some();
         let blocks = if cells { self.core.selected_cells_content() } else { self.core.selected_blocks_content() };
-        let text = if self.core.in_block_mode() || cells {
+        let selected_image = self.core.sel.is_collapsed()
+            && matches!(self.core.kind_of(self.core.sel.head.block), Some(BlockKind::Image { .. }));
+        let text = if self.core.in_block_mode() || cells || selected_image {
             Document { blocks: blocks.clone(), ..Default::default() }.plain_text()
         } else {
             if self.core.sel.is_collapsed() {
@@ -1830,7 +1833,7 @@ impl Editor {
             self.core.selected_text()
         };
         let xml = docxml::serialize(&Document { blocks, ..Default::default() });
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        crate::clipboard::write(ClipboardItem::new_string_with_json_metadata(text, xml), cx);
         true
     }
 
@@ -1849,6 +1852,8 @@ impl Editor {
             self.core.table_clear_cells();
         } else if self.core.in_block_mode() {
             self.core.delete_selected_blocks();
+        } else if self.core.sel.is_collapsed() && matches!(self.core.kind_of(self.core.sel.head.block), Some(BlockKind::Image { .. })) {
+            self.core.delete_block(self.core.sel.head.block);
         } else {
             self.core.delete_selection();
         }
@@ -1870,8 +1875,9 @@ impl Editor {
         if !self.guard(window, cx) {
             return;
         }
-        let fake = crate::clipboard::FAKE_CLIPBOARD.lock().unwrap().clone();
-        let item = if fake.is_some() { None } else { cx.read_from_clipboard() };
+        let copied = crate::clipboard::FAKE_COPIED_CLIPBOARD.lock().unwrap().clone();
+        let fake = if copied.is_some() { None } else { crate::clipboard::FAKE_CLIPBOARD.lock().unwrap().clone() };
+        let item = copied.or_else(|| if fake.is_some() { None } else { cx.read_from_clipboard() });
         let (text, meta, image) = match (&fake, &item) {
             (Some(f), _) => (Some(f.text.clone()), None, (!f.images.is_empty()).then(|| f.images.iter().collect::<Vec<_>>())),
             (None, Some(item)) => {
@@ -1888,6 +1894,19 @@ impl Editor {
             }
             (None, None) => return,
         };
+        let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).filter(|d| !d.blocks.is_empty());
+        if !plain && self.core.in_block_mode()
+            && let Some(doc) = &internal
+            && let Some(last) = self.core.selected_blocks_content().last()
+        {
+            // A fully selected image row pastes after its grid, outside its final column.
+            let blocks: Vec<_> = doc.blocks.iter().map(Block::fresh_ids).collect();
+            let pasted = blocks.last().unwrap().id;
+            self.core.insert_blocks_at(blocks, last.id, core::DropPlace::After);
+            self.core.select_block(pasted);
+            self.changed(window, cx);
+            return;
+        }
         if self.core.in_block_mode() {
             // Paste after the selected blocks.
             if let Some(last) = self.core.block_sel_ids().last().copied() {
@@ -1897,7 +1916,6 @@ impl Editor {
         }
         let head = self.core.sel.head.block;
         let rich_target = head != TITLE && !self.core.is_code(head);
-        let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).filter(|d| !d.blocks.is_empty());
         let html = match &fake {
             Some(f) => f.html.clone(),
             None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_display_math) => {

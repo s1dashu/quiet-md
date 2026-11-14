@@ -483,6 +483,11 @@ mod native {
     }
 
     pub fn send(ns_view: usize, kind: u64, x: f32, y: f32, clicks: i64) {
+        send_modified(ns_view, kind, x, y, clicks, 0);
+    }
+
+    /// Deliver modifier-aware mouse events without changing global keyboard state.
+    pub fn send_modified(ns_view: usize, kind: u64, x: f32, y: f32, clicks: i64, modifiers: u64) {
         unsafe {
             let view = ns_view as *mut Object;
             let win: *mut Object = msg_send![view, window];
@@ -493,7 +498,7 @@ mod native {
             let ev: *mut Object = msg_send![class!(NSEvent),
                 mouseEventWithType: kind
                 location: loc
-                modifierFlags: 0u64
+                modifierFlags: modifiers
                 timestamp: 0f64
                 windowNumber: number
                 context: nil
@@ -534,6 +539,12 @@ fn mouse_step(view: usize, cmd: &str, n: &[f32]) -> bool {
             send(view, MOVED, n[0], n[1], 0);
             send(view, LEFT_DOWN, n[0], n[1], 1);
             send(view, LEFT_UP, n[0], n[1], 1);
+        }
+        "shift-click" | "cmd-click" if n.len() >= 2 => {
+            let flags = if cmd == "cmd-click" { 1 << 20 } else { 1 << 17 };
+            send(view, MOVED, n[0], n[1], 0);
+            send_modified(view, LEFT_DOWN, n[0], n[1], 1, flags);
+            send_modified(view, LEFT_UP, n[0], n[1], 1, flags);
         }
         "dclick" if n.len() >= 2 => {
             send(view, LEFT_DOWN, n[0], n[1], 1);
@@ -608,6 +619,7 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
         // `clip html|text|image <file>`: what the next paste reads instead of the
         // system clipboard (`clip text` with HTML keeps its plain fallback).
         "clip" => {
+            *crate::clipboard::FAKE_COPIED_CLIPBOARD.lock().unwrap() = None;
             let (kind, path) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
             let mut fake = crate::clipboard::FAKE_CLIPBOARD.lock().unwrap();
             let cur = fake.get_or_insert_with(Default::default);

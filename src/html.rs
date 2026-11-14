@@ -213,11 +213,16 @@ impl Writer<'_> {
             }
             BlockKind::Table(t) => self.table(t, out),
             BlockKind::Grid => {
-                out.push_str("<div class=\"grid\">");
+                let _ = write!(out, "<div class=\"grid\" style=\"gap:{}px\">", b.grid_gap.unwrap_or(20));
                 let total: f32 = b.children.iter().map(|c| if let BlockKind::Column { ratio } = c.kind { ratio } else { 1. }).sum::<f32>().max(0.01);
+                let vertical = match b.grid_vertical_align {
+                    VerticalAlign::Top => "flex-start",
+                    VerticalAlign::Center => "center",
+                    VerticalAlign::Bottom => "flex-end",
+                };
                 for col in &b.children {
                     let ratio = if let BlockKind::Column { ratio } = col.kind { ratio } else { 1. };
-                    let _ = write!(out, "<div class=\"col\" style=\"flex:{:.4} 1 0\">", ratio / total);
+                    let _ = write!(out, "<div class=\"col\" style=\"flex:{:.4} 1 0;display:flex;flex-direction:column;justify-content:{}\">", ratio / total, vertical);
                     self.blocks(&col.children, depth, out);
                     out.push_str("</div>");
                 }

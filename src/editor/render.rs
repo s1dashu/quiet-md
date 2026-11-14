@@ -102,6 +102,8 @@ fn hash_block(b: &Block, orders: &rustc_hash::FxHashMap<BlockId, String>, h: &mu
     b.text.text.len().hash(h);
     b.text.runs.len().hash(h);
     b.folded.hash(h);
+    b.grid_gap.hash(h);
+    b.grid_vertical_align.hash(h);
     match &b.kind {
         BlockKind::Heading { level, .. } => (level, orders.get(&b.id)).hash(h),
         BlockKind::Code { wrap, .. } => wrap.hash(h),
@@ -1291,7 +1293,7 @@ impl Editor {
             })
         };
         let (block, target) = match req {
-            Reveal::Caret => match self.core.block_sel {
+            Reveal::Caret => match &self.core.block_sel {
                 Some(b) => (b.head, self.block_bounds.borrow().get(&b.head).copied()),
                 // A selected image has no text layout: keep its box in view.
                 None => {
