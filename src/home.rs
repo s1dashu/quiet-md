@@ -93,6 +93,8 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                 let (iw, ih) = dimensions.map(|(w, h)| (w.max(1) as f32, h.max(1) as f32)).unwrap_or((690., 460.));
                 let w = width.unwrap_or_else(|| height.map(|h| h * iw / ih).unwrap_or(iw)).max(1.);
                 let h = height.unwrap_or(w * ih / iw).max(1.);
+                // No wider than the page: a 1536 px picture would otherwise reserve its full height below a narrower drawing.
+                let (w, h) = if w > 690. { (690., h * 690. / w) } else { (w, h) };
                 if let BlockKind::Image { width, height, .. } = &mut kind { *width = Some(w); *height = Some(h); }
                 kind
             }
