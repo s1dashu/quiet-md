@@ -244,6 +244,10 @@ pub enum DropImport { Files(Vec<std::path::PathBuf>), Local(String) }
 /// What to do once the open document is safely on disk (or its changes given up).
 pub type AfterSave = Box<dyn FnOnce(&mut Workspace, &mut Window, &mut Context<Workspace>)>;
 
+#[derive(Default)]
+struct ListedDocs { entries: Vec<crate::store::Entry>, trash: Vec<crate::store::TrashEntry>, warnings: Vec<String> }
+struct DeletedDocs { deleted: Vec<String>, errors: Vec<String>, changes: Vec<crate::store::FileDelta> }
+
 /// Inline 重命名 of a sidebar row.
 pub struct Rename {
     pub id: String,
@@ -369,6 +373,18 @@ fn notify_system(title: &str, body: &str) {
 }
 
 impl Workspace {
+    pub(crate) fn sync_peers(&self, cx: &mut Context<Self>, entries: &[Entry], trash: &[crate::store::TrashEntry]) {
+        let me = cx.entity_id();
+        for handle in cx.windows().into_iter().filter_map(|w| w.downcast::<Workspace>()) {
+            if !handle.is_active(cx).is_some_and(|yes| yes) || handle.entity(cx).is_ok_and(|e| e.entity_id() == me) { continue }
+            let (entries, trash) = (entries.to_vec(), trash.to_vec());
+            let _ = handle.update(cx, |ws, _, cx| {
+                ws.entries = entries; ws.trash = trash; ws.sort();
+                cx.notify();
+            });
+        }
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         Self::new_window(false, window, cx)
     }
@@ -402,8 +418,12 @@ impl Workspace {
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
-                if window.is_window_active() { if let Some(id) = &this.current { crate::quick_note::used(id, cx); } this.entries = this.store.list(); this.sort(); crate::update::check_if_stale(cx); cx.notify(); }
-                else { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
+                if window.is_window_active() {
+                    if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
+                    if !this.store.file_task_busy() { this.entries = this.store.list(); this.sort(); }
+                    crate::update::check_if_stale(cx); cx.notify();
+                }
+                else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); this.flush(cx); }
             }),
             cx.subscribe_in(&search, window, |this, _, ev: &TextFieldEvent, window, cx| {
                 match ev {
@@ -427,7 +447,7 @@ impl Workspace {
             // go through `save_before` and ask when the save fails.
             cx.on_app_quit(|this, cx| {
                 crate::quick_note::persist(cx);
-                if !this.flush(cx) && let Some(ed) = &this.editor
+                if !this.store.file_task_busy() && !this.flush(cx) && let Some(ed) = &this.editor
                     && let Err(error) = this.store.recover_later(&ed.read(cx).core.doc) {
                     crate::logging::write(&format!("Could not preserve unsaved document: {error:#}"));
                 }
@@ -437,7 +457,7 @@ impl Workspace {
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
             crate::quick_note::persist(cx);
-            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
+            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(false)
         });
         if !quick { crate::settings::watch_themes(cx); }
         // A file written into the library from outside (a model writing a
@@ -454,7 +474,7 @@ impl Workspace {
                 if now == last { continue }
                 let reloaded = this.update(cx, |w, cx| {
                     // Not mid-rename: the row under the field would be rebuilt.
-                    if w.rename.is_some() || w.move_dlg.is_some() { return false }
+                    if w.rename.is_some() || w.move_dlg.is_some() || w.store.file_task_busy() { return false }
                     w.entries = w.store.list();
                     w.sort();
                     cx.notify();
@@ -716,6 +736,7 @@ impl Workspace {
 
     /// Move documents to the trash; if the open one goes, open the next.
     pub fn delete_docs(&mut self, ids: &[String], window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
         // A page goes with its child pages: each topmost page is
         // trashed as one item that carries its subtree.
         let tree = crate::tree::Tree::new(&self.entries);
@@ -748,62 +769,68 @@ impl Workspace {
                 return;
             }
         }
-        let file_before = self.store.track_file_changes();
-        let mut deleted = vec![];
-        let mut errors = vec![];
-        // One write for the lot: a big folder used to rewrite the index once per document.
-        let batch = self.store.begin_batch().is_ok();
-        for (id, root) in &groups {
-            // Do not split a subtree when its root could not be deleted.
-            if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
-            match self.store.delete(id, root.as_deref()) {
-                Ok(()) => deleted.push(id.clone()),
-                Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let mut writer = self.store.tree_writer();
+        let task = cx.background_executor().spawn(async move {
+            let journal = writer.track_file_changes();
+            let mut deleted = vec![];
+            let mut errors = vec![];
+            let batch = writer.begin_batch().is_ok();
+            for (id, root) in &groups {
+                if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
+                match writer.delete(id, root.as_deref()) {
+                    Ok(()) => deleted.push(id.clone()),
+                    Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
+                }
             }
-        }
-        if batch && let Err(e) = self.store.end_batch() {
-            errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string())));
-        }
-        if self.current.as_ref().is_some_and(|c| deleted.contains(c)) {
-            self.save_task = None;
-            self.unsaved = false;
-            self.current = None;
-            self.editor = None;
-            self.editor_sub = None;
-        }
-        self.entries.retain(|e| !deleted.contains(&e.id));
-        if self.folder_current.as_ref().is_some_and(|id| deleted.contains(id)) {
-            self.folder_current = None;
-            if self.view == View::Folder { self.view = View::Home; }
-        }
-        if let Some(b) = self.batch.as_mut() {
-            b.retain(|id| !deleted.contains(id));
-        }
+            if batch && let Err(e) = writer.end_batch() {
+                errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string())));
+            }
+            let warnings = writer.take_warnings();
+            let listed = ListedDocs { entries: writer.list(), trash: writer.list_trash(), warnings };
+            (DeletedDocs { deleted, errors, changes: journal.take() }, listed)
+        });
+        self.batch = None;
         self.row_menu = None;
-        if self.current.is_none() && self.view != View::Folder {
-            // Stay on 主页 / 回收站 if that's where the delete came from.
-            // The last document gone leaves the library empty (主页's empty
-            // state), not a new 未命名 document.
-            let view = self.view;
-            match self.entries.first().map(|e| e.id.clone()) {
-                Some(next) => { self.open(&next, window, cx); self.view = view; }
-                None => self.view = if view == View::Doc { View::Home } else { view },
-            }
-        }
-        self.remember_files(file_before, crate::settings::tr("删除", "Delete"));
-        self.sync_sub_pages(cx);
-        if self.view == View::Trash {
-            self.trash = self.store.list_trash();
-        }
-        errors.extend(self.store.take_warnings().iter().map(|s| crate::settings::diagnostic(s)));
-        if errors.is_empty() {
-            self.show_toast(crate::settings::text("删除成功"), cx);
-        } else {
-            let msg = errors.join("；");
-            self.show_toast_kind(ToastKind::Error, &msg, cx);
-            self.status = SaveStatus::Failed(msg);
-        }
         cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let _task_guard = task_guard;
+            let (done, listed) = task.await;
+            let _ = this.update_in(cx, |w, window, cx| {
+                if w.current.as_ref().is_some_and(|c| done.deleted.contains(c)) {
+                    w.save_task = None;
+                    w.unsaved = false;
+                    w.current = None;
+                    w.editor = None;
+                    w.editor_sub = None;
+                }
+                w.sync_peers(cx, &listed.entries, &listed.trash);
+                w.entries = listed.entries; w.trash = listed.trash;
+                if w.folder_current.as_ref().is_some_and(|id| done.deleted.contains(id)) {
+                    w.folder_current = None;
+                    if w.view == View::Folder { w.view = View::Home; }
+                }
+                w.row_menu = None;
+                if w.current.is_none() && w.view != View::Folder {
+                    let view = w.view;
+                    match w.entries.first().map(|e| e.id.clone()) {
+                        Some(next) => { w.open(&next, window, cx); w.view = view; }
+                        None => w.view = if view == View::Doc { View::Home } else { view },
+                    }
+                }
+                w.remember_file_changes(done.changes, crate::settings::tr("删除", "Delete"));
+                w.sync_sub_pages(cx);
+                let mut errors = done.errors;
+                errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
+                if errors.is_empty() { w.show_toast(crate::settings::text("删除成功"), cx); }
+                else {
+                    let msg = errors.join("；");
+                    w.show_toast_kind(ToastKind::Error, &msg, cx);
+                    w.status = SaveStatus::Failed(msg);
+                }
+                cx.notify();
+            });
+        }).detach();
     }
 
     pub fn toggle_pin(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -990,6 +1017,9 @@ impl Workspace {
         }
         self.save_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(delay).await;
+            while this.update(cx, |w, _| w.store.file_task_busy()).unwrap_or(false) {
+                cx.background_executor().timer(Duration::from_millis(50)).await;
+            }
             let _ = this.update(cx, |w, cx| w.flush(cx));
         }));
         cx.notify();
@@ -1071,6 +1101,7 @@ impl Workspace {
     }
 
     pub fn save_before(&mut self, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> bool {
+        if self.store.file_task_busy() { return false; }
         if self.flush(cx) {
             return true;
         }
@@ -1605,7 +1636,8 @@ impl Render for Workspace {
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
-                if w.file_history.busy && !(ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y")) { cx.stop_propagation(); return; }
+                let undo = ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y");
+                if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 if ev.keystroke.key == "escape" && w.has_home_drag() {
                     w.cancel_home_drag(cx); cx.stop_propagation(); return;
                 }
@@ -1656,7 +1688,7 @@ impl Render for Workspace {
             .children(search)
             .children(resize_overlay)
             .children(folder_drag_overlay)
-            .when(self.file_history.busy, |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
+            .when(self.file_history.busy || self.store.file_task_busy(), |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())).with_priority(20)))
             .children(home_drag_overlay)

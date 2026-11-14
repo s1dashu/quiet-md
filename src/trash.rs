@@ -13,6 +13,9 @@ use gpui::{prelude::FluentBuilder, *};
 
 pub const TRASH_MENU_W: f32 = 160.;
 
+struct ListedTrash { trash: Vec<TrashEntry>, warnings: Vec<String> }
+struct PurgedTrash { errors: Vec<String> }
+
 /// 剩余时间: whole days left before the automatic 彻底删除.
 fn remaining(deleted: u64) -> String {
     let end = deleted + TRASH_DAYS * 86_400;
@@ -260,27 +263,60 @@ impl Workspace {
     }
 
     fn purge_doc(&mut self, id: &str, cx: &mut Context<Self>) {
-        match self.store.purge(id) {
-            Ok(()) => self.show_toast(crate::settings::text("已彻底删除"), cx),
-            Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
-        }
-        self.trash = self.store.list_trash();
-        self.show_store_warnings(cx);
+        let success = crate::settings::text("已彻底删除");
+        self.purge_trash(vec![id.to_string()], success, cx);
     }
 
     /// 清空回收站: purges every trashed page; stops at the first failure.
     fn empty_trash(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<String> = self.store.list_trash().into_iter().map(|t| t.id).collect();
-        match ids.iter().try_for_each(|id| self.store.purge(id)) {
-            Ok(()) => self.show_toast(crate::settings::text("已清空回收站"), cx),
-            Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
-        }
-        self.trash = self.store.list_trash();
-        self.show_store_warnings(cx);
+        let ids: Vec<String> = self.trash.iter().map(|t| t.id.clone()).collect();
+        let success = crate::settings::text("已清空回收站");
+        self.purge_trash(ids, success, cx);
+    }
+
+    fn purge_trash(&mut self, ids: Vec<String>, success: &'static str, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() || ids.is_empty() { return; }
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let mut writer = self.store.tree_writer();
+        let task = cx.background_executor().spawn(async move {
+            let batch = writer.begin_batch().is_ok();
+            let mut errors = vec![];
+            let mut result: anyhow::Result<()> = Ok(());
+            for id in ids {
+                result = writer.purge(&id);
+                if result.is_err() { break }
+            }
+            if let Err(e) = result { errors.push(e.to_string()); }
+            if batch && let Err(e) = writer.end_batch() { errors.push(e.to_string()); }
+            let warnings = writer.take_warnings();
+            let trash = writer.list_trash();
+            (PurgedTrash { errors }, ListedTrash { trash, warnings })
+        });
+        self.trash_menu = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let _task_guard = task_guard;
+            let (done, listed) = task.await;
+            let _ = this.update(cx, |w, cx| {
+                w.trash = listed.trash;
+                let mut errors = done.errors;
+                errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
+                if errors.is_empty() { w.show_toast(success, cx); }
+                else {
+                    let msg = errors.iter().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(e))).collect::<Vec<_>>().join("；");
+                    w.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
+                    w.status = crate::app::SaveStatus::Failed(msg);
+                }
+                cx.notify();
+            });
+        }).detach();
     }
 
     fn show_store_warnings(&mut self, cx: &mut Context<Self>) {
-        let warnings = self.store.take_warnings();
+        self.show_store_warnings_from(&self.store.take_warnings(), cx);
+    }
+
+    pub(crate) fn show_store_warnings_from(&mut self, warnings: &[String], cx: &mut Context<Self>) {
         if !warnings.is_empty() {
             let msg = warnings.iter().map(|s| crate::settings::diagnostic(s)).collect::<Vec<_>>().join(crate::settings::tr("；", "; "));
             self.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);

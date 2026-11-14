@@ -3,9 +3,11 @@ use super::*;
 impl Store {
     /// Independent handle for background tree writes; begin_write reloads under the library lock.
     pub fn tree_writer(&self) -> Self {
-        Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), trash: HashMap::new(), flat: self.flat,
+        Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), trash: self.trash.clone(), flat: self.flat,
             loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), warnings: vec![], migrated: None, batch: Default::default() }
     }
+
+    pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
 
     /// Where `id` would go in folder `parent`: its name there, numbered when taken.
     pub(super) fn rel_in(&self, id: &str, parent: Option<&str>) -> String {
@@ -83,7 +85,7 @@ impl Store {
         anyhow::ensure!(self.index_has(id), "文档或文件夹不存在");
         self.validate_folder(Some(id), parent)?;
         if let Some(anchor) = before {
-            anyhow::ensure!(self.index_has(anchor) && self.index[anchor].parent.as_deref() == parent, "目标位置已改变，请重试");
+            anyhow::ensure!(self.index.get(anchor).is_some_and(|m| m.parent.as_deref() == parent) && self.index_has(anchor), "目标位置已改变，请重试");
             if anchor == id { return Ok(()); }
         }
         let mut siblings: Vec<String> = self.index.iter().filter(|(k, m)| m.parent.as_deref() == parent && self.index_has(k)).map(|(k, _)| k.clone()).collect();

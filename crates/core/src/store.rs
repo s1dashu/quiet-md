@@ -2168,6 +2168,16 @@ mod tests {
     }
 
     #[test]
+    fn missing_move_anchor_is_rejected_without_panicking() {
+        let lib = Lib::new("missing-move-anchor");
+        let mut s = lib.open();
+        let id = s.create_from(&doc("moved")).unwrap();
+        let anchor = uuid::Uuid::new_v4().to_string();
+        let err = s.move_in_tree(&id, None, Some(&anchor)).unwrap_err();
+        assert!(err.to_string().contains("目标位置已改变，请重试"));
+    }
+
+    #[test]
     fn failed_lock_never_writes() {
         let lib = Lib::new("lock-failure");
         let mut s = lib.open();
