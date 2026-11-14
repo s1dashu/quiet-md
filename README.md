@@ -74,7 +74,7 @@ You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release 
 
 On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
 
-The interface is available in English, Simplified Chinese, Japanese, Korean, Spanish and French.
+The interface is available in English, Simplified Chinese, Japanese, Korean, Spanish, French and Arabic.
 
 ## Performance
 

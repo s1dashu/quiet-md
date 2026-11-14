@@ -144,9 +144,9 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 
 ## 界面语言
 
-界面支持简体中文、英文、日文、韩文与西班牙文（`settings::Lang`），偏好保存在 `Preferences::language`；旧文件没有这个字段时由 `Preferences::english` 决定，`english` 仍然写出，让旧版本把其他语言显示成英文。静态文案使用 `settings::text` / `label` 的统一映射，成对文案使用 `settings::tr`，带参数的文案使用 `localized_format!`。菜单表保留稳定的原始标签，在显示时翻译；搜索同时匹配英文标签与原有关键词。输入框保留原始 placeholder，在渲染时翻译，切换语言时刷新所有窗口。
+界面支持简体中文、英文、日文、韩文、西班牙文、法文与阿拉伯文（`settings::Lang`），偏好保存在 `Preferences::language`；旧文件没有这个字段时由 `Preferences::english` 决定，`english` 仍然写出，让旧版本把其他语言显示成英文。静态文案使用 `settings::text` / `label` 的统一映射，成对文案使用 `settings::tr`，带参数的文案使用 `localized_format!`。菜单表保留稳定的原始标签，在显示时翻译；搜索同时匹配英文标签与原有关键词。输入框保留原始 placeholder，在渲染时翻译，切换语言时刷新所有窗口。阿拉伯文目前只翻译文案，界面仍按从左到右排布，没有做 RTL 镜像。
 
-中文原文是翻译键：日文、韩文、西班牙文、法文分别在 `src/l10n/ja.rs`、`ko.rs`、`es.rs`、`fr.rs` 里按中文查表，`tr`、`text` / `label` 和 `localized_format!` 都先查它，表里没有的显示英文，所以新增中文文案不需要同时写这些语言。`localized_format!` 的译文模板从格式化好的中文里读回参数再填入（`l10n::refill`），调用处不用改。不经过宏、要指定语言的地方（日期提醒的测试）用 `settings::localized`。`settings::english()` 的意思是“不是中文”。`python3 tools/l10n/keys.py --missing ja`（或 `ko`、`es`、`fr`）列出该语言表还缺的键；`l10n` 的测试检查表里的键都还在源码中、模板占位符都来自中文原文。
+中文原文是翻译键：日文、韩文、西班牙文、法文、阿拉伯文分别在 `src/l10n/ja.rs`、`ko.rs`、`es.rs`、`fr.rs`、`ar.rs` 里按中文查表，`tr`、`text` / `label` 和 `localized_format!` 都先查它，表里没有的显示英文，所以新增中文文案不需要同时写这些语言。`localized_format!` 的译文模板从格式化好的中文里读回参数再填入（`l10n::refill`），调用处不用改。不经过宏、要指定语言的地方（日期提醒的测试）用 `settings::localized`。`settings::english()` 的意思是“不是中文”。`python3 tools/l10n/keys.py --missing ja`（或 `ko`、`es`、`fr`、`ar`）列出该语言表还缺的键；`l10n` 的测试检查表里的键都还在源码中、模板占位符都来自中文原文。
 
 用户标题、正文、附件名和已保存的按钮文字不作为翻译键；只有空标题等界面默认值随语言变化。Core 的存储诊断在应用层用已知模板翻译，保留路径、文档 ID 和系统错误原文，文档引擎不依赖界面语言。语言回归检查覆盖界面翻译键、菜单表、日期提醒，以及用户内容和诊断参数的保留。
 

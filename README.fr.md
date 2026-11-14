@@ -74,7 +74,7 @@ Vous pouvez aussi télécharger depuis [Quiet.md](https://quiet.md/?lang=fr). Ch
 
 Au premier lancement, Quiet.md demande la langue de l'interface, l'emplacement de votre bibliothèque et le raccourci de note rapide, et propose de copier vos notes depuis Obsidian, Logseq, iA Writer ou Typora. Une bibliothèque vide reçoit le guide **Getting started** : une visite de dix minutes des principales fonctionnalités. Les notes existantes ne sont jamais écrasées.
 
-L'interface est disponible en anglais, chinois simplifié, japonais, coréen, espagnol et français.
+L'interface est disponible en anglais, chinois simplifié, japonais, coréen, espagnol, français et arabe.
 
 ## Performances
 
