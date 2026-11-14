@@ -690,9 +690,15 @@ fn frame(window: &mut Window, cx: &mut App) -> anyhow::Result<(usize, usize, Vec
 #[cfg(target_os = "macos")]
 fn capture(window: &mut Window, cx: &mut App, path: &str) -> anyhow::Result<()> {
     let (w, h, mut px) = frame(window, cx)?;
+    // The offscreen frame has no system glass or desktop behind the clear
+    // sidebar: lay it on the window colour full screen uses, not on black.
+    let bg = Rgba::from(crate::theme::ca(crate::theme::craft::WINDOW, 1.));
+    let bg = [bg.r, bg.g, bg.b].map(|c| c * 255.);
     for p in px.as_chunks_mut::<4>().0 {
         // BGRA (little-endian premultiplied first) → opaque RGBA.
         p.swap(0, 2);
+        let rest = 1. - p[3] as f32 / 255.;
+        for i in 0..3 { p[i] = (p[i] as f32 + bg[i] * rest).round().min(255.) as u8; }
         p[3] = 255;
     }
     image::save_buffer(path, &px, w as u32, h as u32, image::ColorType::Rgba8)?;
