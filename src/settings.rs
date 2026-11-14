@@ -1060,8 +1060,8 @@ fn update_row(cx: &mut Context<Workspace>) -> Div {
 pub(crate) fn about_icon() -> ImageSource {
     const PATH: &str = "branding/app-icon.png";
     static ICON: LazyLock<Option<Arc<RenderImage>>> = LazyLock::new(|| {
-        let bytes = crate::assets::Assets.load(PATH).ok()??;
-        let mut buf = image::imageops::resize(&image::load_from_memory(&bytes).ok()?.into_rgba8(), 176, 176, image::imageops::FilterType::Lanczos3);
+        let bytes = crate::assets::get(PATH)?;
+        let mut buf = image::imageops::resize(&image::load_from_memory(bytes).ok()?.into_rgba8(), 176, 176, image::imageops::FilterType::Lanczos3);
         for px in buf.pixels_mut() {
             px.0.swap(0, 2);
         }

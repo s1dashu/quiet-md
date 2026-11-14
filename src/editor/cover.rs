@@ -93,8 +93,7 @@ pub fn cover_height(window: &Window) -> f32 {
 }
 
 fn preset_bytes(name: &str) -> Option<&'static [u8]> {
-    let path = format!("covers/{name}.jpg");
-    crate::assets::FILES.iter().find(|(p, _)| *p == path).map(|(_, b)| *b)
+    crate::assets::get(&format!("covers/{name}.jpg"))
 }
 
 /// The header's icon / cover entry: 28 tall, 16px icon with 4px each side, 13pt

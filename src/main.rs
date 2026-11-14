@@ -75,7 +75,7 @@ use gpui::*;
 fn set_app_icon() {
     use objc::{class, msg_send, sel, sel_impl};
     use objc::runtime::Object;
-    let png = include_bytes!("../assets/branding/app-icon.png");
+    let Some(png) = crate::assets::get("branding/app-icon.png") else { return };
     unsafe {
         // A bundle with its own icon keeps it (the preview's has a dev ribbon);
         // only a bare binary (`cargo run`) borrows the app icon.
