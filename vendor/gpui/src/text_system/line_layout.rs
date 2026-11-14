@@ -581,6 +581,10 @@ impl LineLayoutCache {
         let mut boundaries = SmallVec::new();
         for row in rows {
             // This row's slice of the font runs.
+            // A row's trailing spaces would sit at its visual start in a
+            // right-to-left row and push it off the edge it is aligned to.
+            let trimmed = text[row.clone()].trim_end().len();
+            let row = row.start..row.start + if trimmed > 0 { trimmed } else { row.len() };
             let mut row_runs = Vec::new();
             let mut at = 0;
             for run in runs {
@@ -748,6 +752,6 @@ impl AsCacheKeyRef for CacheKeyRef<'_> {
 
 /// quiet.md: characters of right-to-left scripts (Hebrew, Arabic, Syriac,
 /// Thaana, N'Ko and their presentation forms).
-fn is_rtl(c: char) -> bool {
+pub(crate) fn is_rtl(c: char) -> bool {
     matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF)
 }
