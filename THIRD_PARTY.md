@@ -4,7 +4,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 
 ## Rust 依赖
 
-由 `cargo metadata` 生成，共 741 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
+由 `cargo metadata` 生成，共 742 个包。许可逐项列于下表，其中也包含 MPL-2.0；本表记录依赖声明，不替代各组件的许可文本。
 
 要重新生成这张表：`scripts/licences.sh`（从 `cargo metadata` 取全部依赖）。
 
@@ -283,6 +283,7 @@ Quiet.md 本体以 MIT 协议发布（见 [LICENSE](LICENSE)）。下面是随�
 | itertools | 0.14.0 | MIT OR Apache-2.0 |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
 | jobserver | 0.1.35 | MIT OR Apache-2.0 |
+| jpeg-decoder | 0.3.2 | MIT OR Apache-2.0 |
 | js-sys | 0.3.106 | MIT OR Apache-2.0 |
 | katex-rs | 0.3.0 | MIT |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 |
@@ -760,7 +761,7 @@ Windows 安装包随附未修改的 Microsoft Visual C++ Runtime `vcruntime140.d
 
 | 素材 | 许可 |
 |---|---|
-| `assets/fonts/katex/`（20 个 KaTeX 字体） | KaTeX 字体，SIL Open Font License / MIT，见同目录 `LICENSE` |
+| `assets/fonts/katex/`（20 个 KaTeX 字体） | KaTeX 字体，SIL Open Font License / MIT，见同目录 `LICENSE`。9 个粗体、斜体字重改过 OS/2 `fsSelection` 和 `head.macStyle` 的样式位（原文件都标成 Regular，Windows 和 Linux 会把斜体当正体选中），字形未改 |
 
 ## 图标
 
@@ -768,8 +769,8 @@ Windows 安装包随附未修改的 Microsoft Visual C++ Runtime `vcruntime140.d
 |---|---|
 | `assets/editor-icons/`（编辑器与文档里的 195 个图标） | 其中 49 个直接取自 Lucide（ISC，见同目录 `LICENSE-lucide`），其余按同一 24px / 2px 描边规格绘制 |
 | `assets/icons/`（界面外壳的 67 个图标，含一个在 Nucleo 图标上加了 MD 字样的 `doc-md.svg`） | Nucleo UI Outline / Fill 18。本项目持有 Nucleo 商业授权，按授权条款「公开源码项目中最多 100 个图标」使用（<https://nucleoapp.com/license>）。**这些图标不在 MIT 范围内**：fork 时请自行确认授权，或换成自己的图标；不得把它们抽出来做成图标库或图标包。 |
-| `assets/icons/folder.svg`、`assets/icons/disclosure.svg`、`assets/icons/import.svg` | 本项目绘制，MIT；不属于上述 67 个 Nucleo 图标 |
-| `assets/branding/app-icon.png` | 本项目自有 |
+| `assets/icons/folder.svg`、`assets/icons/disclosure.svg`、`assets/icons/import.svg`、`assets/icons/globe.svg` | 本项目绘制，MIT；不属于上述 67 个 Nucleo 图标 |
+| `assets/branding/app-icon.png`、`assets/branding/app-icon-dev.png`（预览版，带 dev 丝带，由 `tools/branding/dev_icon.py` 生成） | 本项目自有 |
 
 ## 封面与插画
 

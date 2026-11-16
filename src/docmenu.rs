@@ -227,6 +227,14 @@ impl Workspace {
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(|w, _, window, cx| w.open_doc_info(window, cx))),
             )
+            .child(
+                menu_item("dm-history", "restore", crate::settings::tr("版本历史", "Version history"), false, false)
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(|w, _, window, cx| {
+                        w.close_doc_menu(cx);
+                        if let Some(id) = w.current.clone() { w.open_history(&id, window, cx) }
+                    })),
+            )
             .child(divider())
             // 更多 and 删除 share the last group.
             .child(menu_item("dm-more", "ellipsis", crate::settings::text("更多"), true, sub == Some(DocSub::More)).on_hover(hover_sub(Some(DocSub::More))))
@@ -283,7 +291,7 @@ impl Workspace {
                 },
             )),
             Some(DocSub::More) => Some((
-                if crate::printing::SUPPORTED { item_top(9, 6) } else { item_top(8, 5) } - 1. - PAD,
+                if crate::printing::SUPPORTED { item_top(10, 6) } else { item_top(9, 5) } - 1. - PAD,
                 popover()
                     .id("dm-more-menu")
                     .occlude()
@@ -291,6 +299,13 @@ impl Workspace {
                     .px(px(5.))
                     .py(px(PAD))
                     .child(recorder())
+                    .child(sub_item("dm-copy-md", crate::settings::text("复制为 Markdown")).on_click(cx.listener(|w, _, _, cx| {
+                        w.close_doc_menu(cx);
+                        if let Some(ed) = w.editor.clone() {
+                            ed.update(cx, |e, cx| e.copy_markdown(cx));
+                            w.show_toast(crate::settings::text("已复制为 Markdown"), cx);
+                        }
+                    })))
                     .child(
                         sub_item("dm-refs", crate::settings::text("显示引用列表"))
                             .justify_between()
