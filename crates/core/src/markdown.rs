@@ -373,8 +373,11 @@ fn wiki_walk(blocks: &mut [Block], find: &mut dyn FnMut(&str) -> Option<PathBuf>
 
 type Names = std::collections::HashMap<String, Vec<PathBuf>>;
 
-/// Every file in `vault` by lower-case name (folders starting with `.` skipped;
-/// at most 50 000 entries). Kept a minute: a folder import asks once per page.
+/// Every file in `vault` by lower-case name (at most 50 000 entries). Folders
+/// an app keeps for itself are skipped, but a vault's own hidden attachment
+/// folder (`.attachments`, `.files` …) is walked: a picture in one is still
+/// the picture a `![[name.png]]` means. Kept a minute: a folder import asks
+/// once per page.
 fn vault_names(vault: &Path) -> std::sync::Arc<Names> {
     static LAST: std::sync::Mutex<Option<(PathBuf, std::time::Instant, std::sync::Arc<Names>)>> = std::sync::Mutex::new(None);
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
@@ -384,6 +387,10 @@ fn vault_names(vault: &Path) -> std::sync::Arc<Names> {
     n
 }
 
+/// Folders that hold an app's own files, never a vault's attachments: the
+/// editor's configuration and local trash, a repository's, this app's library.
+const INTERNAL_FOLDERS: [&str; 5] = [".obsidian", ".trash", ".git", ".quiet", ".assets"];
+
 fn walk_names(vault: &Path) -> Names {
     let (mut out, mut stack, mut seen) = (Names::new(), vec![vault.to_path_buf()], 0);
     while let Some(d) = stack.pop() {
@@ -392,11 +399,11 @@ fn walk_names(vault: &Path) -> Names {
             seen += 1;
             if seen > 50_000 { return out; }
             let name = e.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') { continue; }
-            match e.file_type() {
-                Ok(t) if t.is_dir() => stack.push(e.path()),
-                Ok(t) if t.is_file() => out.entry(name.to_lowercase()).or_default().push(e.path()),
-                _ => {}
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_dir() {
+                if !INTERNAL_FOLDERS.contains(&name.to_ascii_lowercase().as_str()) { stack.push(e.path()); }
+            } else if kind.is_file() && !name.starts_with('.') {
+                out.entry(name.to_lowercase()).or_default().push(e.path());
             }
         }
     }
@@ -958,6 +965,28 @@ mod tests {
         let mut blocks = crate::paste::markdown_to_blocks("![[att.png]]\n", crate::paste::Off { file: true, ..Default::default() });
         wiki_images(&mut blocks, &notes, None);
         assert!(matches!(&blocks[0].kind, BlockKind::Image { src, .. } if Path::new(src) == root.join("files/att.png")), "{blocks:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A vault may keep its pictures in a hidden folder (`.attachments`) and
+    /// configure nothing, so the walk has to go on into it — #227. The
+    /// library's own folders are still not the vault's.
+    #[test]
+    fn wiki_embeds_reach_pictures_in_a_hidden_attachment_folder() {
+        let root = std::env::temp_dir().join(format!("fdl-hidden-{}", uuid::Uuid::new_v4()));
+        let notes = root.join("notes");
+        for d in ["notes", ".obsidian", ".attachments", "normal", ".quiet", ".git"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        for f in [".attachments/hidden.png", "normal/visible.png", ".quiet/quiet.png", ".git/ignored.png"] { std::fs::write(root.join(f), b"png").unwrap(); }
+        let src = "![[hidden.png]]\n\n![[visible.png]]\n\n![[quiet.png]]\n\n![[ignored.png]]\n";
+        let mut doc = parse_file(src, "page", Some(&notes));
+        wiki_images(&mut doc.blocks, &notes, None);
+        let pics: Vec<PathBuf> = doc.blocks.iter().filter_map(|b| match &b.kind {
+            BlockKind::Image { src, .. } => Some(PathBuf::from(src)),
+            _ => None,
+        }).collect();
+        assert_eq!(pics, vec![root.join(".attachments").join("hidden.png"), root.join("normal").join("visible.png")]);
+        let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.text.as_str()).filter(|t| !t.is_empty()).collect();
+        assert_eq!(texts, vec!["![[quiet.png]]", "![[ignored.png]]"]);
         let _ = std::fs::remove_dir_all(&root);
     }
 }
