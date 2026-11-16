@@ -257,6 +257,8 @@ pub struct Workspace {
     pub doc_sub: Option<DocSub>,
     /// Last-frame bounds of the open submenu (clicks there keep the menu open).
     pub doc_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Rendered width of the open 「…」 menu, for placing its submenus (#225).
+    pub doc_menu_w: Rc<Cell<Option<f32>>>,
     pub doc_info: Option<DocInfo>,
     pub list_scroll: ScrollHandle,
     pub search_scroll: ScrollHandle,
@@ -433,6 +435,7 @@ impl Workspace {
             doc_menu: false,
             doc_sub: None,
             doc_sub_bounds: Rc::new(Cell::new(None)),
+            doc_menu_w: Rc::new(Cell::new(None)),
             doc_info: None,
             list_scroll: ScrollHandle::new(),
             search_scroll: ScrollHandle::new(),
