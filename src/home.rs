@@ -871,8 +871,9 @@ impl Workspace {
         // The last row's own 16 plus 16 more: 32 below the cards, like the
         // list view's 24 and clear of the window's rounded corner.
         // The top padding sits inside the list's clip, so a folder's papers can
-        // rise above the first row without being cut off.
-        .flex_1().min_h_0().pt(px(14.)).pb(px(16.)).track_scroll(grid_scroll.clone());
+        // rise above the first row without being cut off — and the clip keeps a
+        // row scrolling out of sight from drawing over the tabs above it.
+        .flex_1().min_h_0().overflow_hidden().pt(px(14.)).pb(px(16.)).track_scroll(grid_scroll.clone());
         let scroll = grid_scroll.0.borrow().base_handle.clone();
         div().relative().flex_1().min_h_0().mt(px(-4.)).flex().flex_col()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
