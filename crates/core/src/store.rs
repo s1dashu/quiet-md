@@ -905,7 +905,12 @@ impl Store {
     }
 
     fn index_has(&self, id: &str) -> bool {
-        self.index.get(id).is_some_and(|m| m.folder.is_some() || self.path(id).exists())
+        let Some(m) = self.index.get(id) else { return false };
+        m.folder.is_some() || {
+            #[cfg(test)]
+            crate::store::DISK_LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.path(id).exists()
+        }
     }
 
     /// 彻底删除 a page from the 回收站, with the pages that went with it.
@@ -1052,6 +1057,11 @@ impl Store {
     }
 }
 
+/// Disk existence checks performed by `index_has`; compiled only in tests,
+/// to keep imports O(N) instead of O(N × library) (#216).
+#[cfg(test)]
+pub(crate) static DISK_LOOKUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1077,6 +1087,23 @@ mod tests {
 
     fn doc(title: &str) -> Document {
         Document { title: crate::model::RichText::plain(title), ..Default::default() }
+    }
+
+    /// #216: importing N files must stay O(N) disk checks — the per-file
+    /// drop used to stat every entry of the library through `move_in_tree`.
+    #[test]
+    fn importing_files_does_not_walk_the_library() {
+        let lib = Lib::new("import-walk");
+        let mut store = lib.open();
+        let folder = store.create_folder("imported", None).unwrap();
+        for _ in 0..30 { store.create_from(&doc("background")).unwrap(); }
+        DISK_LOOKUPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        for _ in 0..10 {
+            let id = store.create_from(&doc("page")).unwrap();
+            store.set_parent(&id, Some(&folder)).unwrap();
+        }
+        let looked = DISK_LOOKUPS.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(looked <= 20, "10 imports made {looked} disk checks, not O(N)");
     }
 
     #[test]
