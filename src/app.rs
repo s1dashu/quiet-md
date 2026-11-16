@@ -469,10 +469,15 @@ impl Workspace {
         ws.sort();
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
-        // window starts a document of its own.
-        match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
+        // window starts a document of its own. The main window returns to the
+        // document read last (#234), or the home page when that is set.
+        match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
+            None if !crate::settings::prefs().start_home => match ws.entries.iter().max_by_key(|e| e.meta.opened) {
+                Some(e) => { let id = e.id.clone(); ws.open(&id, window, cx); }
+                None => ws.view = View::Home,
+            },
             None => ws.view = View::Home,
         }
         // Kept in the top bar (not just a toast): the user should notice.
