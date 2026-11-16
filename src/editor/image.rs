@@ -2013,7 +2013,7 @@ fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<Path
     Ok(path)
 }
 
-fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
+pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !p.is_file() || !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -2023,6 +2023,18 @@ fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
     }
     let bytes = std::fs::read(p).map_err(|_| BAD_DIMS)?;
     image_block_named(&bytes, &ext, p.file_stem().and_then(|s| s.to_str()))
+}
+
+/// One line of pasted text that is nothing but a local image file path
+/// (`file://` counts): the file to take in, if it is really an image
+/// that exists. WeChat puts such a line in the pasteboard instead of
+/// image data (#252).
+pub(crate) fn local_image_path(line: &str) -> Option<PathBuf> {
+    let s = line.trim();
+    let s = s.strip_prefix("file://").unwrap_or(s);
+    let p = Path::new(s);
+    let ext = p.extension().and_then(|x| x.to_str()).unwrap_or_default().to_ascii_lowercase();
+    (p.is_absolute() && FORMATS.contains(&ext.as_str()) && p.is_file()).then(|| p.to_path_buf())
 }
 
 /// File name of a remote image's download in `assets/remote`.
@@ -2074,8 +2086,25 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{clipboard_image_data, BAD_DIMS};
+    use super::{clipboard_image_data, local_image_path, BAD_DIMS};
     use gpui::ImageFormat;
+
+    #[test]
+    fn local_image_path_takes_only_existing_image_files() {
+        let dir = std::env::temp_dir().join(format!("fdl-imgpath-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = dir.join("shot.png");
+        std::fs::write(&png, b"not decoded, only named").unwrap();
+        let shown = png.display().to_string();
+        assert_eq!(local_image_path(&shown).as_deref(), Some(png.as_path()));
+        assert_eq!(local_image_path(&format!("  file://{shown}  ")).as_deref(), Some(png.as_path()));
+        // Not there, wrong type, or relative: text, not an image.
+        assert_eq!(local_image_path(&dir.join("gone.png").display().to_string()), None);
+        assert_eq!(local_image_path(&dir.join("notes.txt").display().to_string()), None);
+        assert_eq!(local_image_path("shot.png"), None);
+        assert_eq!(local_image_path("https://example.com/a.png"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn clipboard_tiff_preserves_pixels_as_png() {
