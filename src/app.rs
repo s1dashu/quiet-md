@@ -223,6 +223,8 @@ pub enum Confirm {
     Purge(String),
     /// 回收站 → 清空回收站: every trashed page, permanently.
     EmptyTrash,
+    /// 设置 › 文档库 → 清理未使用资源: the sweep's file names (#237).
+    RemoveUnused(Vec<String>),
     /// 隐藏引用列表 (with 不再提示) / 显示引用列表.
     Refs { show: bool, no_ask: bool },
     /// The open document could not be written before it was to be replaced
@@ -312,6 +314,8 @@ pub struct Workspace {
     pub doc_sub: Option<DocSub>,
     /// Last-frame bounds of the open submenu (clicks there keep the menu open).
     pub doc_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Rendered width of the open 「…」 menu, for placing its submenus (#225).
+    pub doc_menu_w: Rc<Cell<Option<f32>>>,
     pub doc_info: Option<DocInfo>,
     /// 版本历史 drawer, open for `HistoryView::id`.
     pub history: Option<crate::history::HistoryView>,
@@ -549,6 +553,7 @@ impl Workspace {
             doc_menu: false,
             doc_sub: None,
             doc_sub_bounds: Rc::new(Cell::new(None)),
+            doc_menu_w: Rc::new(Cell::new(None)),
             doc_info: None,
             history: None,
             preview: None,
@@ -587,10 +592,15 @@ impl Workspace {
         ws.sort();
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
-        // window starts a document of its own.
-        match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
+        // window starts a document of its own. The main window returns to the
+        // document read last (#234), or the home page when that is set.
+        match document {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
+            None if !crate::settings::prefs().start_home => match ws.entries.iter().max_by_key(|e| e.meta.opened) {
+                Some(e) => { let id = e.id.clone(); ws.open(&id, window, cx); }
+                None => ws.view = View::Home,
+            },
             None => ws.view = View::Home,
         }
         // Kept in the top bar (not just a toast): the user should notice.

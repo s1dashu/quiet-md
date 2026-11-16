@@ -99,11 +99,12 @@ fn set_app_icon() {
     }
 }
 
-/// The main window's options: centred at the remembered size, or at `at`.
+/// The main window's options: at `at`, else at the remembered spot, clamped
+/// into the work area (clear of the menu bar and Dock).
 pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx: &mut App) -> WindowOptions {
     // Scripted dev runs must not steal keyboard focus from whatever the
     // user is typing into.
-    let bounds = at.unwrap_or_else(|| Bounds::centered(None, quick_note::main_window_size(cx), cx));
+    let bounds = at.unwrap_or_else(|| quick_note::main_window_bounds(cx));
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_background: crate::theme::window_background(),
@@ -120,7 +121,7 @@ pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx
     }
 }
 
-/// The main window, centred at the remembered size, or where first launch's window was.
+/// The main window, at the remembered spot or where first launch's window was.
 pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &mut App) {
     let options = main_window_options(scripted, at, cx);
     cx.open_window(options, |window, cx| {

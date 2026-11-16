@@ -182,6 +182,13 @@ pub struct Settings {
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
+    /// Main window position and the display it was on, so reopening returns
+    /// to the same spot. The origin is in that display's top-left coordinates;
+    /// a display id that no longer exists makes the window re-centre.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_origin: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_display: Option<u32>,
     /// 阅读位置: the list offset each document was left at, so switching back
     /// returns to the same place. Kept out of `index.json`: it is window
     /// state, not document metadata.
@@ -609,6 +616,60 @@ impl Store {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (found.dirs, found.docs, found.pending).hash(&mut h);
         h.finish()
+    }
+
+    /// 设置 › 文档库 › 未使用资源 (#237): the files under the asset folder that
+    /// no document text mentions — documents (nested folders too), their `.bak`
+    /// copies and the 回收站 are all read. A file that cannot be read makes the
+    /// sweep fail: nothing is offered rather than something in use gets deleted.
+    /// `remote/` cache downloads are not listed; they are not references anyone
+    /// wrote. Standalone so it can run off the UI thread.
+    pub fn unused_assets_at(root: PathBuf) -> Result<Vec<(String, u64)>> {
+        /// Every file under `dir`: a trashed folder keeps its pages inside it.
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            let Ok(rd) = std::fs::read_dir(dir) else { return };
+            for e in rd.flatten() {
+                match e.file_type() {
+                    Ok(t) if t.is_dir() => walk(&e.path(), out),
+                    Ok(t) if t.is_file() => out.push(e.path()),
+                    _ => {}
+                }
+            }
+        }
+        let (docs, trash) = if Self::flat_at(&root) { (root.join("docs"), root.join("trash")) } else { (root.clone(), root.join(INTERNAL).join("trash")) };
+        // The documents and their `.bak` copies, wherever this layout keeps them.
+        let mut paths: Vec<PathBuf> = layout::scan(&docs).docs.iter().map(|rel| docs.join(rel)).collect();
+        paths.extend(paths.clone().iter().map(|p| with_suffix(p, ".bak")));
+        walk(&trash, &mut paths);
+        let texts = paths.iter().filter(|p| p.is_file()).map(std::fs::read_to_string).collect::<std::io::Result<Vec<String>>>()?;
+        // A library that never took an image has no asset folder: nothing to list.
+        let listed = match std::fs::read_dir(Self::assets_in(&root)) {
+            Ok(rd) => rd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
+            Err(e) => return Err(e.into()),
+        };
+        let mut out = vec![];
+        for e in listed.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() { continue }
+            let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            if name.starts_with('.') { continue }
+            if !texts.iter().any(|t| t.contains(&name)) { out.push((name, meta.len())); }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    /// Delete the sweep's files. A name with a path separator, a dot prefix
+    /// or a vanished file is skipped, not a failure.
+    pub fn remove_unused_assets(root: &Path, names: &[String]) -> usize {
+        let dir = Self::assets_in(root);
+        let mut gone = 0;
+        for name in names {
+            if name.contains('/') || name.contains('\\') || name.starts_with('.') { continue }
+            if std::fs::remove_file(dir.join(name)).is_ok() { gone += 1 }
+        }
+        gone
     }
 
     /// Whether `dir` holds a library, of this layout or an older one.
@@ -1814,7 +1875,11 @@ impl Store {
     }
 
     fn index_has(&self, id: &str) -> bool {
-        self.index.get(id).is_some_and(|m| if m.folder.is_some() { self.flat || self.abs(&m.rel).is_dir() } else { self.path(id).exists() })
+        let Some(m) = self.index.get(id) else { return false };
+        if m.folder.is_some() { return self.flat || self.abs(&m.rel).is_dir() }
+        #[cfg(test)]
+        crate::store::DISK_LOOKUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.path(id).exists()
     }
 
     /// 彻底删除 a page from the 回收站, with the pages that went with it.
@@ -2023,13 +2088,17 @@ impl Store {
     }
 }
 
+/// Disk existence checks performed by `index_has`; compiled only in tests,
+/// to keep imports O(N) instead of O(N × library) (#216).
+#[cfg(test)]
+pub(crate) static DISK_LOOKUPS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// A library in a fresh temporary folder, removed on drop.
     struct Lib(PathBuf);
-
     impl Lib {
         fn new(name: &str) -> Self {
             let d = std::env::temp_dir().join(format!("fdl-test-{name}-{}", uuid::Uuid::new_v4()));
@@ -2054,6 +2123,63 @@ mod tests {
 
     fn doc(title: &str) -> Document {
         Document { title: crate::model::RichText::plain(title), ..Default::default() }
+    }
+
+    /// #216: importing N files must stay O(N) disk checks — the per-file
+    /// drop used to stat every entry of the library through `move_in_tree`.
+    #[test]
+    fn importing_files_does_not_walk_the_library() {
+        let lib = Lib::new("import-walk");
+        let mut store = lib.open();
+        let folder = store.create_folder("imported", None).unwrap();
+        for _ in 0..30 { store.create_from(&doc("background")).unwrap(); }
+        DISK_LOOKUPS.store(0, std::sync::atomic::Ordering::Relaxed);
+        for _ in 0..10 {
+            let id = store.create_from(&doc("page")).unwrap();
+            store.set_parent(&id, Some(&folder)).unwrap();
+        }
+        let looked = DISK_LOOKUPS.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(looked <= 20, "10 imports made {looked} disk checks, not O(N)");
+    }
+
+    /// #237: only files no text mentions are offered; a nested document, a
+    /// `.bak` copy and the 回收站 all count as references, and deletion takes
+    /// exactly the sweep's names.
+    #[test]
+    fn unused_assets_sweep_keeps_every_mention() {
+        let d = std::env::temp_dir().join(format!("fdl-test-unused-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(d.join("folder")).unwrap();
+        std::fs::create_dir_all(d.join(".assets")).unwrap();
+        std::fs::create_dir_all(d.join(".quiet/trash/deleted")).unwrap();
+        std::fs::write(d.join("A.xml"), "<title>A</title><img src=\".assets/used.png\"/>").unwrap();
+        std::fs::write(d.join("folder/B.md"), "![](../.assets/nested.png)").unwrap();
+        std::fs::write(d.join("A.xml.bak"), "<title>A</title><img src=\".assets/bak-only.png\"/>").unwrap();
+        std::fs::write(d.join(".quiet/trash/deleted/C.xml"), "trash-only.png").unwrap();
+        for name in ["used.png", "nested.png", "bak-only.png", "trash-only.png", "lonely.png", ".hidden.png"] {
+            std::fs::write(d.join(".assets").join(name), b"123").unwrap();
+        }
+        let unused = Store::unused_assets_at(d.clone()).unwrap();
+        assert_eq!(unused, vec![("lonely.png".to_string(), 3)]);
+        assert_eq!(Store::remove_unused_assets(&d, &unused.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>()), 1);
+        assert!(!d.join(".assets/lonely.png").exists());
+        assert!(d.join(".assets/used.png").exists() && d.join(".assets/nested.png").exists() && d.join(".assets/bak-only.png").exists() && d.join(".assets/trash-only.png").exists());
+        // Path tricks and vanished files are skipped, not deleted.
+        assert_eq!(Store::remove_unused_assets(&d, &["../escape.png".into(), "no-such.png".into(), ".hidden.png".into()]), 0);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// The old layout (`assets/`, `docs/<id>.xml`) is swept the same way.
+    #[test]
+    fn unused_assets_sweep_reads_the_old_layout() {
+        let d = std::env::temp_dir().join(format!("fdl-test-unused-flat-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(d.join("docs")).unwrap();
+        std::fs::create_dir_all(d.join("assets")).unwrap();
+        std::fs::write(d.join("index.json"), "{}").unwrap();
+        std::fs::write(d.join("docs/a.xml"), "<img src=\"assets/used.png\"/>").unwrap();
+        std::fs::write(d.join("assets/used.png"), b"1").unwrap();
+        std::fs::write(d.join("assets/lonely.png"), b"12").unwrap();
+        assert_eq!(Store::unused_assets_at(d.clone()).unwrap(), vec![("lonely.png".to_string(), 2)]);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     fn doc_with(title: &str, body: &str) -> Document {

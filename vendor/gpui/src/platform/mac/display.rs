@@ -1,4 +1,4 @@
-use crate::{Bounds, DisplayId, Pixels, PlatformDisplay, px, size};
+use crate::{Bounds, DisplayId, Pixels, PlatformDisplay, point, px, size};
 use anyhow::Result;
 use cocoa::{
     appkit::NSScreen,
@@ -112,6 +112,35 @@ impl PlatformDisplay for MacDisplay {
                 origin: Default::default(),
                 size: size(px(bounds.size.width as f32), px(bounds.size.height as f32)),
             }
+        }
+    }
+
+    /// quiet.md: the work area of this screen — `visibleFrame`, with the menu
+    /// bar and Dock left out — turned into the same per-screen top-left
+    /// coordinates `bounds()` is consumed in. Falls back to the full frame.
+    fn usable_bounds(&self) -> Bounds<Pixels> {
+        unsafe {
+            let screens = NSScreen::screens(nil);
+            let count = cocoa::foundation::NSArray::count(screens);
+            for i in 0..count {
+                let screen = cocoa::foundation::NSArray::objectAtIndex(screens, i);
+                let device_description = NSScreen::deviceDescription(screen);
+                let screen_number_key: id = NSString::alloc(nil).init_str("NSScreenNumber");
+                let screen_number = device_description.objectForKey_(screen_number_key);
+                let screen_number: CGDirectDisplayID = msg_send![screen_number, unsignedIntegerValue];
+                if screen_number != self.0 { continue }
+                let frame = NSScreen::frame(screen);
+                let visible = NSScreen::visibleFrame(screen);
+                // AppKit counts y from the bottom, the window code from the top of
+                // the same screen; the difference of the two top edges is the menu
+                // bar (and any Dock floating at the top).
+                let top = (frame.origin.y + frame.size.height) - (visible.origin.y + visible.size.height);
+                return Bounds {
+                    origin: point(px((visible.origin.x - frame.origin.x) as f32), px(top as f32)),
+                    size: size(px(visible.size.width as f32), px(visible.size.height as f32)),
+                };
+            }
+            self.bounds()
         }
     }
 }

@@ -730,7 +730,7 @@ impl Workspace {
             let menu = popover()
                 .id("batch-menu")
                 .occlude()
-                .w(px(ROW_MENU_W))
+                .min_w(px(ROW_MENU_W))
                 .px(px(5.))
                 .py(px(crate::ui::MENU_PAD_Y))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| {
@@ -765,7 +765,7 @@ impl Workspace {
         let menu = popover()
             .id("row-menu")
             .occlude()
-            .w(px(ROW_MENU_W))
+            .min_w(px(ROW_MENU_W))
             .px(px(5.))
             .py(px(crate::ui::MENU_PAD_Y))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -872,7 +872,7 @@ impl Workspace {
                         popover()
                             .id("rm-download-menu")
                             .occlude()
-                            .w(px(130.))
+                            .min_w(px(130.))
                             .px(px(5.))
                             .py(px(crate::ui::MENU_PAD_Y))
                             .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
