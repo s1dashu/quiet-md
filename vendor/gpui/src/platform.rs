@@ -289,6 +289,12 @@ pub trait PlatformDisplay: Send + Sync + Debug {
     /// Get the bounds for this display
     fn bounds(&self) -> Bounds<Pixels>;
 
+    /// quiet.md: the same bounds with the menu bar and Dock excluded, so a
+    /// window placed inside stays clear of both. Defaults to `bounds()`.
+    fn usable_bounds(&self) -> Bounds<Pixels> {
+        self.bounds()
+    }
+
     /// Get the default bounds for this display to place a window
     fn default_bounds(&self) -> Bounds<Pixels> {
         let bounds = self.bounds();
@@ -344,6 +350,13 @@ pub struct DisplayId(pub(crate) u32);
 impl From<DisplayId> for u32 {
     fn from(id: DisplayId) -> Self {
         id.0
+    }
+}
+
+/// quiet.md: rebuild a persisted id; `From<DisplayId> for u32` stores it.
+impl From<u32> for DisplayId {
+    fn from(id: u32) -> Self {
+        DisplayId(id)
     }
 }
 

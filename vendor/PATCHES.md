@@ -41,6 +41,7 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 20 | `elements/img.rs`、`elements/image_cache.rs` | 图片缓存增加不触发加载的 `peek`；显式尺寸图片可选择延迟到可见区域绘制时才解码 | 卡片裁剪范围之外的图片不再预先解码；原始像素、尺寸和动图播放保持不变 |
 | 21 | `platform/mac/metal_atlas.rs` | 删除图片时立即移除 tile 索引，再递减所属纹理的引用计数 | 避免共享纹理仍被使用时残留旧索引，导致重复删除或复用失效 tile |
 | 22 | `platform/mac/platform.rs` | 读取剪贴板时同时保留文字和一种图片格式（优先 PNG），跳过空图片数据 | 截图工具同时提供文字和图片时，正文可选择图片，文本输入框仍可读取文字 |
+| 23 | `platform.rs`、`platform/mac/display.rs` | `PlatformDisplay` 新增 `usable_bounds`（默认 `bounds()`）；mac 用 `NSScreen.visibleFrame` 换算成和 `bounds()` 一致的每屏左上坐标 | 主窗口、快速笔记窗口按扣除菜单栏和 Dock 的工作区居中、夹取，不再被左侧/底部 Dock 遮挡（#253）；Windows/Linux 默认仍是整屏 |
 
 
 ## taffy 0.9.0

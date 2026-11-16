@@ -80,11 +80,11 @@ fn set_app_icon() {
     }
 }
 
-/// The main window, centred at the remembered size.
+/// The main window, at the remembered spot or centred in the work area.
 fn open_main_window(scripted: bool, cx: &mut App) {
     // Scripted dev runs must not steal keyboard focus from whatever the
     // user is typing into.
-    let bounds = Bounds::centered(None, quick_note::main_window_size(cx), cx);
+    let bounds = quick_note::main_window_bounds(cx);
     cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
