@@ -6,7 +6,7 @@ use crate::app::{Confirm, Workspace};
 use crate::settings::display_title;
 use crate::search::doc_icon;
 use crate::store::{TRASH_DAYS, TrashEntry};
-pub(crate) use crate::ui::{close_button, dialog, list_header_text, list_line, menu_label, primary_button, row_hover, scrim, secondary_button};
+pub(crate) use crate::ui::{ToastKind, close_button, dialog, list_header_text, list_line, menu_label, primary_button, row_hover, scrim, secondary_button};
 use crate::theme::{self, Theme, craft};
 use crate::ui::{ROW_RADIUS, TipExt, TitleBarExt, icon, popover, ui_para, ui_text};
 use gpui::{prelude::FluentBuilder, *};
@@ -279,6 +279,16 @@ impl Workspace {
         self.show_store_warnings(cx);
     }
 
+    /// 设置 › 文档库 › 未使用资源 (#237): delete exactly the sweep's files.
+    pub(crate) fn remove_unused_assets(&mut self, names: &[String], cx: &mut Context<Self>) {
+        let gone = crate::store::Store::remove_unused_assets(&crate::store::Store::root_dir(), names);
+        if gone > 0 {
+            self.show_toast_kind(ToastKind::Success, &crate::localized_format!("已清理 {gone} 个未使用资源", "Removed {gone} unused assets"), cx);
+        } else {
+            self.show_toast(crate::settings::text("没有可清理的资源"), cx);
+        }
+    }
+
     fn show_store_warnings(&mut self, cx: &mut Context<Self>) {
         let warnings = self.store.take_warnings();
         if !warnings.is_empty() {
@@ -316,6 +326,12 @@ impl Workspace {
                 true,
             ),
             Confirm::Purge(_) => (crate::settings::text("确认彻底删除？").to_string(), crate::settings::text("彻底删除后，该页面及其子页面将无法恢复").to_string(), crate::settings::text("删除"), true),
+            Confirm::RemoveUnused(names) => (
+                crate::settings::text("清理未使用资源").to_string(),
+                crate::localized_format!("{} 个文件将被永久删除，无法恢复", "{} files will be deleted permanently. This cannot be undone.", names.len()),
+                crate::settings::text("删除"),
+                true,
+            ),
             Confirm::Refs { show: false, .. } => (
                 crate::settings::text("是否隐藏引用列表？").to_string(),
                 crate::settings::text("选择隐藏后，协作者将无法查看本文的引用列表。如需重新显示，可点击文档右上角的更多按钮“...”，打开“显示引用列表”开关。").to_string(),
@@ -393,6 +409,7 @@ impl Workspace {
                             Confirm::Restore(id) => w.restore_doc(&id, cx),
                             Confirm::Purge(id) => w.purge_doc(&id, cx),
                             Confirm::EmptyTrash => w.empty_trash(cx),
+                            Confirm::RemoveUnused(names) => w.remove_unused_assets(&names, cx),
                             Confirm::Refs { show, no_ask } => {
                                 if no_ask {
                                     let mut s = w.store.settings();

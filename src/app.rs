@@ -196,6 +196,8 @@ pub enum Confirm {
     Purge(String),
     /// 回收站 → 清空回收站: every trashed page, permanently.
     EmptyTrash,
+    /// 设置 › 文档库 → 清理未使用资源: the sweep's file names (#237).
+    RemoveUnused(Vec<String>),
     /// 隐藏引用列表 (with 不再提示) / 显示引用列表.
     Refs { show: bool, no_ask: bool },
     /// The open document could not be written before it was to be replaced

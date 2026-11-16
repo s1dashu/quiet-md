@@ -388,6 +388,44 @@ impl Store {
         d
     }
 
+    /// 设置 › 文档库 › 未使用资源 (#237): the files under `assets` that no
+    /// document text mentions — documents, their `.bak` copies and the 回收站
+    /// are all read. A file that cannot be read makes the sweep fail: nothing
+    /// is offered rather than something in use gets deleted. `remote/` cache
+    /// downloads are not listed; they are not references anyone wrote.
+    /// Standalone so it can run off the UI thread.
+    pub fn unused_assets_at(root: PathBuf) -> Result<Vec<(String, u64)>> {
+        let mut texts: Vec<String> = vec![];
+        for dir in ["docs", "trash"] {
+            let Ok(rd) = std::fs::read_dir(root.join(dir)) else { continue };
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.is_file() { texts.push(std::fs::read_to_string(&p)?); }
+            }
+        }
+        let mut out = vec![];
+        for e in std::fs::read_dir(root.join("assets"))?.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() { continue }
+            let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            if name.starts_with('.') { continue }
+            if !texts.iter().any(|t| t.contains(&name)) { out.push((name, meta.len())); }
+        }
+        out.sort();
+        Ok(out)
+    }
+
+    /// Delete the sweep's files. A name with a path separator, a dot prefix
+    /// or a vanished file is skipped, not a failure.
+    pub fn remove_unused_assets(root: &std::path::Path, names: &[String]) -> usize {
+        let mut gone = 0;
+        for name in names {
+            if name.contains('/') || name.contains('\\') || name.starts_with('.') { continue }
+            if std::fs::remove_file(root.join("assets").join(name)).is_ok() { gone += 1 }
+        }
+        gone
+    }
+
     pub fn open() -> Result<Self> {
         Self::open_at(Self::root_dir())
     }
@@ -1068,7 +1106,6 @@ mod tests {
 
     /// A library in a fresh temporary folder, removed on drop.
     struct Lib(PathBuf);
-
     impl Lib {
         fn new(name: &str) -> Self {
             let d = std::env::temp_dir().join(format!("fdl-test-{name}-{}", uuid::Uuid::new_v4()));
@@ -1104,6 +1141,32 @@ mod tests {
         }
         let looked = DISK_LOOKUPS.load(std::sync::atomic::Ordering::Relaxed);
         assert!(looked <= 20, "10 imports made {looked} disk checks, not O(N)");
+    }
+
+    /// #237: only files no text mentions are offered, and the 回收站 counts
+    /// as a reference; deletion takes exactly the sweep's names.
+    #[test]
+    fn unused_assets_sweep_keeps_every_mention() {
+        let d = std::env::temp_dir().join(format!("fdl-test-unused-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(d.join("docs")).unwrap();
+        std::fs::create_dir_all(d.join("trash")).unwrap();
+        std::fs::create_dir_all(d.join("assets")).unwrap();
+        std::fs::write(d.join("docs/a.xml"), "<title>A</title><img src=\"assets/used.png\"/>").unwrap();
+        std::fs::write(d.join("docs/a.xml.bak"), "<title>A</title><img src=\"assets/bak-only.png\"/>").unwrap();
+        std::fs::write(d.join("trash/b.xml"), "trash-only.png").unwrap();
+        std::fs::write(d.join("assets/used.png"), b"12345").unwrap();
+        std::fs::write(d.join("assets/bak-only.png"), b"12").unwrap();
+        std::fs::write(d.join("assets/trash-only.png"), b"123").unwrap();
+        std::fs::write(d.join("assets/lonely.png"), b"1234567").unwrap();
+        std::fs::write(d.join("assets/.hidden.png"), b"1").unwrap();
+        let unused = Store::unused_assets_at(d.clone()).unwrap();
+        assert_eq!(unused, vec![("lonely.png".to_string(), 7)]);
+        assert_eq!(Store::remove_unused_assets(&d, &unused.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>()), 1);
+        assert!(!d.join("assets/lonely.png").exists());
+        assert!(d.join("assets/used.png").exists() && d.join("assets/trash-only.png").exists() && d.join("assets/bak-only.png").exists());
+        // Path tricks and vanished files are skipped, not deleted.
+        assert_eq!(Store::remove_unused_assets(&d, &["../escape.png".into(), "no-such.png".into(), ".hidden.png".into()]), 0);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
