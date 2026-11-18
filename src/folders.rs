@@ -105,6 +105,8 @@ impl Workspace {
         if self.manual_home_sort() { self.prepare_manual_order(cx); }
         self.folder_current = Some(id.to_string());
         self.view = View::Folder;
+        self.home_cursor = None;
+        self.doc_history.record(crate::app::NavTarget::Folder(id.to_string()));
         self.row_menu = None;
         self.create_menu = None;
         self.doc_menu = false;

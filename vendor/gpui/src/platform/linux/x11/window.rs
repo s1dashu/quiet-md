@@ -273,6 +273,8 @@ pub struct X11WindowState {
     edge_constraints: Option<EdgeConstraints>,
     pub handle: AnyWindowHandle,
     last_insets: [u32; 4],
+    // quiet.md: whether XIM composition is allowed for this window.
+    pub(crate) ime_allowed: bool,
 }
 
 impl X11WindowState {
@@ -692,6 +694,7 @@ impl X11WindowState {
                 edge_constraints: None,
                 counter_id: sync_request_counter,
                 last_sync_counter: None,
+                ime_allowed: true,
             })
         });
 
@@ -1275,6 +1278,18 @@ impl PlatformWindow for X11Window {
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
         self.0.state.borrow_mut().input_handler.take()
+    }
+
+    fn set_ime_active(&self, active: bool) {
+        let client = {
+            let mut state = self.0.state.borrow_mut();
+            if state.ime_allowed == active {
+                return;
+            }
+            state.ime_allowed = active;
+            state.client.clone()
+        };
+        client.set_ime_active(self.0.x_window, active);
     }
 
     fn prompt(

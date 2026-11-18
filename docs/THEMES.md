@@ -43,12 +43,12 @@ blockquote { border-left: 3px solid var(--accent); }
 | `.page` | `max-width` | 「标准」页宽时正文栏的宽度；「较宽」「全宽」不受影响 | ✓ |
 | `::selection` | `background-color` | 选中文字的底色 | ✓ |
 | `p` | `margin-bottom` | 块与块之间的距离 | ✓ |
-| `.title` | `font-family` `font-size` `line-height` `font-weight` `color` | 文档标题 | ✓ |
-| `h1`–`h9` | `font-family` `font-size` `line-height` `font-weight` `color` `margin-top` `margin-bottom` | 各级标题 | 字号、行高、字重、上下间距 |
+| `.title` | `font-family` `font-size` `line-height` `font-weight` `letter-spacing` `color` | 文档标题 | ✓ |
+| `h1`–`h9` | `font-family` `font-size` `line-height` `font-weight` `letter-spacing` `color` `margin-top` `margin-bottom` | 各级标题 | ✓ |
 | `strong`（`b`） | `font-weight` `color` | 粗体 | |
 | `a` | `color` `text-decoration`（`underline` / `none`）`text-decoration-color` | 链接；`underline` 时始终画下划线 | 仅 `color` |
 | `a:hover` | `color` | 悬停的链接 | ✓ |
-| `code` | `color` `background-color` `border-color` `border-radius` `padding-left` | 行内代码 | |
+| `code` | `font-family` `font-size` `color` `background-color` `border-color` `border-radius` `padding-left` | 行内代码 | 字体与字号 |
 | `pre` | `font-family` `font-size` `line-height` `color` `background-color` `border-color` `border-radius` | 代码块 | 颜色与字体 |
 | `.line-numbers` | `display`（`block` / `none`）`color` `background-color` | 代码块行号 | 颜色 |
 | `.token.comment` `.token.keyword` `.token.tag` `.token.string` `.token.number` `.token.boolean` `.token.class-name` `.token.attr-name` `.token.function` | `color` | 代码高亮（沿用 Prism 的类名） | ✓ |

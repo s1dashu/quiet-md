@@ -310,10 +310,8 @@ pub fn shadow_button() -> Vec<BoxShadow> {
     vec![shadow(0.05, 1., 1.5, 0.)]
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub const UI_FONT: &str = ".SystemUIFont";
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub const UI_FONT: &str = "Noto Sans";
 pub const NUMERAL_FONT: &str = if cfg!(any(target_os = "macos", target_os = "windows")) { "Helvetica Neue" } else { UI_FONT };
 /// Platform monospace font.
 #[cfg(target_os = "macos")]
@@ -321,7 +319,86 @@ pub const MONO_FONT: &str = ".AppleSystemUIFontMonospaced";
 #[cfg(target_os = "windows")]
 pub const MONO_FONT: &str = "Consolas";
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub const MONO_FONT: &str = "Noto Sans Mono";
+pub const MONO_FONT: &str = ".SystemUIFontMonospaced";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FontClass { Sans, Serif, Kai, Mono }
+
+pub fn classify_font(family: &str) -> FontClass {
+    let f = family.to_ascii_lowercase();
+    if f.contains("mono") || f.contains("consolas") || f.contains("menlo") || f.contains("courier") || f.contains("duospace") || f.contains("code") {
+        FontClass::Mono
+    } else if f.contains("kai") || f.contains("wenkai") || f.contains("jinkai") || f.contains("fangsong") || f.contains("xiaolai") {
+        FontClass::Kai
+    } else if f.contains("serif") || f.contains("song") || f.contains("mincho") || f.contains("georgia") || f.contains("times") || f.contains("c059") || f.contains("garamond") || f.contains("palatino") || f.contains("charter") || f.contains("baskerville") || f.contains("new york") {
+        FontClass::Serif
+    } else {
+        FontClass::Sans
+    }
+}
+
+pub fn font_fallbacks(mono: bool) -> gpui::FontFallbacks {
+    #[cfg(target_os = "linux")]
+    let list = if mono { vec![".SystemCJKMonoFont".into(), "TsangerJinKai05".into(), ".SystemCJKFont".into(), "Noto Color Emoji".into()] } else { vec!["TsangerJinKai05".into(), ".SystemCJKFont".into(), "Noto Color Emoji".into()] };
+    #[cfg(not(target_os = "linux"))]
+    let list = { let _ = mono; vec!["PingFang SC".into(), "Apple Color Emoji".into()] };
+    gpui::FontFallbacks::from_fonts(list)
+}
+
+pub fn doc_font_fallbacks_for(primary: &str) -> gpui::FontFallbacks {
+    #[cfg(target_os = "linux")]
+    let mut list: Vec<String> = match classify_font(primary) {
+        FontClass::Serif => vec!["Noto Serif CJK SC".into(), "Source Han Serif SC".into(), "Noto Sans CJK SC".into(), ".SystemCJKFont".into(), "Noto Color Emoji".into()],
+        FontClass::Kai => vec!["LXGW WenKai".into(), "TsangerJinKai05".into(), "Noto Serif CJK SC".into(), ".SystemCJKFont".into(), "Noto Color Emoji".into()],
+        FontClass::Mono => vec![".SystemCJKMonoFont".into(), "Noto Sans Mono CJK SC".into(), "LXGW WenKai Mono".into(), ".SystemCJKFont".into(), "Noto Color Emoji".into()],
+        FontClass::Sans => vec!["Noto Sans CJK SC".into(), "Source Han Sans SC".into(), ".SystemCJKFont".into(), "LXGW WenKai".into(), "Noto Color Emoji".into()],
+    };
+    #[cfg(not(target_os = "linux"))]
+    let mut list: Vec<String> = match classify_font(primary) {
+        FontClass::Serif => vec!["Songti SC".into(), "STSong".into(), "PingFang SC".into(), "Apple Color Emoji".into()],
+        FontClass::Kai => vec!["Kaiti SC".into(), "STKaiti".into(), "PingFang SC".into(), "Apple Color Emoji".into()],
+        FontClass::Mono | FontClass::Sans => vec!["PingFang SC".into(), "Apple Color Emoji".into()],
+    };
+    if !primary.is_empty() && !primary.starts_with('.') && !list.iter().any(|f| f.eq_ignore_ascii_case(primary)) {
+        list.insert(0, primary.into());
+    }
+    gpui::FontFallbacks::from_fonts(list)
+}
+
+fn is_cjk_font(f: &str) -> bool {
+    let l = f.to_ascii_lowercase();
+    ["cjk", "han", "pingfang", "song", "kai", "hei", "yahei", "hiragino", "meiryo", "mincho", "gothic", "wenkai", "jinkai", "fangsong", "simsun"]
+        .iter().any(|k| l.contains(k))
+}
+
+pub fn doc_cjk_punct_font(primary: &'static str) -> &'static str {
+    if !primary.is_empty() && !primary.starts_with('.') && is_cjk_font(primary) {
+        return primary;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        match classify_font(primary) {
+            FontClass::Serif => "Noto Serif CJK SC",
+            FontClass::Kai => if primary.eq_ignore_ascii_case("TsangerJinKai05") { "TsangerJinKai05" } else { "LXGW WenKai" },
+            FontClass::Mono => "Noto Sans Mono CJK SC",
+            FontClass::Sans => "Noto Sans CJK SC",
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        match classify_font(primary) {
+            FontClass::Serif => "Songti SC",
+            FontClass::Kai => "Kaiti SC",
+            FontClass::Mono | FontClass::Sans => "PingFang SC",
+        }
+    }
+}
+
+pub fn font_with_fallbacks(family: &'static str, mono: bool) -> gpui::Font {
+    let mut f = gpui::font(family);
+    f.fallbacks = Some(font_fallbacks(mono));
+    f
+}
 
 pub struct Theme;
 
@@ -562,34 +639,74 @@ pub struct BlockMetrics {
     pub mb: f32,
 }
 
-/// The text styles on Mac (iOS px × 0.882353): Title 21 / 700,
-/// Subtitle 19 / 700, Heading 18 / 600, Strong 16 / 600; H5+ are body size
-/// at 600. Line heights are multipliers on the font's natural line
-/// height (1.19em); margins are padding-top / -bottom.
+/// Modular heading scale for Craft: Title 34 / 42 Bold, H1 26 / 33 Bold,
+/// H2 21 / 28 Bold, H3 18 / 25 SemiBold, H4 16.5 / 24 SemiBold, H5–H6+ step
+/// down via tracking & tone so every level stays distinct from 15pt body.
 pub fn heading_metrics(level: u8) -> BlockMetrics {
-    // Paddings are px as pt: measured gaps match them unscaled.
     let (size, lh, mt, mb) = match level {
-        1 => (21.0, 27.0, 48.0, 16.0),
-        2 => (19.0, 25.0, 36.0, 16.0),
-        3 => (18.0, 24.0, 28.0, 12.0),
-        4 => (16.0, 25.0, 16.0, 16.0),
-        _ => (15.0, 22.0, 13.0, 13.0),
+        1 => (26.0, 33.0, 36.0, 12.0),
+        2 => (21.0, 28.0, 28.0, 10.0),
+        3 => (18.0, 25.0, 22.0, 8.0),
+        4 => (16.5, 24.0, 18.0, 6.0),
+        5 => (15.0, 22.0, 14.0, 5.0),
+        _ => (14.5, 21.0, 12.0, 4.0),
     };
     BlockMetrics { size, line_height: lh, mt, mb }
 }
 
-/// Body text: 15pt, 1.25 × natural line height ≈ 22pt; single-line
-/// paragraphs repeat every 35pt, so 13pt between blocks.
+/// Body text: 15pt, 1.6 × line height (24pt) for comfortable CJK + Latin reading.
 pub const BODY_SIZE: f32 = 15.0;
-pub const BODY_LINE: f32 = 22.0;
-pub const BLOCK_GAP: f32 = 13.0;
+pub const BODY_LINE: f32 = 24.0;
+pub const BLOCK_GAP: f32 = 12.0;
 
-/// Heading weight per level (Title / Subtitle 700, Heading / Strong 600).
+/// Heading weight per level (Title / H1 / H2 700, H3+ 600).
 pub fn heading_weight(level: u8) -> gpui::FontWeight {
     if level <= 2 { gpui::FontWeight::BOLD } else { gpui::FontWeight::SEMIBOLD }
 }
 
-/// Page title: Quiet.md uses 34 / 55.25 Bold, larger than the 21pt
-/// reference `.pageTitle`, to match preview typography; the larger title is
-/// an intentional deviation, not a measurement.
-pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
+/// Optical letter-spacing (px) per heading level.
+pub fn heading_tracking(level: u8) -> f32 {
+    match level {
+        1 => -0.52,
+        2 => -0.32,
+        3 => -0.18,
+        4 => 0.0,
+        5 => 0.22,
+        _ => 0.29,
+    }
+}
+
+/// Subtle tonal ramp so H1 anchors darker and H5+ recede gracefully.
+pub fn heading_color(level: u8) -> Option<Hsla> {
+    match level {
+        1 => Some(c(craft::N950)),
+        5 => Some(c(craft::N700)),
+        6..=9 => Some(c(craft::N650)),
+        _ => None,
+    }
+}
+
+/// Page title: 34 / 42 Bold, tight display leading and tracking.
+pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 42.0, mt: 0.0, mb: 0.0 };
+pub const TITLE_TRACKING: f32 = -0.85;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn font_classification_and_cjk_punct_matching() {
+        assert_eq!(classify_font("Noto Serif CJK SC"), FontClass::Serif);
+        assert_eq!(classify_font("Songti SC"), FontClass::Serif);
+        assert_eq!(classify_font("LXGW WenKai"), FontClass::Kai);
+        assert_eq!(classify_font("JetBrains Mono"), FontClass::Mono);
+        assert_eq!(classify_font("Inter"), FontClass::Sans);
+        assert_eq!(doc_cjk_punct_font("LXGW WenKai"), "LXGW WenKai");
+        assert_eq!(doc_cjk_punct_font("Noto Serif CJK SC"), "Noto Serif CJK SC");
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(doc_cjk_punct_font("Inter"), "Noto Sans CJK SC");
+            assert_eq!(doc_cjk_punct_font("Georgia"), "Noto Serif CJK SC");
+        }
+    }
+}

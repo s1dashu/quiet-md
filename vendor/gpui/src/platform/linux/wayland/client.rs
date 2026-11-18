@@ -289,9 +289,26 @@ impl WaylandClientStatePtr {
             Some(PendingActivation::Window(window));
     }
 
+    pub fn is_focused_window(&self, window: &WaylandWindowStatePtr) -> bool {
+        let client = self.get_client();
+        let state = client.borrow();
+        state
+            .keyboard_focused_window
+            .as_ref()
+            .is_some_and(|focused| focused.is_same(window))
+    }
+
     pub fn enable_ime(&self) {
         let client = self.get_client();
         let mut state = client.borrow_mut();
+        // quiet.md: keep Wayland text-input disabled while the focused window is in a non-insert modal state.
+        if state
+            .keyboard_focused_window
+            .as_ref()
+            .is_some_and(|window| !window.ime_allowed())
+        {
+            return;
+        }
         let Some(mut text_input) = state.text_input.take() else {
             return;
         };
@@ -318,6 +335,7 @@ impl WaylandClientStatePtr {
         let client = self.get_client();
         let mut state = client.borrow_mut();
         state.composing = false;
+        state.pre_edit_text.take();
         if let Some(text_input) = &state.text_input {
             text_input.disable();
             text_input.commit();
@@ -1239,6 +1257,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
                 if let Some(window) = state.keyboard_focused_window.clone() {
                     drop(state);
                     window.set_focused(true);
+                    if !window.ime_allowed() {
+                        this.disable_ime();
+                    }
                 }
             }
             wl_keyboard::Event::Leave { surface, .. } => {

@@ -179,4 +179,23 @@ pub fn bind_keys(cx: &mut App) {
     // PC clipboard keys (Ctrl+Insert after `shortcuts::pc_binding`).
     #[cfg(not(target_os = "macos"))]
     cx.bind_keys([KeyBinding::new("shift-delete", Cut, c), KeyBinding::new("cmd-insert", Copy, c), KeyBinding::new("shift-insert", Paste, c)]);
+
+    // Vim non-insert mode keeps safe navigation, clipboard, save and undo/redo keys.
+    let v = Some("EditorVim");
+    cx.bind_keys([
+        KeyBinding::new("left", MoveLeft, v),
+        KeyBinding::new("right", MoveRight, v),
+        KeyBinding::new("up", MoveUp, v),
+        KeyBinding::new("down", MoveDown, v),
+        KeyBinding::new("shift-left", SelectLeft, v),
+        KeyBinding::new("shift-right", SelectRight, v),
+        KeyBinding::new("shift-up", SelectUp, v),
+        KeyBinding::new("shift-down", SelectDown, v),
+        KeyBinding::new("cmd-a", SelectAll, v),
+        KeyBinding::new("cmd-c", Copy, v),
+        KeyBinding::new("cmd-s", Save, v),
+        KeyBinding::new("cmd-z", Undo, v),
+        KeyBinding::new("cmd-shift-z", Redo, v),
+        KeyBinding::new("cmd-y", Redo, v),
+    ]);
 }

@@ -71,6 +71,23 @@ fn hhmm(secs: u64) -> String {
     format!("{h:02}:{mi:02}")
 }
 
+fn history_child_index(visible: &[Version], target_ix: usize) -> usize {
+    let mut child_ix = 0;
+    let mut day: Option<(i64, u32, u32)> = None;
+    for (i, v) in visible.iter().enumerate() {
+        let key = day_key(v.ms / 1000);
+        if day != Some(key) {
+            day = Some(key);
+            child_ix += 1;
+        }
+        if i == target_ix {
+            return child_ix;
+        }
+        child_ix += 1;
+    }
+    0
+}
+
 /// `+12 行 −3 行`, or the note that this is the earliest snapshot.
 fn delta_text(name: &str, delta: &HashMap<String, (usize, usize)>) -> String {
     match delta.get(name).copied() {
@@ -108,6 +125,9 @@ impl Workspace {
         });
         self.doc_menu = false;
         self.doc_sub = None;
+        self.non_doc_pending = None;
+        self.sidebar_pending_g = false;
+        self.sidebar_pending_ctrl_w = false;
         self.mark_history_drawer(true, cx);
         match first {
             Some(name) => self.preview_version(&name, window, cx),
@@ -186,8 +206,140 @@ impl Workspace {
         self.exit_preview(cx);
         self.history = None;
         self.version_rename = None;
+        self.non_doc_pending = None;
         self.mark_history_drawer(false, cx);
         cx.notify();
+    }
+
+    pub(crate) fn handle_history_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(h) = self.history.as_ref() else { return false };
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        if self.non_doc_pending == Some('?') {
+            self.non_doc_pending = None;
+            cx.notify();
+            if ks.key == "escape" || (!ks.modifiers.control && ch == Some('?')) {
+                return true;
+            }
+        }
+        let visible: Vec<Version> = h.versions.iter().filter(|v| !h.named_only || v.label.is_some()).cloned().collect();
+        let selected = h.selected.clone();
+        if ks.modifiers.control {
+            match ks.key.as_str() {
+                "[" => {
+                    self.non_doc_pending = None;
+                    if self.preview.is_some() {
+                        self.exit_preview(cx);
+                    } else {
+                        self.close_history(cx);
+                        if let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+                    }
+                    return true;
+                }
+                "d" | "u" => {
+                    let down = ks.key == "d";
+                    if let Some(ed) = &self.editor {
+                        ed.update(cx, |e, cx| {
+                            let vh = f32::from(e.list.viewport_bounds().size.height).max(200.) * 0.5;
+                            e.list.scroll_by(px(if down { vh } else { -vh }));
+                            cx.notify();
+                        });
+                    }
+                    return true;
+                }
+                _ => return false,
+            }
+        }
+        if ks.key == "escape" {
+            self.non_doc_pending = None;
+            if self.preview.is_some() {
+                self.exit_preview(cx);
+            } else {
+                self.close_history(cx);
+                if let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+            }
+            return true;
+        }
+        if ks.key == "q" && !ks.modifiers.shift {
+            self.non_doc_pending = None;
+            self.close_history(cx);
+            if let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+            return true;
+        }
+        if !ks.modifiers.control && ch == Some('?') {
+            self.non_doc_pending = Some('?');
+            cx.notify();
+            return true;
+        }
+        if self.non_doc_pending == Some('g') {
+            self.non_doc_pending = None;
+            if ks.key == "g" && !ks.modifiers.shift && let Some(v) = visible.first() {
+                let name = v.name.clone();
+                if let Some(h) = self.history.as_mut() { h.list_scroll.scroll_to_item(0); }
+                self.preview_version(&name, window, cx);
+            } else {
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "g" && !ks.modifiers.shift {
+            self.non_doc_pending = Some('g');
+            cx.notify();
+            return true;
+        }
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            if let Some(last_ix) = visible.len().checked_sub(1) {
+                let name = visible[last_ix].name.clone();
+                let child_ix = history_child_index(&visible, last_ix);
+                if let Some(h) = self.history.as_mut() { h.list_scroll.scroll_to_item(child_ix); }
+                self.preview_version(&name, window, cx);
+            }
+            return true;
+        }
+        if ks.key == "j" || ks.key == "down" || ks.key == "k" || ks.key == "up" {
+            if visible.is_empty() {
+                return true;
+            }
+            let down = ks.key == "j" || ks.key == "down";
+            let next_ix = match selected.as_deref().and_then(|s| visible.iter().position(|v| v.name == s)) {
+                Some(i) if down => (i + 1).min(visible.len() - 1),
+                Some(i) => i.saturating_sub(1),
+                None => 0,
+            };
+            let name = visible[next_ix].name.clone();
+            let child_ix = history_child_index(&visible, next_ix);
+            if let Some(h) = self.history.as_mut() { h.list_scroll.scroll_to_item(child_ix); }
+            self.preview_version(&name, window, cx);
+            return true;
+        }
+        match ch.unwrap_or_default() {
+            _ if ks.key == "enter" => {
+                if selected.is_some() {
+                    self.restore_selected(window, cx);
+                }
+                true
+            }
+            'm' => { self.toggle_history_marks(cx); true }
+            'f' => { self.toggle_history_named(cx); true }
+            's' => { self.save_version_now(window, cx); true }
+            'c' => { if selected.is_some() { self.version_as_copy(window, cx); } true }
+            'r' | 'n' => {
+                if let Some(name) = selected {
+                    self.start_version_rename(&name, window, cx);
+                }
+                true
+            }
+            'x' | 'D' => {
+                if selected.is_some() {
+                    self.delete_selected_version(window, cx);
+                }
+                true
+            }
+            _ => true,
+        }
     }
 
     /// Tell the editor whether Esc belongs to the drawer.
@@ -195,7 +347,11 @@ impl Workspace {
         if let Some(ed) = &self.editor {
             ed.update(cx, |e, cx| {
                 e.history_drawer = on;
-                cx.notify();
+                if on {
+                    e.clear_vim_pending(cx);
+                } else {
+                    cx.notify();
+                }
             });
         }
     }
@@ -291,6 +447,8 @@ impl Workspace {
         // document again, and `flush` must work.
         self.exit_preview(cx);
         self.history = None;
+        self.version_rename = None;
+        self.mark_history_drawer(false, cx);
         if self.store.save(&id, &doc).is_err() {
             self.show_toast_kind(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败：当前版本未被改动。", "Restore failed; the current version was left alone."), cx);
             return;

@@ -230,17 +230,42 @@ pub struct BlockMetrics {
 
 pub fn heading_metrics(level: u8) -> BlockMetrics {
     let (size, lh, mt, mb) = match level {
-        1 => (26.0, 36.4, 26.0, 10.0),
-        2 => (22.0, 30.8, 22.0, 8.0),
-        3 => (20.0, 28.0, 20.0, 8.0),
-        4 => (18.0, 25.2, 18.0, 8.0),
-        5 => (16.0, 26.0, 18.0, 8.0),
-        _ => (16.0, 26.0, 16.0, 8.0),
+        1 => (27.0, 35.0, 34.0, 12.0),
+        2 => (22.0, 30.0, 26.0, 10.0),
+        3 => (19.0, 26.0, 20.0, 8.0),
+        4 => (17.0, 25.0, 16.0, 6.0),
+        5 => (15.5, 24.0, 14.0, 5.0),
+        _ => (15.0, 23.0, 12.0, 4.0),
     };
     BlockMetrics { size, line_height: lh, mt, mb }
 }
 
-pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
+pub fn heading_weight(level: u8) -> gpui::FontWeight {
+    if level <= 2 { gpui::FontWeight::BOLD } else { gpui::FontWeight::SEMIBOLD }
+}
+
+pub fn heading_tracking(level: u8) -> f32 {
+    match level {
+        1 => -0.54,
+        2 => -0.33,
+        3 => -0.19,
+        4 => 0.0,
+        5 => 0.23,
+        _ => 0.30,
+    }
+}
+
+pub fn heading_color(level: u8) -> Option<Hsla> {
+    match level {
+        1 => Some(c(ud::N950)),
+        5 => Some(c(ud::N700)),
+        6..=9 => Some(c(ud::N650)),
+        _ => None,
+    }
+}
+
+pub const TITLE: BlockMetrics = BlockMetrics { size: 36.0, line_height: 44.0, mt: 0.0, mb: 0.0 };
+pub const TITLE_TRACKING: f32 = -0.90;
 
 pub use crate::theme::{craft, ca, mix, ta, shadow_button};
 

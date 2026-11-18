@@ -252,6 +252,19 @@ impl X11ClientStatePtr {
         }
     }
 
+    pub fn set_ime_active(&self, x_window: u32, active: bool) {
+        let Some(client) = self.get_client() else {
+            return;
+        };
+        if client.0.borrow().keyboard_focused_window == Some(x_window) {
+            if active {
+                client.enable_ime();
+            } else {
+                client.reset_ime();
+            }
+        }
+    }
+
     pub fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let Some(client) = self.get_client() else {
             return;
@@ -620,7 +633,13 @@ impl X11Client {
 
             for event in events.into_iter() {
                 let mut state = self.0.borrow_mut();
-                if !state.has_xim() {
+                // quiet.md: bypass XIM key interception when the focused window disabled IME (e.g. Vim Normal/Visual).
+                let ime_blocked_key = matches!(event, Event::KeyPress(_) | Event::KeyRelease(_))
+                    && state
+                        .keyboard_focused_window
+                        .and_then(|id| state.windows.get(&id))
+                        .is_some_and(|wr| !wr.window.state.borrow().ime_allowed);
+                if !state.has_xim() || ime_blocked_key {
                     drop(state);
                     self.handle_event(event);
                     continue;
@@ -676,6 +695,13 @@ impl X11Client {
         if !state.has_xim() {
             return;
         }
+        if state
+            .keyboard_focused_window
+            .and_then(|id| state.windows.get(&id))
+            .is_some_and(|wr| !wr.window.state.borrow().ime_allowed)
+        {
+            return;
+        }
 
         let Some((mut ximc, mut xim_handler)) = state.take_xim() else {
             return;
@@ -718,6 +744,10 @@ impl X11Client {
     pub fn reset_ime(&self) {
         let mut state = self.0.borrow_mut();
         state.composing = false;
+        state.pre_edit_text.take();
+        if let Some(compose_state) = state.compose_state.as_mut() {
+            compose_state.reset();
+        }
         if let Some(mut ximc) = state.ximc.take() {
             if let Some(xim_handler) = state.xim_handler.as_ref() {
                 ximc.reset_ic(xim_handler.im_id, xim_handler.ic_id).ok();

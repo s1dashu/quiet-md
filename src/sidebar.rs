@@ -2,7 +2,7 @@
 //! no panel, border or shadow, straight on the window surface (only the note
 //! floats). 30pt rows on a 31pt pitch, selection pill radius 9.
 
-use crate::app::{Confirm, RowMenu, View, Workspace};
+use crate::app::{Confirm, PaneFocus, RowMenu, SidebarItem, View, Workspace};
 use crate::settings::display_title;
 use crate::store::Entry;
 use crate::theme::{self, Theme, craft};
@@ -148,9 +148,11 @@ impl Workspace {
         // The nav is just 主页: 36px items, a blue tint when selected. Its
         // icon column (x 17) is shared with 搜索 and the doc rows.
         let home_on = self.view == View::Home;
+        let home_cur = self.is_sidebar_cursor(&SidebarItem::Home);
         let nav = div().flex_none().pt(px(4.)).pb(px(4.)).px(px(SB_X)).child(
             div()
                 .id("nav-home")
+                .relative()
                 .h(px(ROW_H))
                 .pl(px(6.))
                 .pr(px(4.))
@@ -161,7 +163,8 @@ impl Workspace {
                 .text_size(px(theme::ui_font()))
                 .line_height(px(20.))
                 .when(home_on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
-                .when(!home_on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
+                .when(!home_on && home_cur, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text()))
+                .when(!home_on && !home_cur, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
                 .child(
                     // Selected or not, the same outline: the row's fill marks the selection.
                     div().size(px(20.)).flex_none().flex().items_center().justify_center().mr(px(9.)).child(icon(
@@ -171,6 +174,7 @@ impl Workspace {
                     )),
                 )
                 .child(crate::settings::tr("主页", "Home"))
+                .when(home_cur, |d| d.child(div().absolute().inset_0().rounded(px(ROW_R)).border_1().border_color(Theme::primary())))
                 .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))),
         );
 
@@ -231,6 +235,7 @@ impl Workspace {
                 )
         };
         let some = self.batch.as_ref().is_some_and(|b| !b.is_empty());
+        let settings_cur = self.is_sidebar_cursor(&SidebarItem::Settings);
         // 设置; in 设置 the same row reads 返回 (`settings.rs`), so one spot toggles.
         let footer = div()
             .flex_none()
@@ -239,6 +244,9 @@ impl Workspace {
             .when(self.batch.is_none(), |d| {
                 d.child(footer_slot(
                     footer_row("ft-settings", "settings-gear", crate::settings::tr("设置", "Settings"))
+                        .relative()
+                        .when(settings_cur, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text())
+                            .child(div().absolute().inset_0().rounded(px(ROW_R)).border_1().border_color(Theme::primary())))
                         .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Settings, cx))),
                 ))
             })
@@ -669,6 +677,12 @@ impl Workspace {
         let batch = self.batch.as_ref().filter(|_| key == "doc");
         let checked = batch.is_some_and(|b| b.contains(&e.id));
         let blocked = batch.is_some_and(|b| !checked && b.len() >= BATCH_LIMIT);
+        let item = match key {
+            "pinned" => SidebarItem::Pinned(e.id.clone()),
+            "local" => SidebarItem::Local(e.id.clone()),
+            _ => SidebarItem::Doc(e.id.clone()),
+        };
+        let vim_cur = self.is_sidebar_cursor(&item);
         self.row_base(e, key, cx)
             .h(px(DOC_ROW_H))
             .w_full()
@@ -677,7 +691,9 @@ impl Workspace {
             .items_center()
             // In 我的文档 the selection pill and the hover wash are drawn under the row (`sidebar_drag.rs`).
             .when(checked || (selected && key != "doc"), |d| d.bg(Theme::sidebar_selected()))
-            .when(!selected && !checked && !drop_target && key != "doc", |d| d.hover(|s| s.bg(Theme::sidebar_hover())))
+            .when(vim_cur && !selected && !checked && !drop_target, |d| d.rounded(px(ROW_R)).bg(Theme::sidebar_hover()))
+            .when(!selected && !checked && !drop_target && key != "doc" && !vim_cur, |d| d.hover(|s| s.bg(Theme::sidebar_hover())))
+            .when(vim_cur, |d| d.child(div().absolute().inset_0().rounded(px(ROW_R)).border_1().border_color(Theme::primary())))
             .pl(px(6. + 18. * depth as f32))
             .when(batch.is_some(), |d| {
                 d.child(
@@ -911,5 +927,403 @@ impl Workspace {
             self.row_sub_bounds.set(None);
         }
         out
+    }
+
+    pub(crate) fn visible_sidebar_items(&self) -> Vec<SidebarItem> {
+        let mut items = vec![SidebarItem::Home];
+        if !self.folded[0] {
+            for e in self.entries.iter().filter(|e| e.meta.pinned) {
+                items.push(SidebarItem::Pinned(e.id.clone()));
+            }
+        }
+        if !self.folded[1] {
+            for r in self.drag_rows() {
+                items.push(SidebarItem::Doc(r.entry.id));
+            }
+        }
+        if !self.folded[2] {
+            for e in self.local_entries() {
+                items.push(SidebarItem::Local(e.id.clone()));
+            }
+        }
+        if self.batch.is_none() {
+            items.push(SidebarItem::Settings);
+        }
+        items
+    }
+
+    pub(crate) fn is_sidebar_cursor(&self, item: &SidebarItem) -> bool {
+        crate::settings::vim_mode() && self.pane_focus == PaneFocus::Sidebar && self.sidebar_cursor.as_ref() == Some(item)
+    }
+
+    fn default_sidebar_item(&self, items: &[SidebarItem]) -> Option<SidebarItem> {
+        let preferred = match self.view {
+            View::Home => Some(SidebarItem::Home),
+            View::Settings => Some(SidebarItem::Settings),
+            View::Doc => self.current.as_ref().map(|id| SidebarItem::Doc(id.clone())),
+            View::Folder => self.folder_current.as_ref().map(|id| SidebarItem::Doc(id.clone())),
+            View::Trash => None,
+        };
+        if let Some(p) = preferred && items.contains(&p) {
+            return Some(p);
+        }
+        items.first().cloned()
+    }
+
+    fn scroll_sidebar_to(&self, item: &SidebarItem) {
+        let vh = f32::from(self.list_scroll.bounds().size.height);
+        if vh <= 0. {
+            return;
+        }
+        let mut y = 0f32;
+        let pinned_len = self.entries.iter().filter(|e| e.meta.pinned).count();
+        let mut target_y: Option<f32> = None;
+        if pinned_len > 0 {
+            y += SECTION_H;
+            if !self.folded[0] {
+                for e in self.entries.iter().filter(|e| e.meta.pinned) {
+                    if matches!(item, SidebarItem::Pinned(id) if id == &e.id) {
+                        target_y = Some(y);
+                        break;
+                    }
+                    y += ROW_H;
+                }
+            }
+            y += GROUP_GAP - SECTION_TOP;
+        }
+        if target_y.is_none() {
+            y += SECTION_H;
+            if !self.folded[1] {
+                let rows = self.drag_rows();
+                for r in &rows {
+                    if matches!(item, SidebarItem::Doc(id) if id == &r.entry.id) {
+                        target_y = Some(y);
+                        break;
+                    }
+                    y += ROW_H + ROW_GAP;
+                }
+            }
+        }
+        if target_y.is_none() {
+            let local = self.local_entries();
+            if !local.is_empty() {
+                y += (GROUP_GAP - SECTION_TOP) + SECTION_H;
+                if !self.folded[2] {
+                    for e in local {
+                        if matches!(item, SidebarItem::Local(id) if id == &e.id) {
+                            target_y = Some(y);
+                            break;
+                        }
+                        y += ROW_H;
+                    }
+                }
+            }
+        }
+        if let Some(top) = target_y {
+            let cur_top = (-f32::from(self.list_scroll.offset().y)).max(0.);
+            if top < cur_top {
+                self.list_scroll.set_offset(point(px(0.), px(-top)));
+            } else if top + ROW_H > cur_top + vh {
+                self.list_scroll.set_offset(point(px(0.), px(-(top + ROW_H - vh))));
+            }
+        }
+    }
+
+    pub(crate) fn move_sidebar_cursor(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let items = self.visible_sidebar_items();
+        if items.is_empty() {
+            self.sidebar_cursor = None;
+            return;
+        }
+        let cur = self.sidebar_cursor.as_ref().and_then(|c| items.iter().position(|x| x == c))
+            .or_else(|| self.default_sidebar_item(&items).and_then(|d| items.iter().position(|x| x == &d)))
+            .unwrap_or(0);
+        let next = (cur as isize + delta).clamp(0, items.len() as isize - 1) as usize;
+        let target = items[next].clone();
+        self.scroll_sidebar_to(&target);
+        self.sidebar_cursor = Some(target);
+        self.sidebar_pending_g = false;
+        self.sidebar_pending_ctrl_w = false;
+        cx.notify();
+    }
+
+    fn set_sidebar_cursor_index(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let items = self.visible_sidebar_items();
+        if let Some(target) = items.get(ix).cloned() {
+            self.scroll_sidebar_to(&target);
+            self.sidebar_cursor = Some(target);
+            self.sidebar_pending_g = false;
+            self.sidebar_pending_ctrl_w = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn vim_focus_pane(&mut self, pane: fdl_core::editor::vim::VimPane, window: &mut Window, cx: &mut Context<Self>) {
+        use fdl_core::editor::vim::VimPane;
+        let target = match pane {
+            VimPane::Cycle => if self.pane_focus == PaneFocus::Sidebar { VimPane::Right } else { VimPane::Left },
+            other => other,
+        };
+        self.sidebar_pending_g = false;
+        self.sidebar_pending_ctrl_w = false;
+        self.non_doc_pending = None;
+        if let Some(ed) = &self.editor {
+            ed.update(cx, |e, cx| e.clear_vim_pending(cx));
+        }
+        match target {
+            VimPane::Left => {
+                if !self.sidebar_open {
+                    self.sidebar_open = true;
+                }
+                self.pane_focus = PaneFocus::Sidebar;
+                if !matches!(self.view, View::Settings | View::Trash) {
+                    let items = self.visible_sidebar_items();
+                    if self.sidebar_cursor.as_ref().is_none_or(|c| !items.contains(c)) {
+                        self.sidebar_cursor = self.default_sidebar_item(&items);
+                    }
+                    if let Some(c) = &self.sidebar_cursor {
+                        self.scroll_sidebar_to(c);
+                    }
+                }
+                window.focus(&self.focus);
+                if crate::settings::vim_auto_ime() {
+                    window.set_ime_active(false);
+                }
+                cx.notify();
+            }
+            VimPane::Right | VimPane::Cycle => {
+                self.pane_focus = PaneFocus::Main;
+                if self.view == View::Doc && let Some(ed) = &self.editor {
+                    ed.read(cx).focus(window);
+                } else {
+                    window.focus(&self.focus);
+                    if crate::settings::vim_mode() && crate::settings::vim_auto_ime() {
+                        window.set_ime_active(false);
+                    } else {
+                        window.set_ime_active(true);
+                    }
+                }
+                cx.notify();
+            }
+        }
+    }
+
+    fn activate_sidebar_item(&mut self, item: &SidebarItem, focus_main: bool, window: &mut Window, cx: &mut Context<Self>) {
+        match item {
+            SidebarItem::Home => {
+                self.show_view(View::Home, cx);
+                if focus_main { self.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx); }
+            }
+            SidebarItem::Settings => {
+                self.show_view(View::Settings, cx);
+                if focus_main { self.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx); }
+            }
+            SidebarItem::Pinned(id) | SidebarItem::Doc(id) | SidebarItem::Local(id) => {
+                let is_folder = self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some());
+                if is_folder {
+                    self.expanded.insert(id.clone());
+                    let _ = self.open_folder(id, window, cx);
+                    if focus_main { self.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx); }
+                    else { cx.notify(); }
+                } else {
+                    self.open(id, window, cx);
+                    if focus_main { self.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx); }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn handle_sidebar_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        use fdl_core::editor::vim::VimPane;
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        if self.non_doc_pending == Some('?') {
+            self.non_doc_pending = None;
+            cx.notify();
+            if ks.key == "escape" || (!ks.modifiers.control && ch == Some('?')) {
+                return true;
+            }
+        }
+        if self.sidebar_pending_ctrl_w {
+            self.sidebar_pending_ctrl_w = false;
+            match ks.key.as_str() {
+                "h" => { self.vim_focus_pane(VimPane::Left, window, cx); return true; }
+                "l" => { self.vim_focus_pane(VimPane::Right, window, cx); return true; }
+                "w" => { self.vim_focus_pane(VimPane::Cycle, window, cx); return true; }
+                _ => { cx.notify(); return true; }
+            }
+        }
+        if let Some(pending) = self.non_doc_pending.take() {
+            match pending {
+                '[' if !ks.modifiers.control && ks.key == "b" => {
+                    self.cycle_buffer(false, window, cx);
+                    return true;
+                }
+                ']' if !ks.modifiers.control && ks.key == "b" => {
+                    self.cycle_buffer(true, window, cx);
+                    return true;
+                }
+                ' ' if !ks.modifiers.control => {
+                    let kc = ks.key_char.as_deref().and_then(|s| s.chars().next());
+                    if matches!(kc, Some('b' | ' ')) || matches!(ks.key.as_str(), "b" | "space") {
+                        self.open_search(window, cx);
+                    } else if matches!(kc, Some('e')) || ks.key == "e" {
+                        self.vim_focus_pane(VimPane::Right, window, cx);
+                    } else if kc == Some('h') || (ks.key == "h" && !ks.modifiers.shift) {
+                        self.show_view(crate::app::View::Home, cx);
+                        self.vim_focus_pane(VimPane::Right, window, cx);
+                    } else if (kc == Some('H') || (ks.key == "h" && ks.modifiers.shift)) && self.current.is_some() {
+                        if let Some(id) = self.current.clone() { self.open_history(&id, window, cx); }
+                    } else if matches!(kc, Some('?' | '/')) || matches!(ks.key.as_str(), "?" | "/") {
+                        self.shortcuts = !self.shortcuts;
+                        cx.notify();
+                    } else {
+                        cx.notify();
+                    }
+                    return true;
+                }
+                _ => { self.non_doc_pending = Some(pending); }
+            }
+        }
+        if ks.modifiers.control {
+            return match ks.key.as_str() {
+                "w" => { self.sidebar_pending_ctrl_w = true; cx.notify(); true }
+                "o" => { self.jump_doc_history(false, window, cx); true }
+                "i" => { self.jump_doc_history(true, window, cx); true }
+                "[" => { self.vim_focus_pane(VimPane::Right, window, cx); true }
+                _ => false,
+            };
+        }
+        if matches!(ch, Some('[' | ']' | ' ' | '?')) || ks.key == "space" {
+            self.sidebar_pending_g = false;
+            self.non_doc_pending = Some(ch.unwrap_or(' '));
+            cx.notify();
+            return true;
+        }
+        if matches!(self.view, View::Settings | View::Trash) {
+            return self.handle_settings_sidebar_vim_key(ev, window, cx);
+        }
+        if ks.key == "escape" || ks.key == "q" || ks.key == "tab" {
+            self.vim_focus_pane(VimPane::Right, window, cx);
+            return true;
+        }
+        if ks.key == "g" && !ks.modifiers.shift {
+            if std::mem::take(&mut self.sidebar_pending_g) {
+                self.set_sidebar_cursor_index(0, cx);
+            } else {
+                self.sidebar_pending_g = true;
+                cx.notify();
+            }
+            return true;
+        }
+        self.sidebar_pending_g = false;
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            let n = self.visible_sidebar_items().len();
+            if n > 0 { self.set_sidebar_cursor_index(n - 1, cx); }
+            return true;
+        }
+        if ks.key == "j" || ks.key == "down" {
+            self.move_sidebar_cursor(1, cx);
+            return true;
+        }
+        if ks.key == "k" || ks.key == "up" {
+            self.move_sidebar_cursor(-1, cx);
+            return true;
+        }
+        let items = self.visible_sidebar_items();
+        let Some(cur_item) = self.sidebar_cursor.clone().or_else(|| self.default_sidebar_item(&items)) else { return false };
+        if ks.key == "enter" {
+            self.activate_sidebar_item(&cur_item, true, window, cx);
+            return true;
+        }
+        if ks.key == "l" || ks.key == "right" {
+            if let SidebarItem::Doc(id) = &cur_item && self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some()) {
+                if !self.expanded.contains(id) {
+                    self.expanded.insert(id.clone());
+                    cx.notify();
+                } else {
+                    self.move_sidebar_cursor(1, cx);
+                }
+            } else {
+                self.activate_sidebar_item(&cur_item, true, window, cx);
+            }
+            return true;
+        }
+        if ks.key == "h" || ks.key == "left" {
+            if let SidebarItem::Doc(id) = &cur_item {
+                let is_folder = self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some());
+                if is_folder && self.expanded.contains(id) {
+                    self.expanded.remove(id);
+                    cx.notify();
+                    return true;
+                }
+                if let Some(parent) = self.entries.iter().find(|e| &e.id == id).and_then(|e| e.meta.parent.clone()) {
+                    let target = SidebarItem::Doc(parent);
+                    if items.contains(&target) {
+                        self.scroll_sidebar_to(&target);
+                        self.sidebar_cursor = Some(target);
+                        cx.notify();
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
+        let item_id = match &cur_item {
+            SidebarItem::Pinned(id) | SidebarItem::Doc(id) | SidebarItem::Local(id) => Some(id.clone()),
+            SidebarItem::Home | SidebarItem::Settings => None,
+        };
+        let target_parent = match &cur_item {
+            SidebarItem::Doc(id) => {
+                if self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some()) {
+                    Some(id.clone())
+                } else {
+                    self.entries.iter().find(|e| &e.id == id).and_then(|e| e.meta.parent.clone())
+                }
+            }
+            _ => None,
+        };
+        match ch {
+            Some('r') => {
+                if let Some(id) = item_id { self.start_rename(&id, window, cx); }
+                true
+            }
+            Some('a' | 'n') => {
+                if let Some(p) = target_parent {
+                    self.new_child(&p, window, cx);
+                } else {
+                    self.create_doc(crate::settings::quick_new_markdown(), None, window, cx);
+                }
+                true
+            }
+            Some('A' | 'N') => {
+                self.new_folder(target_parent, window, cx);
+                true
+            }
+            Some('d' | 'x') => {
+                if let Some(id) = item_id && !matches!(cur_item, SidebarItem::Local(_)) {
+                    self.ask_delete(&id, cx);
+                }
+                true
+            }
+            Some('p') => {
+                if let Some(id) = item_id && !matches!(cur_item, SidebarItem::Local(_)) {
+                    self.toggle_pin(&id, cx);
+                }
+                true
+            }
+            Some('s') => {
+                if let Some(id) = item_id && !matches!(cur_item, SidebarItem::Local(_))
+                    && self.entries.iter().any(|e| e.id == id && e.meta.folder.is_none())
+                {
+                    self.toggle_star(&id, cx);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 }

@@ -265,8 +265,233 @@ impl Editor {
 
     fn set_cat_pinned(&mut self, pinned: bool, cx: &mut Context<Self>) {
         self.cat_pinned = pinned;
+        if !pinned {
+            self.cat_focused = false;
+        }
         cx.emit(EditorEvent::Catalogue(pinned));
         cx.notify();
+    }
+
+    pub(super) fn visible_cat_rows(&self) -> Vec<(CatEntry, bool)> {
+        let entries = self.cat_entries.clone();
+        let mut rows: Vec<(CatEntry, bool)> = vec![];
+        let mut hide_below: Option<usize> = None;
+        for (i, e) in entries.iter().enumerate() {
+            if let Some(l) = hide_below {
+                if e.level > l {
+                    continue;
+                }
+                hide_below = None;
+            }
+            let parent = e.id != TITLE && entries.get(i + 1).is_some_and(|n| n.level > e.level);
+            if parent && self.cat_collapsed.contains(&e.id) {
+                hide_below = Some(e.level);
+            }
+            rows.push((e.clone(), parent));
+        }
+        rows
+    }
+
+    pub(super) fn toggle_catalogue_focus(&mut self, cx: &mut Context<Self>) {
+        if self.cat_entries.is_empty() {
+            return;
+        }
+        if !self.cat_pinned {
+            self.set_cat_pinned(true, cx);
+            self.cat_focused = true;
+        } else {
+            self.cat_focused = !self.cat_focused;
+        }
+        if self.cat_focused {
+            self.vim.clear_pending();
+            let rows = self.visible_cat_rows();
+            self.cat_cursor = self
+                .cat_active
+                .filter(|id| rows.iter().any(|(e, _)| e.id == *id))
+                .or_else(|| rows.first().map(|(e, _)| e.id));
+            if let Some(id) = self.cat_cursor
+                && let Some(ix) = rows.iter().position(|(e, _)| e.id == id)
+            {
+                self.cat_scroll.scroll_to_item(ix, ScrollStrategy::Top);
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn handle_catalogue_vim_key(&mut self, vk: &fdl_core::editor::vim::VimKey, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        use fdl_core::editor::vim::{PendingPrefix, VimPane};
+        if self.vim.pending_prefix == Some(PendingPrefix::Window) {
+            self.vim.pending_prefix = None;
+            let k = vk.ch.or_else(|| vk.key.chars().next().filter(|_| vk.key.len() == 1));
+            match k {
+                Some('h') => {
+                    self.cat_focused = false;
+                    cx.emit(EditorEvent::VimFocusPane(VimPane::Left));
+                    cx.notify();
+                }
+                Some('l' | 'w') => {
+                    self.cat_focused = false;
+                    cx.notify();
+                }
+                _ => cx.notify(),
+            }
+            return true;
+        }
+        if self.vim.pending_prefix == Some(PendingPrefix::Space) {
+            self.vim.pending_prefix = None;
+            let k = vk.ch.or_else(|| vk.key.chars().next().filter(|_| vk.key.len() == 1));
+            match k {
+                Some('o') => {
+                    self.cat_focused = false;
+                    cx.notify();
+                }
+                Some('b' | ' ') => {
+                    self.cat_focused = false;
+                    cx.emit(EditorEvent::Search(String::new()));
+                    cx.notify();
+                }
+                Some('e') => {
+                    self.cat_focused = false;
+                    cx.emit(EditorEvent::VimFocusPane(VimPane::Left));
+                    cx.notify();
+                }
+                Some('h') => {
+                    self.cat_focused = false;
+                    cx.emit(EditorEvent::VimOpenHome);
+                    cx.notify();
+                }
+                Some('H') => {
+                    self.cat_focused = false;
+                    cx.emit(EditorEvent::VimOpenHistory);
+                    cx.notify();
+                }
+                Some('?' | '/') => {
+                    cx.emit(EditorEvent::VimToggleShortcuts);
+                    cx.notify();
+                }
+                _ => cx.notify(),
+            }
+            return true;
+        }
+        if vk.ctrl {
+            return match vk.key.as_str() {
+                "w" => {
+                    self.vim.pending_prefix = Some(PendingPrefix::Window);
+                    cx.notify();
+                    true
+                }
+                "[" => {
+                    self.cat_focused = false;
+                    self.vim.clear_pending();
+                    cx.notify();
+                    true
+                }
+                "o" => {
+                    cx.emit(EditorEvent::VimJumpHistory { forward: false });
+                    true
+                }
+                "i" => {
+                    cx.emit(EditorEvent::VimJumpHistory { forward: true });
+                    true
+                }
+                _ => false,
+            };
+        }
+        if vk.key == "space" || vk.ch == Some(' ') {
+            self.vim.pending_prefix = Some(PendingPrefix::Space);
+            cx.notify();
+            return true;
+        }
+        if vk.key == "escape" || vk.ch == Some('q') {
+            self.cat_focused = false;
+            self.vim.clear_pending();
+            cx.notify();
+            return true;
+        }
+        let rows = self.visible_cat_rows();
+        if rows.is_empty() {
+            self.cat_focused = false;
+            return true;
+        }
+        let cur_ix = self.cat_cursor.and_then(|id| rows.iter().position(|(e, _)| e.id == id)).unwrap_or(0);
+        if self.vim.pending_prefix == Some(PendingPrefix::G) {
+            self.vim.pending_prefix = None;
+            if vk.ch == Some('g') {
+                let id = rows[0].0.id;
+                self.cat_cursor = Some(id);
+                self.cat_scroll.scroll_to_item(0, ScrollStrategy::Top);
+                self.jump_to_heading(id, cx);
+            } else {
+                cx.notify();
+            }
+            return true;
+        }
+        if vk.ch == Some('g') && !vk.shift {
+            self.vim.pending_prefix = Some(PendingPrefix::G);
+            cx.notify();
+            return true;
+        }
+        if vk.ch == Some('G') {
+            let last = rows.len() - 1;
+            let id = rows[last].0.id;
+            self.cat_cursor = Some(id);
+            self.cat_scroll.scroll_to_item(last, ScrollStrategy::Top);
+            self.jump_to_heading(id, cx);
+            return true;
+        }
+        if matches!(vk.ch, Some('j')) || vk.key == "down" {
+            let next = (cur_ix + 1).min(rows.len() - 1);
+            let id = rows[next].0.id;
+            self.cat_cursor = Some(id);
+            self.cat_scroll.scroll_to_item(next, ScrollStrategy::Top);
+            self.jump_to_heading(id, cx);
+            return true;
+        }
+        if matches!(vk.ch, Some('k')) || vk.key == "up" {
+            let next = cur_ix.saturating_sub(1);
+            let id = rows[next].0.id;
+            self.cat_cursor = Some(id);
+            self.cat_scroll.scroll_to_item(next, ScrollStrategy::Top);
+            self.jump_to_heading(id, cx);
+            return true;
+        }
+        let (cur_e, is_parent) = &rows[cur_ix];
+        if matches!(vk.ch, Some('h')) || vk.key == "left" {
+            if *is_parent && !self.cat_collapsed.contains(&cur_e.id) {
+                self.cat_collapsed.insert(cur_e.id);
+                cx.notify();
+            } else if let Some(parent_ix) = rows[..cur_ix].iter().rposition(|(e, _)| e.level < cur_e.level) {
+                let id = rows[parent_ix].0.id;
+                self.cat_cursor = Some(id);
+                self.cat_scroll.scroll_to_item(parent_ix, ScrollStrategy::Top);
+                self.jump_to_heading(id, cx);
+            }
+            return true;
+        }
+        if matches!(vk.ch, Some('l')) || vk.key == "right" {
+            if *is_parent && self.cat_collapsed.contains(&cur_e.id) {
+                self.cat_collapsed.remove(&cur_e.id);
+                cx.notify();
+                return true;
+            }
+            let id = cur_e.id;
+            self.jump_to_heading(id, cx);
+            self.core.sel = super::core::Selection::caret(super::core::Pos::new(id, 0));
+            self.vim.clamp_normal_caret(&mut self.core);
+            self.cat_focused = false;
+            self.changed(window, cx);
+            return true;
+        }
+        if vk.key == "enter" {
+            let id = cur_e.id;
+            self.jump_to_heading(id, cx);
+            self.core.sel = super::core::Selection::caret(super::core::Pos::new(id, 0));
+            self.vim.clamp_normal_caret(&mut self.core);
+            self.cat_focused = false;
+            self.changed(window, cx);
+            return true;
+        }
+        true
     }
 
     fn jump_to_heading(&mut self, id: BlockId, cx: &mut Context<Self>) {
@@ -346,22 +571,7 @@ impl Editor {
 
     fn catalogue_list(&mut self, width: f32, max_h: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         // Catalogue-only folding: hide everything deeper below a folded row.
-        let entries = self.cat_entries.clone();
-        let mut rows: Vec<(CatEntry, bool)> = vec![];
-        let mut hide_below: Option<usize> = None;
-        for (i, e) in entries.iter().enumerate() {
-            if let Some(l) = hide_below {
-                if e.level > l {
-                    continue;
-                }
-                hide_below = None;
-            }
-            let parent = e.id != TITLE && entries.get(i + 1).is_some_and(|n| n.level > e.level);
-            if parent && self.cat_collapsed.contains(&e.id) {
-                hide_below = Some(e.level);
-            }
-            rows.push((e.clone(), parent));
-        }
+        let rows = self.visible_cat_rows();
         let active = self.cat_active;
         if active != self.cat_shown_active {
             self.cat_shown_active = active;
@@ -369,10 +579,12 @@ impl Editor {
                 self.cat_scroll.scroll_to_item(ix, ScrollStrategy::Top);
             }
         }
+        let focused_cur = self.cat_focused.then_some(self.cat_cursor).flatten();
         let collapsed = self.cat_collapsed.clone();
         let text_w = width - 11.;
         let mut style = window.text_style();
         style.font_family = theme::UI_FONT.into();
+        style.font_fallbacks = Some(crate::theme::font_fallbacks(false));
         let entity = cx.entity();
         let n = rows.len();
         let rows = Rc::new(rows);
@@ -389,7 +601,8 @@ impl Editor {
                     let full_w = window.text_system().shape_line(e.text.clone(), px(size), &runs, None).width;
                     // The outline: quiet secondary rows, the current one in full text colour.
                     let on = Some(e.id) == active;
-                    let color = if on { Theme::text() } else { Theme::text_caption() };
+                    let vim_cur = focused_cur == Some(e.id);
+                    let color = if on || vim_cur { Theme::text() } else { Theme::text_caption() };
                     let (id, ent, ent2) = (e.id, entity.clone(), entity.clone());
                     let group = SharedString::from(format!("cat-row-{ix}"));
                     let row = div()
@@ -399,6 +612,9 @@ impl Editor {
                         .h(px(ROW_H))
                         .pb(px(8.))
                         .pl(px(indent))
+                        .pr(px(4.))
+                        .rounded(px(4.))
+                        .when(vim_cur, |d| d.bg(Theme::fill_hover()).border_1().border_color(Theme::primary()))
                         .flex()
                         .cursor_pointer()
                         .child(

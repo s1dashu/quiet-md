@@ -13,7 +13,7 @@ fn animate_folding() -> bool { crate::settings::motion_high() }
 const INDENT: f32 = 18.;
 
 #[derive(Clone)]
-struct Row { entry: Entry, depth: usize }
+pub(crate) struct Row { pub(crate) entry: Entry, depth: usize }
 
 /// Seconds a dragged row must rest on a collapsed folder before it opens.
 const DWELL: f32 = 0.45;
@@ -209,7 +209,7 @@ fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
 }
 
 impl Workspace {
-    fn drag_rows(&self) -> Vec<Row> {
+    pub(crate) fn drag_rows(&self) -> Vec<Row> {
         crate::tree::Tree::new(&self.entries).rows(|id| self.expanded.contains(id)).into_iter()
             .filter(|(e, _)| self.folder_drag.active.as_ref().is_none_or(|d| !d.started || !d.excluded.contains(&e.id)))
             .map(|(e, depth)| Row { entry: e.clone(), depth }).collect()

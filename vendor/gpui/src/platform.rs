@@ -4,13 +4,16 @@ mod keystroke;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 mod linux;
+#[cfg(all(
+    any(target_os = "linux", target_os = "freebsd"),
+    any(feature = "x11", feature = "wayland")
+))]
+pub use linux::{linux_shaped_run_families, test_text_system};
 
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
 pub use mac::{check_fallback_glyphs, test_text_system};
-#[cfg(all(any(target_os = "linux", target_os = "freebsd"), any(feature = "wayland", feature = "x11")))]
-pub use linux::test_text_system;
 
 #[cfg(any(
     all(
@@ -475,6 +478,8 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn capslock(&self) -> Capslock;
     fn set_input_handler(&mut self, input_handler: PlatformInputHandler);
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler>;
+    /// quiet.md: pause or resume OS IME composition for modal editing.
+    fn set_ime_active(&self, _active: bool) {}
     fn prompt(
         &self,
         level: PromptLevel,

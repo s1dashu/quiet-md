@@ -9,7 +9,7 @@
   --theme-name: "Craft";
   --theme-name-en: "Craft";
   --theme-author: "quiet.md";
-  --theme-description: "Craft for macOS 的文档样式：SF Pro 15 / 22，虚点分隔线，蓝色强调。";
+  --theme-description: "Craft for macOS 的文档样式：15 / 24 清晰字阶，虚点分隔线，蓝色强调。";
   /* 块的画法：craft 或 feishu */
   --theme-base: craft;
 
@@ -131,7 +131,7 @@
   color: #1f2225;
   font-family: system-ui;
   font-size: 15px;
-  line-height: 22px;
+  line-height: 24px;
   max-width: 820px;
   caret-color: #3a85f7;
 }
@@ -141,55 +141,60 @@
 }
 
 p {
-  margin-bottom: 13px;
+  margin-bottom: 12px;
 }
 
 .title {
   font-family: system-ui;
   font-size: 34px;
-  line-height: 55.25px;
+  line-height: 42px;
   font-weight: 700;
-  color: inherit;
+  letter-spacing: -0.85px;
+  color: #141517;
 }
 
 h1 {
   font-family: system-ui;
-  font-size: 21px;
-  line-height: 27px;
+  font-size: 26px;
+  line-height: 33px;
   font-weight: 700;
-  color: inherit;
-  margin-top: 48px;
-  margin-bottom: 16px;
+  letter-spacing: -0.52px;
+  color: #141517;
+  margin-top: 36px;
+  margin-bottom: 12px;
 }
 
 h2 {
   font-family: system-ui;
-  font-size: 19px;
-  line-height: 25px;
+  font-size: 21px;
+  line-height: 28px;
   font-weight: 700;
+  letter-spacing: -0.32px;
   color: inherit;
-  margin-top: 36px;
-  margin-bottom: 16px;
+  margin-top: 28px;
+  margin-bottom: 10px;
 }
 
 h3 {
   font-family: system-ui;
   font-size: 18px;
-  line-height: 24px;
+  line-height: 25px;
   font-weight: 600;
+  letter-spacing: -0.18px;
   color: inherit;
-  margin-top: 28px;
-  margin-bottom: 12px;
+  margin-top: 22px;
+  margin-bottom: 8px;
 }
 
 h4 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 25px;
+  font-size: 16.5px;
+  line-height: 24px;
   font-weight: 600;
+  letter-spacing: 0px;
   color: inherit;
-  margin-top: 16px;
-  margin-bottom: 16px;
+  margin-top: 18px;
+  margin-bottom: 6px;
 }
 
 h5 {
@@ -197,49 +202,54 @@ h5 {
   font-size: 15px;
   line-height: 22px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 13px;
-  margin-bottom: 13px;
+  letter-spacing: 0.22px;
+  color: #3f4143;
+  margin-top: 14px;
+  margin-bottom: 5px;
 }
 
 h6 {
   font-family: system-ui;
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 14.5px;
+  line-height: 21px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 13px;
-  margin-bottom: 13px;
+  letter-spacing: 0.29px;
+  color: #5d6064;
+  margin-top: 12px;
+  margin-bottom: 4px;
 }
 
 h7 {
   font-family: system-ui;
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 14.5px;
+  line-height: 21px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 13px;
-  margin-bottom: 13px;
+  letter-spacing: 0.29px;
+  color: #5d6064;
+  margin-top: 12px;
+  margin-bottom: 4px;
 }
 
 h8 {
   font-family: system-ui;
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 14.5px;
+  line-height: 21px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 13px;
-  margin-bottom: 13px;
+  letter-spacing: 0.29px;
+  color: #5d6064;
+  margin-top: 12px;
+  margin-bottom: 4px;
 }
 
 h9 {
   font-family: system-ui;
-  font-size: 15px;
-  line-height: 22px;
+  font-size: 14.5px;
+  line-height: 21px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 13px;
-  margin-bottom: 13px;
+  letter-spacing: 0.29px;
+  color: #5d6064;
+  margin-top: 12px;
+  margin-bottom: 4px;
 }
 
 strong {
@@ -258,6 +268,8 @@ a:hover {
 }
 
 code {
+  font-family: ui-monospace;
+  font-size: 13px;
   color: inherit;
   background-color: #f8f8f8;
   border-color: #e2e3e3;
@@ -285,7 +297,7 @@ blockquote {
   border-left-width: 4px;
   border-left-color: #1f2225d1;
   padding-left: 16px;
-  color: inherit;
+  color: #3f4143;
   font-style: normal;
 }
 

@@ -47,7 +47,7 @@ pub fn toast_el(kind: ToastKind, msg: &SharedString, t0: std::time::Instant, win
         .border_1()
         .border_color(Theme::line_border())
         .shadow(theme::shadow_panel())
-        .font_family(theme::UI_FONT)
+        .font(theme::font_with_fallbacks(theme::UI_FONT, false))
         .text_size(px(13.))
         .line_height(px(20.))
         .text_color(Theme::text())
@@ -86,7 +86,7 @@ pub fn popover() -> Div {
         .border_color(Theme::line_border())
         .rounded(px(MENU_RADIUS))
         .shadow(theme::shadow_menu())
-        .font_family(theme::UI_FONT)
+        .font(theme::font_with_fallbacks(theme::UI_FONT, false))
         .text_color(Theme::text())
 }
 
@@ -127,7 +127,7 @@ pub fn scrim() -> Hsla {
 
 /// The modal dialog: white, radius 16, deep soft drop.
 pub fn dialog(id: &'static str) -> Stateful<Div> {
-    div().id(id).occlude().rounded(px(16.)).bg(crate::theme::raised(Theme::bg_body())).shadow(theme::shadow_dialog()).font_family(theme::UI_FONT).text_color(Theme::text())
+    div().id(id).occlude().rounded(px(16.)).bg(crate::theme::raised(Theme::bg_body())).shadow(theme::shadow_dialog()).font(theme::font_with_fallbacks(theme::UI_FONT, false)).text_color(Theme::text())
 }
 
 /// A busy mark for a button: three short bars rising and falling in turn,
@@ -284,7 +284,7 @@ impl Render for Tooltip {
             .text_color(gpui::white())
             .text_size(px(12.))
             .line_height(px(TIP_LINE))
-            .font_family(theme::UI_FONT)
+            .font(theme::font_with_fallbacks(theme::UI_FONT, false))
             .whitespace_nowrap()
             .flex()
             .flex_col()
@@ -296,6 +296,7 @@ impl Render for Tooltip {
         // side unless it doesn't fit, and kept inside the window.
         let mut style = window.text_style();
         style.font_family = theme::UI_FONT.into();
+        style.font_fallbacks = Some(theme::font_fallbacks(false));
         let text_w = lines
             .iter()
             .map(|l| {
@@ -558,7 +559,10 @@ pub fn is_cjk_punct(ch: char) -> bool {
 /// Font for full-width punctuation. When CoreText falls back from the
 /// system UI font it squeezes these (an opening paren after a CJK
 /// character loses ~5px). Browsers draw them full width with PingFang SC.
+#[cfg(not(target_os = "linux"))]
 pub const CJK_PUNCT_FONT: &str = "PingFang SC";
+#[cfg(target_os = "linux")]
+pub const CJK_PUNCT_FONT: &str = "TsangerJinKai05";
 
 /// Single-line UI text that keeps full-width punctuation at full width,
 /// with an optional colored range (search hits). Inherits the parent text

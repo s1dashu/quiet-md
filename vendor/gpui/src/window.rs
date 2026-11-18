@@ -879,6 +879,8 @@ pub struct Window {
     pub(crate) pending_input_observers: SubscriberSet<(), AnyObserver>,
     prompt: Option<RenderablePromptHandle>,
     pub(crate) client_inset: Option<Pixels>,
+    // quiet.md: tracks whether OS IME composition should be active for this window.
+    ime_active: Cell<bool>,
     #[cfg(any(feature = "inspector", debug_assertions))]
     inspector: Option<Entity<Inspector>>,
 }
@@ -1266,6 +1268,7 @@ impl Window {
             pending_input_observers: SubscriberSet::new(),
             prompt: None,
             client_inset: None,
+            ime_active: Cell::new(true),
             image_cache_stack: Vec::new(),
             #[cfg(any(feature = "inspector", debug_assertions))]
             inspector: None,
@@ -4025,6 +4028,13 @@ impl Window {
     /// Determine whether a potential multi-stroke key binding is in progress on this window.
     pub fn has_pending_keystrokes(&self) -> bool {
         self.pending_input.is_some()
+    }
+
+    /// quiet.md: pause or resume OS IME composition when entering/leaving modal non-insert modes.
+    pub fn set_ime_active(&self, active: bool) {
+        if self.ime_active.replace(active) != active {
+            self.platform_window.set_ime_active(active);
+        }
     }
 
     pub(crate) fn clear_pending_keystrokes(&mut self) {

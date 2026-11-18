@@ -371,7 +371,7 @@ impl Workspace {
         cx.notify();
     }
 
-    fn reset_all_shortcuts(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn reset_all_shortcuts(&mut self, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
         let mut custom: BTreeMap<String, String> = cx.global::<Shortcuts>().custom.iter().filter(|(k, _)| is_global(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
         // Keep the separately configured global key usable after resetting app keys.
@@ -399,7 +399,7 @@ impl Workspace {
         cx.notify();
     }
 
-    fn clear_shortcut(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn clear_shortcut(&mut self, id: &str, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
         self.shortcut_error = change(id, Some(String::new()), cx).err().map(|e| (id.to_string(), e.to_string()));
         cx.notify();
@@ -451,10 +451,43 @@ impl Workspace {
             .into_any_element()
     }
 
+    pub(crate) fn visible_shortcut_ids(&self, cx: &App) -> Vec<String> {
+        let q = self.settings_filter.read(cx).text.trim().to_lowercase();
+        let mut out = vec![];
+        if cfg!(target_os = "macos") {
+            let matches = |zh: &str, en: &str, key: &str| q.is_empty() || [zh.to_lowercase(), en.to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q));
+            let global = global_key();
+            let last = key_of(cx, LAST_ID);
+            if matches("快速新建笔记", "Quick note", &pretty(&global)) || matches("打开上次使用的文档", "Open last used document", &pretty(&last)) {
+                out.push("global".into());
+                out.push(LAST_ID.into());
+            }
+        }
+        let mut groups: Vec<Vec<String>> = (0..GROUPS.len()).map(|_| vec![]).collect();
+        for (id, _, key) in rows(cx).into_iter().filter(|(id, _, _)| !is_global(id)) {
+            let Some((g, zh, en)) = info(&id) else { continue };
+            if !q.is_empty() && ![zh.to_lowercase(), en.to_lowercase(), pretty(&key).to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q)) { continue; }
+            groups[g].push(id);
+        }
+        for g in groups {
+            out.extend(g);
+        }
+        out
+    }
+
     pub(crate) fn shortcut_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let q = self.settings_filter.read(cx).text.trim().to_lowercase();
         let customized = cx.try_global::<Shortcuts>().map(|s| s.custom.keys().filter(|k| !is_global(k)).cloned().collect::<Vec<_>>()).unwrap_or_default();
-        let mut groups: Vec<Vec<AnyElement>> = (0..GROUPS.len()).map(|_| vec![]).collect();
+        let vim_active = crate::settings::vim_mode()
+            && self.pane_focus == crate::app::PaneFocus::Main
+            && self.view == crate::app::View::Settings
+            && self.settings_page == crate::settings::Page::Shortcuts;
+        let matches = |zh: &str, en: &str, key: &str| q.is_empty() || [zh.to_lowercase(), en.to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q));
+        let global = global_key();
+        let last = key_of(cx, LAST_ID);
+        let show_global = cfg!(target_os = "macos") && (matches("快速新建笔记", "Quick note", &pretty(&global)) || matches("打开上次使用的文档", "Open last used document", &pretty(&last)));
+        let mut row_ix = if show_global { 2usize } else { 0usize };
+        let mut groups: Vec<Vec<(usize, AnyElement)>> = (0..GROUPS.len()).map(|_| vec![]).collect();
         for (id, title, key) in rows(cx).into_iter().filter(|(id, _, _)| !is_global(id)) {
             let Some((g, zh, en)) = info(&id) else { continue };
             if !q.is_empty() && ![zh.to_lowercase(), en.to_lowercase(), pretty(&key).to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q)) { continue; }
@@ -463,7 +496,7 @@ impl Workspace {
             let is_custom = customized.contains(&id);
             let (rec, reset, clear) = (id.clone(), id.clone(), id.clone());
             let shown_key = if recording { self.shortcut_strokes.join(" ") } else { key.clone() };
-            groups[g].push(div().group("shortcut-row").w_full().px(px(16.)).py(px(7.)).flex().flex_col().gap(px(2.))
+            let el = div().group("shortcut-row").w_full().px(px(16.)).py(px(7.)).flex().flex_col().gap(px(2.))
                 .child(div().w_full().min_h(px(28.)).flex().items_center().gap(px(12.))
                     .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(title))
                     .when(is_custom && !recording, |d| d.child(div().id(SharedString::from(format!("reset-{reset}"))).h(px(26.)).px(px(8.)).flex().items_center().rounded(px(7.)).cursor_pointer()
@@ -474,31 +507,37 @@ impl Workspace {
                         .on_click(cx.listener(move |w, _, window, cx| w.start_recording(&rec, window, cx)))))
                 .when(recording, |d| d.child(self.shortcut_recorder(cx)))
                 .children(error.map(|e| div().text_size(px(12.)).line_height(px(17.)).text_color(Theme::danger()).child(e)))
-                .into_any_element());
+                .into_any_element();
+            groups[g].push((0, el));
+        }
+        for grp in &mut groups {
+            for (slot, _) in grp.iter_mut() {
+                *slot = row_ix;
+                row_ix += 1;
+            }
         }
         let empty = groups.iter().all(|g| g.is_empty());
         let general_error = self.shortcut_error.as_ref().filter(|(id, _)| id.is_empty()).map(|(_, e)| e.clone());
         // 快速笔记 from anywhere: the one system-wide shortcut, which can be off.
         let on = crate::settings::prefs().quick_hotkey;
-        let global = global_key();
         let global_rec = self.shortcut_recording.as_deref() == Some("global");
-        let last = key_of(cx, LAST_ID);
         let last_rec = self.shortcut_recording.as_deref() == Some(LAST_ID);
         let global_err = self.shortcut_error.as_ref().filter(|(id, _)| is_global(id)).map(|(_, e)| e.clone())
             .or_else(|| on.then(crate::quick_note::hotkey_error).flatten());
-        let matches = |zh: &str, en: &str, key: &str| q.is_empty() || [zh.to_lowercase(), en.to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q));
-        let show_global = cfg!(target_os = "macos") && (matches("快速新建笔记", "Quick note", &pretty(&global)) || matches("打开上次使用的文档", "Open last used document", &pretty(&last)));
         let empty = empty && !show_global;
+        let sel = vim_active.then_some(self.settings_row_cursor);
         let global_group = div().w_full().flex().flex_col().gap(px(8.))
             .child(crate::settings::group(Some(tr("全局", "Global")), vec![
-                div().w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
+                div().relative().w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
+                    .when(sel == Some(0), |d| d.bg(Theme::fill_hover()).child(div().absolute().inset_0().border_1().border_color(Theme::primary())))
                     .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(tr("快速新建笔记", "Quick note")))
                     .when(on && global != GLOBAL_DEFAULT && !global_rec, |d| d.child(crate::settings::link_button("global-reset", tr("恢复默认", "Reset")).on_click(cx.listener(|w, _, _, cx| w.reset_shortcut("global", cx)))))
                     .when(on, |d| d.child(crate::settings::keycap("global-key", &if global_rec { self.shortcut_strokes.join(" ") } else { global.clone() }, global_rec).on_click(cx.listener(|w, _, window, cx| w.start_recording("global", window, cx)))))
                     .child(crate::settings::switch("pref-hotkey", on).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.quick_hotkey = !p.quick_hotkey, cx))))
                     .into_any_element(),
                 // Off with the switch above, like 快速新建笔记; 移除 turns just this one off.
-                div().group("shortcut-row").w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
+                div().group("shortcut-row").relative().w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
+                    .when(sel == Some(1), |d| d.bg(Theme::fill_hover()).child(div().absolute().inset_0().border_1().border_color(Theme::primary())))
                     .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(tr("打开上次使用的文档", "Open last used document")))
                     .when(on && last != LAST_DEFAULT && !last_rec, |d| d.child(crate::settings::link_button("global-last-reset", tr("恢复默认", "Reset")).on_click(cx.listener(|w, _, _, cx| w.reset_shortcut(LAST_ID, cx)))))
                     .when(on && !last_rec && !last.is_empty(), |d| d.child(crate::settings::link_button("global-last-clear", tr("移除", "Remove")).invisible().group_hover("shortcut-row", |s| s.visible()).on_click(cx.listener(|w, _, _, cx| w.clear_shortcut(LAST_ID, cx)))))
@@ -516,7 +555,12 @@ impl Workspace {
                 div().w_full().flex().flex_col().gap(px(8.))
                     .child(div().px(px(4.)).text_size(px(13.)).line_height(px(18.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section()).child(tr(GROUPS[g].0, GROUPS[g].1)))
                     .child(div().w_full().flex().flex_col().rounded(px(12.)).border_1().border_color(Theme::line_border()).overflow_hidden()
-                        .children(rows.into_iter().enumerate().map(move |(i, r)| div().w_full().flex().flex_col().when(i + 1 < n, |d| d.border_b_1().border_color(crate::ui::list_line())).child(r))))
+                        .children(rows.into_iter().enumerate().map(move |(i, (rix, r))| {
+                            div().relative().w_full().flex().flex_col()
+                                .when(i + 1 < n, |d| d.border_b_1().border_color(crate::ui::list_line()))
+                                .when(sel == Some(rix), |d| d.bg(Theme::fill_hover()).child(div().absolute().inset_0().border_1().border_color(Theme::primary())))
+                                .child(r)
+                        })))
             }))
             .into_any_element()
     }

@@ -132,10 +132,16 @@ impl Workspace {
             .child(col(Some(168.), "位置"))
             .child(col(Some(168.), "剩余时间"))
             .child(div().w(px(48.)).flex_none());
-        let mut list = div().id("trash-list").flex_1().min_h_0().overflow_y_scroll().px(px(24.)).pb(px(24.));
+        let mut list = div().id("trash-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.trash_scroll).px(px(24.)).pb(px(24.));
+        let vim_cur_id = (crate::settings::vim_mode()
+            && self.pane_focus == crate::app::PaneFocus::Main
+            && self.view == crate::app::View::Trash)
+        .then(|| self.effective_trash_cursor())
+        .flatten();
         for (i, t) in self.trash.iter().enumerate() {
             let (id, id2) = (t.id.clone(), t.id.clone());
             let menu_open = self.trash_menu.as_ref().is_some_and(|(m, _, _)| *m == t.id);
+            let vim_cur = vim_cur_id.as_deref() == Some(t.id.as_str());
             let title = display_title(&t.title);
             let more = div()
                 .id(SharedString::from(format!("trash-more-{}", t.id)))
@@ -157,12 +163,14 @@ impl Workspace {
             list = list.child(
                 div()
                     .id(SharedString::from(format!("trash-row-{}", t.id)))
+                    .relative()
                     .h(px(56.))
                     .flex()
                     .items_center()
                     .when(i > 0, |d| d.border_t_1().border_color(list_line()))
                     .hover(row_hover)
-                    .when(menu_open, |d| d.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS)))
+                    .when(menu_open || vim_cur, |d| d.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS)))
+                    .when(vim_cur, |d| d.child(div().absolute().inset_0().rounded(px(ROW_RADIUS)).border_1().border_color(Theme::primary())))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -441,13 +449,7 @@ impl Workspace {
                             .child(crate::ui::checkbox(on))
                             .child(ui_text(crate::settings::text("不再提示")))
                     })))
-                    .child(secondary_button("confirm-cancel", if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| {
-                        // 稍后 asks again in a week, not at every launch.
-                        if matches!(w.confirm, Some(Confirm::Migrate(_))) { crate::settings::migrate_later(); }
-                        w.confirm = None;
-                        w.after_save = None;
-                        cx.notify();
-                    })))
+                    .child(secondary_button("confirm-cancel", if matches!(c, Confirm::Migrate(_)) { crate::settings::tr("稍后", "Later") } else { crate::settings::text("取消") }).on_click(cx.listener(|w, _, _, cx| w.cancel_confirm(cx))))
                     .when(matches!(c, Confirm::SaveFailed), |d| {
                         d.child(secondary_button("confirm-save-copy", crate::settings::tr("另存副本", "Save a copy")).on_click(cx.listener(|w, _, window, cx| {
                             w.save_failed_copy(window, cx);
@@ -457,33 +459,7 @@ impl Workspace {
                             w.resolve_save_failed(false, window, cx);
                         })))
                     })
-                    .child(ok.on_click(cx.listener(|w, _, window, cx| {
-                        let Some(c) = w.confirm.take() else { return };
-                        match c {
-                            Confirm::Delete { ids, batch } => {
-                                if batch {
-                                    w.batch = None;
-                                }
-                                w.delete_docs(&ids, window, cx);
-                            }
-                            Confirm::Restore(id) => w.restore_doc(&id, cx),
-                            Confirm::Purge(id) => w.purge_doc(&id, cx),
-                            Confirm::EmptyTrash => w.empty_trash(cx),
-                            Confirm::Refs { show, no_ask } => {
-                                if no_ask {
-                                    let mut s = w.store.settings();
-                                    s.refs_hide_no_ask = true;
-                                    let _ = w.store.save_settings(&s);
-                                }
-                                w.set_refs_hidden(!show, cx);
-                            }
-                            Confirm::SaveFailed => w.resolve_save_failed(true, window, cx),
-                            Confirm::Migrate(_) => w.migrate_library(window, cx),
-                            Confirm::SwitchLibrary(root) => cx.defer(move |cx| crate::app::switch_library(root, cx)),
-                            Confirm::Import { what, target } => w.import_dropped(what, target, window, cx),
-                        }
-                        cx.notify();
-                    }))),
+                    .child(ok.on_click(cx.listener(|w, _, window, cx| w.accept_confirm(window, cx)))),
             );
         Some(
             deferred(
@@ -501,5 +477,135 @@ impl Workspace {
             .with_priority(3)
             .into_any_element(),
         )
+    }
+
+    pub(crate) fn effective_trash_cursor(&self) -> Option<String> {
+        if let Some(cur) = &self.trash_cursor
+            && self.trash.iter().any(|t| &t.id == cur)
+        {
+            return Some(cur.clone());
+        }
+        self.trash.first().map(|t| t.id.clone())
+    }
+
+    pub(crate) fn cancel_confirm(&mut self, cx: &mut Context<Self>) {
+        // 稍后 asks again in a week, not at every launch.
+        if matches!(self.confirm, Some(Confirm::Migrate(_))) {
+            crate::settings::migrate_later();
+        }
+        self.confirm = None;
+        self.after_save = None;
+        cx.notify();
+    }
+
+    pub(crate) fn accept_confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(c) = self.confirm.take() else { return };
+        match c {
+            Confirm::Delete { ids, batch } => {
+                if batch {
+                    self.batch = None;
+                }
+                self.delete_docs(&ids, window, cx);
+            }
+            Confirm::Restore(id) => self.restore_doc(&id, cx),
+            Confirm::Purge(id) => self.purge_doc(&id, cx),
+            Confirm::EmptyTrash => self.empty_trash(cx),
+            Confirm::Refs { show, no_ask } => {
+                if no_ask {
+                    let mut s = self.store.settings();
+                    s.refs_hide_no_ask = true;
+                    let _ = self.store.save_settings(&s);
+                }
+                self.set_refs_hidden(!show, cx);
+            }
+            Confirm::SaveFailed => self.resolve_save_failed(true, window, cx),
+            Confirm::Migrate(_) => self.migrate_library(window, cx),
+            Confirm::SwitchLibrary(root) => cx.defer(move |cx| crate::app::switch_library(root, cx)),
+            Confirm::Import { what, target } => self.import_dropped(what, target, window, cx),
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn handle_trash_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function || ks.modifiers.control {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        let cur_id = self.effective_trash_cursor();
+        let cur_ix = cur_id.as_deref().and_then(|id| self.trash.iter().position(|t| t.id == id)).unwrap_or(0);
+
+        if self.non_doc_pending == Some('g') {
+            self.non_doc_pending = None;
+            if ks.key == "g" && !ks.modifiers.shift && let Some(first) = self.trash.first() {
+                self.trash_cursor = Some(first.id.clone());
+                self.trash_scroll.scroll_to_item(0);
+            }
+            cx.notify();
+            return true;
+        }
+        if ks.key == "g" && !ks.modifiers.shift {
+            self.non_doc_pending = Some('g');
+            cx.notify();
+            return true;
+        }
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            if let Some(last_ix) = self.trash.len().checked_sub(1) {
+                self.trash_cursor = Some(self.trash[last_ix].id.clone());
+                self.trash_scroll.scroll_to_item(last_ix);
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "j" || ks.key == "down" {
+            if !self.trash.is_empty() {
+                let next = (cur_ix + 1).min(self.trash.len() - 1);
+                self.trash_cursor = Some(self.trash[next].id.clone());
+                self.trash_scroll.scroll_to_item(next);
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "k" || ks.key == "up" {
+            if !self.trash.is_empty() {
+                let next = cur_ix.saturating_sub(1);
+                self.trash_cursor = Some(self.trash[next].id.clone());
+                self.trash_scroll.scroll_to_item(next);
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "escape" || (ks.key == "q" && !ks.modifiers.shift) {
+            self.close_settings(cx);
+            if self.view == crate::app::View::Doc && let Some(ed) = &self.editor {
+                ed.read(cx).focus(window);
+            }
+            return true;
+        }
+        if ks.key == "enter" || matches!(ch, Some('r' | 'u')) {
+            if let Some(id) = cur_id {
+                self.trash_menu = None;
+                self.confirm = Some(Confirm::Restore(id));
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "delete" || ks.key == "backspace" || matches!(ch, Some('d' | 'x')) {
+            if let Some(id) = cur_id {
+                self.trash_menu = None;
+                self.confirm = Some(Confirm::Purge(id));
+                cx.notify();
+            }
+            return true;
+        }
+        if ch == Some('E') {
+            if !self.trash.is_empty() {
+                self.trash_menu = None;
+                self.confirm = Some(Confirm::EmptyTrash);
+                cx.notify();
+            }
+            return true;
+        }
+        false
     }
 }

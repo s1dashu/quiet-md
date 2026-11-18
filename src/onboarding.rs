@@ -877,7 +877,7 @@ impl Render for Onboarding {
         // Quiet glows in as the film ends.
         let mark = if film_up { ((t - MARK_IN.0) / (MARK_IN.1 - MARK_IN.0)).clamp(0., 1.) } else { 0. };
         div().id("onboarding").size_full().relative().overflow_hidden()
-            .font_family(theme::UI_FONT).text_color(Theme::text())
+            .font(theme::font_with_fallbacks(theme::UI_FONT, false)).text_color(Theme::text())
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| w.key_down(ev, window, cx)))
             .when(frame.is_none(), |d| d.child(backdrop))

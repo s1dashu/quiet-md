@@ -240,8 +240,17 @@ impl R<'_> {
         let bm = core.in_block_mode() || self.ghost;
         let sel = core.sel;
         spec.link_underline = !bm && self.focused && sel.head.block == id;
-        let selection = if bm || sel.is_collapsed() { None } else { core.range_in(id, &self.units) };
-        let caret_here = !bm && core.cell_sel.is_none() && sel.head.block == id && sel.is_collapsed();
+        let in_visual = !bm && self.ed.vim_in_visual();
+        let selection = if bm {
+            None
+        } else if in_visual {
+            self.ed.vim_visual_range_in(id, &self.units)
+        } else if sel.is_collapsed() {
+            None
+        } else {
+            core.range_in(id, &self.units)
+        };
+        let caret_here = !bm && core.cell_sel.is_none() && sel.head.block == id && (sel.is_collapsed() || in_visual);
         RichTextElement {
             id,
             text: text.clone(),
@@ -250,12 +259,15 @@ impl R<'_> {
             placeholder,
             placeholder_color: None,
             placeholder_dx: 0.,
+            selection_full_line: !bm && self.ed.vim_is_visual_line() && selection.is_some(),
             selection,
             caret: caret_here.then_some(sel.head.offset),
             caret_row_end: caret_here && self.ed.caret_row_end == Some((id, sel.head.offset)),
             marked: self.ed.marked.as_ref().filter(|(b, _)| *b == id && !self.ghost).map(|(_, r)| r.clone()),
             cache: self.cache.clone(),
             show_caret: caret_here && self.focused && self.ed.caret_visible && !self.ed.read_only,
+            block_caret: !self.ghost && self.ed.vim_block_caret(),
+            caret_anim: (!self.ghost && self.ed.vim_enabled()).then(|| self.ed.caret_anim.clone()),
             highlight: None,
             found: if self.ghost { vec![] } else { self.ed.find_hits(id) },
             eq_counter: self.eqnos.get(&id).copied().unwrap_or(0),
@@ -297,14 +309,15 @@ impl R<'_> {
         let st = theme::style();
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = st.num("table.size");
-            spec.line_height = st.num("table.line-height");
+            spec.size = theme::table_size();
+            spec.line_height = theme::table_line_height();
         }
         if let BlockKind::Heading { level, .. } = b.kind {
             let m = theme::heading_metrics(level);
             spec.size = m.size;
             spec.line_height = m.line_height;
             spec.weight = theme::heading_weight(level);
+            spec.letter_spacing = theme::heading_tracking(level);
             if let Some(c) = theme::heading_color(level) { spec.color = c; }
             let f = theme::heading_font(level);
             if f != theme::body_font() { spec.font = Some(f); }
@@ -625,7 +638,7 @@ impl R<'_> {
             el.placeholder_color = Some(Theme::text_placeholder());
             el.placeholder_dx = 2.;
         }
-        let BlockKind::Heading { .. } = b.kind else {
+        let BlockKind::Heading { level, .. } = b.kind else {
             return div().child(el).child(self.children_of(b, env, cx)).into_any_element();
         };
         // `.heading-order`: a flex row of number + text, on one baseline.
@@ -642,7 +655,7 @@ impl R<'_> {
                         .flex()
                         .items_center()
                         .whitespace_nowrap()
-                        .font_family(theme::UI_FONT)
+                        .font_family(theme::heading_font(level))
                         .font_weight(weight)
                         .text_size(px(size))
                         .text_color(Theme::text_caption())
@@ -772,7 +785,7 @@ impl R<'_> {
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
         let st = theme::style();
-        let (code_size, code_line, radius) = (st.num("pre.size"), st.num("pre.line"), st.num("pre.radius"));
+        let (code_size, code_line, radius) = (theme::pre_size(), theme::pre_line(), st.num("pre.radius"));
         let gutter_w = if st.flag("pre.numbers") { GUTTER_W } else { 0. };
         // SF Mono 13 on a 20pt line.
         let spec = TextSpec {
@@ -1190,9 +1203,10 @@ impl Editor {
                 let mut spec = TextSpec::body();
                 spec.size = theme::title().size;
                 spec.line_height = theme::title().line_height;
-                spec.weight = FontWeight(theme::style().num("title.weight"));
+                spec.weight = theme::title_weight();
+                spec.letter_spacing = theme::title_tracking();
                 if let Some(c) = theme::style().color("title.color") { spec.color = c; }
-                let tf = theme::style().font("title.font");
+                let tf = theme::title_font();
                 if tf != theme::body_font() { spec.font = Some(tf); }
                 cover = self.cover_el(window, cx);
                 div()
@@ -1395,6 +1409,7 @@ impl Editor {
             window.request_animation_frame();
         }
         self.cache.borrow_mut().clear();
+        self.caret_anim.borrow_mut().begin_frame(self.vim_enabled());
         self.block_bounds.borrow_mut().clear();
         self.tables.geo.borrow_mut().clear();
         self.tables.stuck.borrow_mut().clear();
@@ -1435,8 +1450,16 @@ impl Editor {
         let file_line = self.file_drop_line();
         let pointer_hidden = self.pointer_hidden;
         let read_only = self.read_only;
+        let vim_accepts = self.vim_accepts_text_input();
+        let vim_non_insert = !read_only && !vim_accepts;
+        let vim_wants_no_ime = focused && !read_only && self.vim_wants_ime_disabled();
+        let vim_active = focused && !self.history_drawer;
+        let vim_badge = vim_active.then(|| self.render_vim_badge()).flatten();
+        let which_key = vim_active.then(|| self.render_which_key()).flatten();
+        let flash_overlay = self.render_flash_overlay(cx);
         let origin = self.content_origin.clone();
         let pane0 = self.pane_size();
+        let caret_anim = self.caret_anim.clone();
         let link_rects = self.pointer_rects();
         let root_canvas = canvas(
             move |b, window, _| {
@@ -1444,9 +1467,10 @@ impl Editor {
                 link_rects.into_iter().map(|r| window.insert_hitbox(r, HitboxBehavior::Normal)).collect::<Vec<_>>()
             },
             move |bounds, link_hitboxes, window, cx| {
-                if !read_only {
+                if !read_only && vim_accepts {
                     window.handle_input(&focus, ElementInputHandler::new(bounds, entity.clone()), cx);
                 }
+                window.set_ime_active(!(vim_wants_no_ime && window.is_window_active()));
                 // Links point (`cursor: pointer`).
                 for h in &link_hitboxes {
                     window.set_cursor_style(CursorStyle::PointingHand, h);
@@ -1582,6 +1606,11 @@ impl Editor {
                         }
                     });
                 }
+                if let Some(draw) = caret_anim.borrow().active_draw() {
+                    draw.paint(bounds, window);
+                    let e = entity.clone();
+                    window.on_next_frame(move |_, cx| e.update(cx, |_, cx| cx.notify()));
+                }
                 entity.update(cx, |ed, cx| {
                     ed.start_downloads(cx);
                     ed.start_thumbs(cx);
@@ -1600,14 +1629,16 @@ impl Editor {
         .size_full();
 
         let root = div()
-            .key_context(if read_only { "EditorRO" } else { "Editor" })
-            .when(read_only, |d| {
-                d.on_key_down(cx.listener(|ed, ev: &KeyDownEvent, window, cx| {
+            .key_context(if read_only { "EditorRO" } else if vim_non_insert { "EditorVim" } else { "Editor" })
+            .on_key_down(cx.listener(|ed, ev: &KeyDownEvent, window, cx| {
+                if ed.read_only {
                     if ed.focus.is_focused(window) {
                         ed.read_only_key(ev, cx);
                     }
-                }))
-            })
+                } else {
+                    ed.handle_vim_key(ev, window, cx);
+                }
+            }))
             .track_focus(&self.focus)
             .size_full()
             .relative()
@@ -1647,7 +1678,22 @@ impl Editor {
             .children(table_overlay)
             .children(block_overlay)
             .children(image_layer)
-            .children(counter)
+            .children(flash_overlay)
+            .children(if vim_badge.is_some() { None } else { counter })
+            .when_some(vim_badge, |d, badge| {
+                d.child(
+                    div()
+                        .absolute()
+                        .bottom(px(10.))
+                        .right(px(34.))
+                        .flex()
+                        .flex_col()
+                        .items_end()
+                        .gap(px(6.))
+                        .children(which_key)
+                        .child(div().flex().items_center().gap(px(6.)).child(badge).children(self.word_counter_pill())),
+                )
+            })
             .children(find_box)
             .children(lightbox)
             .children(board)
@@ -1685,8 +1731,7 @@ impl Editor {
         })
     }
 
-    /// "N 字" chip at the bottom right while text is selected (§2).
-    fn word_counter(&self) -> Option<AnyElement> {
+    fn word_counter_pill(&self) -> Option<Div> {
         let n = if self.core.in_block_mode() {
             let index = core::block_index(&self.core.doc);
             self.core
@@ -1700,12 +1745,8 @@ impl Editor {
         } else {
             crate::docinfo::word_count(&self.core.selected_text())
         };
-        // Selection word count: a small white pill at the note's bottom right.
         Some(
             div()
-                .absolute()
-                .bottom(px(10.))
-                .right(px(34.))
                 .h(px(24.))
                 .px(px(9.))
                 .rounded(px(8.))
@@ -1716,27 +1757,36 @@ impl Editor {
                 .text_size(px(12.))
                 .line_height(px(22.))
                 .text_color(Theme::text_caption())
-                .child(crate::settings::localized(crate::settings::lang(), "{n} 字", || format!("{n} 字"), || format!("{n} {}", if n == 1 { "word" } else { "words" })))
-                .into_any_element(),
+                .child(crate::settings::localized(crate::settings::lang(), "{n} 字", || format!("{n} 字"), || format!("{n} {}", if n == 1 { "word" } else { "words" }))),
         )
+    }
+
+    /// "N 字" chip at the bottom right while text is selected (§2).
+    fn word_counter(&self) -> Option<AnyElement> {
+        // Selection word count: a small white pill at the note's bottom right.
+        self.word_counter_pill().map(|d| d.absolute().bottom(px(10.)).right(px(34.)).into_any_element())
     }
 }
 
 impl R<'_> {
 fn spec_for_feishu(&self, b: &Block, env: Env) -> TextSpec {
-        use crate::feishu_theme::{self as theme, Theme};
+        use crate::editor_theme as et;
+        use crate::feishu_theme::Theme;
 
         let mut spec = TextSpec::body();
         if env.cell {
-            spec.size = 14.;
-            spec.line_height = 22.;
+            spec.size = et::table_size();
+            spec.line_height = et::table_line_height();
         }
         if let BlockKind::Heading { level, .. } = b.kind {
-            let m = theme::heading_metrics(level);
+            let m = et::heading_metrics(level);
             spec.size = m.size;
             spec.line_height = m.line_height;
-            spec.weight = FontWeight::MEDIUM;
-            spec.letter_spacing = m.size * -0.02;
+            spec.weight = et::heading_weight(level);
+            spec.letter_spacing = et::heading_tracking(level);
+            if let Some(c) = et::heading_color(level) { spec.color = c; }
+            let f = et::heading_font(level);
+            if f != et::body_font() { spec.font = Some(f); }
         }
         spec.dim_marks = env.quote;
         if let Some(c) = env.color {
@@ -2070,8 +2120,8 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         let id = b.id;
         let g = SharedString::from(format!("code-{}", id.0));
         let spec = TextSpec {
-            size: 14.,
-            line_height: 22.,
+            size: crate::editor_theme::pre_size(),
+            line_height: crate::editor_theme::pre_line(),
             weight: FontWeight::NORMAL,
             color: Theme::text_code(),
             mono: true,

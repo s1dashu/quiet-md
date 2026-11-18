@@ -5,3 +5,4 @@ pub mod core;
 #[cfg(test)]
 mod fuzz_tests;
 pub mod table_ops;
+pub mod vim;

@@ -114,6 +114,8 @@ pub struct WaylandWindowState {
     in_progress_window_controls: Option<WindowControls>,
     window_controls: WindowControls,
     client_inset: Option<Pixels>,
+    // quiet.md: whether OS IME composition is allowed for this window.
+    ime_allowed: bool,
 }
 
 #[derive(Clone)]
@@ -189,6 +191,7 @@ impl WaylandWindowState {
             in_progress_window_controls: None,
             window_controls: WindowControls::default(),
             client_inset: None,
+            ime_allowed: true,
         })
     }
 
@@ -748,6 +751,14 @@ impl WaylandWindowStatePtr {
         }
     }
 
+    pub fn ime_allowed(&self) -> bool {
+        self.state.borrow().ime_allowed
+    }
+
+    pub fn is_same(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.state, &other.state)
+    }
+
     pub fn set_appearance(&mut self, appearance: WindowAppearance) {
         self.state.borrow_mut().appearance = appearance;
 
@@ -899,6 +910,24 @@ impl PlatformWindow for WaylandWindow {
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
         self.borrow_mut().input_handler.take()
+    }
+
+    fn set_ime_active(&self, active: bool) {
+        let client = {
+            let mut state = self.borrow_mut();
+            if state.ime_allowed == active {
+                return;
+            }
+            state.ime_allowed = active;
+            state.client.clone()
+        };
+        if client.is_focused_window(&self.0) {
+            if active {
+                client.enable_ime();
+            } else {
+                client.disable_ime();
+            }
+        }
     }
 
     fn prompt(

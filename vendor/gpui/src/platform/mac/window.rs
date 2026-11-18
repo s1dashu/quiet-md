@@ -1,4 +1,8 @@
-use super::{BoolExt, MacDisplay, NSRange, NSStringExt, ns_string, renderer};
+use super::{
+    BoolExt, MacDisplay, NSRange, NSStringExt, TISCopyCurrentASCIICapableKeyboardInputSource,
+    TISCopyCurrentKeyboardInputSource, TISGetInputSourceProperty, TISSelectInputSource,
+    kTISPropertyInputSourceIsASCIICapable, ns_string, renderer,
+};
 use crate::{
     AnyWindowHandle, Bounds, Capslock, DisplayLink, ExternalPaths, FileDropEvent,
     ForegroundExecutor, KeyDownEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
@@ -26,6 +30,10 @@ use cocoa::{
     },
 };
 
+use core_foundation::{
+    base::{CFRelease, CFTypeRef, TCFType},
+    boolean::CFBoolean,
+};
 use core_graphics::display::{CGDirectDisplayID, CGPoint, CGRect};
 use ctor::ctor;
 use futures::channel::oneshot;
@@ -438,6 +446,17 @@ struct MacWindowState {
     select_previous_tab_callback: Option<Box<dyn FnMut()>>,
     toggle_tab_bar_callback: Option<Box<dyn FnMut()>>,
     activated_least_once: bool,
+    // quiet.md: modal IME state and previous non-ASCII input source.
+    ime_allowed: bool,
+    saved_ime_source: Option<usize>,
+}
+
+impl Drop for MacWindowState {
+    fn drop(&mut self) {
+        if let Some(src) = self.saved_ime_source.take() {
+            unsafe { CFRelease(src as CFTypeRef) };
+        }
+    }
 }
 
 impl MacWindowState {
@@ -744,6 +763,8 @@ impl MacWindow {
                 select_previous_tab_callback: None,
                 toggle_tab_bar_callback: None,
                 activated_least_once: false,
+                ime_allowed: true,
+                saved_ime_source: None,
             })));
 
             (*native_window).set_ivar(
@@ -1135,6 +1156,54 @@ impl PlatformWindow for MacWindow {
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
         self.0.as_ref().lock().input_handler.take()
+    }
+
+    fn set_ime_active(&self, active: bool) {
+        let (native_view, already_saved, saved) = {
+            let mut lock = self.0.as_ref().lock();
+            if lock.ime_allowed == active {
+                return;
+            }
+            lock.ime_allowed = active;
+            let saved = if active { lock.saved_ime_source.take() } else { None };
+            (lock.native_view.as_ptr(), lock.saved_ime_source.is_some(), saved)
+        };
+
+        // quiet.md: discard marked text and switch non-ASCII IME to ASCII in non-insert modes, restoring it later.
+        unsafe {
+            if !active {
+                let input_context: id = msg_send![native_view, inputContext];
+                if input_context != nil {
+                    let _: () = msg_send![input_context, discardMarkedText];
+                }
+                if !already_saved {
+                    let current = TISCopyCurrentKeyboardInputSource();
+                    if !current.is_null() {
+                        let prop = TISGetInputSourceProperty(
+                            current,
+                            kTISPropertyInputSourceIsASCIICapable as *const _,
+                        );
+                        let is_ascii = !prop.is_null() && bool::from(CFBoolean::wrap_under_get_rule(prop as _));
+                        if !is_ascii {
+                            let ascii = TISCopyCurrentASCIICapableKeyboardInputSource();
+                            if !ascii.is_null() {
+                                TISSelectInputSource(ascii);
+                                CFRelease(ascii as CFTypeRef);
+                                let mut lock = self.0.as_ref().lock();
+                                if !lock.ime_allowed && lock.saved_ime_source.is_none() {
+                                    lock.saved_ime_source = Some(current as usize);
+                                    return;
+                                }
+                            }
+                        }
+                        CFRelease(current as CFTypeRef);
+                    }
+                }
+            } else if let Some(saved) = saved {
+                TISSelectInputSource(saved as *mut Object);
+                CFRelease(saved as CFTypeRef);
+            }
+        }
     }
 
     fn prompt(

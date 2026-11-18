@@ -125,7 +125,7 @@ impl Editor {
             .collect()
     }
 
-    fn step_find(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn step_find(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(f) = &mut self.find else { return };
         let n = f.matches.len();
         if n == 0 {

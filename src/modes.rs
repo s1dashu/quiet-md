@@ -24,6 +24,60 @@ const DRAWER_W: f32 = 314.;
 
 /// 快捷键 rows: icon, description, keys; `None` separates groups.
 type Row = Option<(&'static str, &'static str, &'static str)>;
+type VimRow = Option<(&'static str, &'static str, &'static str, &'static str)>;
+
+const VIM_KEYS: &[VimRow] = &[
+    Some(("keyboard", "返回普通模式", "Return to Normal mode", "Esc / ⌃[")),
+    Some(("pen-line", "光标前 / 行首插入", "Insert before caret / line start", "i / I")),
+    Some(("pen-line", "光标后 / 行尾追加", "Append after caret / line end", "a / A")),
+    Some(("plus", "下方 / 上方新建行", "Open line below / above", "o / O")),
+    Some(("code", "字符 / 整行可视模式", "Visual char / line mode", "v / V")),
+    None,
+    Some(("arrow-left", "左 / 下 / 上 / 右移动", "Left / down / up / right", "h / j / k / l")),
+    Some(("chevron-right", "词首 / 词尾 / 上一词", "Word start / end / back", "w / e / b")),
+    Some(("arrow-left", "行首 / 非空首 / 行尾", "Line start / first / end", "0 / ^ / $")),
+    Some(("doc", "文档开头 / 结尾", "Document start / end", "gg / G")),
+    Some(("heading-1", "上一标题 / 下一标题", "Prev / next heading", "[h / ]h")),
+    Some(("list", "上一段 / 下一段", "Prev / next paragraph", "{ / }")),
+    Some(("chevron-down", "半页向下 / 向上", "Half page down / up", "⌃D / ⌃U")),
+    Some(("text-search", "行内查找字符与重复", "Find char in line & repeat", "f / F / t / T · ; / ,")),
+    Some(("text-search", "Flash 屏幕快速跳转", "Flash jump anywhere", "s")),
+    Some(("search", "文档内查找与上下匹配", "Find in doc & next/prev", "/ · n / N")),
+    None,
+    Some(("bin", "删除 / 整行 / 至行尾", "Delete / line / to EOL", "d / dd / D")),
+    Some(("square-pen", "修改 / 整行 / 至行尾", "Change / line / to EOL", "c / cc / C")),
+    Some(("copy", "复制 / 复制整行 / 粘贴", "Yank / line / paste", "y / yy / p / P")),
+    Some(("indent-increase", "增加 / 减少缩进", "Indent / outdent", ">> / <<")),
+    Some(("restore", "撤销 / 重做 / 重复", "Undo / redo / repeat", "u / ⌃R / .")),
+    Some(("braces", "文本对象（词 / 引号 / 括号）", "Text objects (word/quotes/parens)", "iw / aw / i\" / i(")),
+    None,
+    Some(("panel-left-open", "切换左栏 / 右栏 / 循环分栏", "Focus left / right / cycle pane", "⌃W h / l / w")),
+    Some(("panel-left-open", "快速切换分栏与文档", "Quick pane & doc switch", "⌥H / L / J / K")),
+    Some(("restore", "跨视图与文档历史后退 / 前进", "Jump back / forward in history", "⌃O / ⌃I")),
+    Some(("copy", "上一篇 / 下一篇文档 (Buffer 环)", "Prev / next doc (buffer ring)", "[b / ]b")),
+    Some(("search", "搜索与快速切换文档", "Search & switch documents", "Space b / Space Space")),
+    Some(("list", "主页 / 目录大纲 / 历史 / 侧栏", "Home / outline / history / sidebar", "Space h / o / H / e")),
+    Some(("keyboard", "打开快捷键速查 / 界面确认与返回", "Cheatsheet / accept & back", "Space ? · Enter / Esc")),
+];
+
+fn vim_rows() -> Vec<AnyElement> {
+    VIM_KEYS
+        .iter()
+        .map(|r| match r {
+            None => div().h(px(16.)).into_any_element(),
+            Some((ic, zh, en, keys)) => div()
+                .flex()
+                .items_center()
+                .py(px(8.))
+                .border_b_1()
+                .border_color(Theme::line_divider())
+                .child(div().flex_none().mr(px(8.)).child(icon(ic, 16., Theme::icon())))
+                .child(div().flex_none().mr(px(12.)).text_size(px(13.)).line_height(px(18.)).child(crate::settings::tr(zh, en)))
+                .child(div().flex_1().min_w_0().flex().justify_end().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption()).child(crate::shortcuts::keys(keys)))
+                .into_any_element(),
+        })
+        .collect()
+}
 
 const STANDARD: &[Row] = &[
     Some(("keyboard", "阅读模式切回编辑", "E")), Some(("keyboard", "复制 / 剪切 / 粘贴", "⌘C / ⌘X / ⌘V")),
@@ -209,7 +263,21 @@ impl Workspace {
                                 .text_color(Theme::text_caption())
                                 .child(crate::settings::text("Markdown 是一种快速输入带格式文本的方式，让你书写文档时行云流水，一气呵成，例如输入#空格，即可输入一级标题。")),
                         )
-                        .children(rows(MARKDOWN)),
+                        .children(rows(MARKDOWN))
+                        .child(section(crate::settings::tr("Vim 模式", "Vim mode")).mt(px(32.)))
+                        .child(
+                            div()
+                                .mt(px(-4.))
+                                .pb(px(12.))
+                                .text_size(px(12.))
+                                .line_height(px(18.))
+                                .text_color(Theme::text_caption())
+                                .child(crate::settings::tr(
+                                    "在 设置 › 通用 中开启 Vim 编辑模式后，可在正文及侧栏、主页、文件夹、回收站、设置、目录大纲与版本历史中使用全键盘操作。",
+                                    "Enable Vim mode in Settings › General for modal editing and full-keyboard navigation across sidebar, Home, folders, Trash, Settings, Outline and History.",
+                                )),
+                        )
+                        .children(vim_rows()),
                 )
                 .into_any_element(),
         )

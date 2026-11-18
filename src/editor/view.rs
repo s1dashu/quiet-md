@@ -44,6 +44,18 @@ pub enum EditorEvent {
     Leave,
     /// Esc while 版本历史 is open: back to the live document, then close.
     HistoryEscape,
+    /// Vim Normal-mode workspace pane navigation (`Ctrl+w h/l/w`).
+    VimFocusPane(fdl_core::editor::vim::VimPane),
+    /// Vim Normal-mode unified view/document jump history (`Ctrl+o`/`Ctrl+i`).
+    VimJumpHistory { forward: bool },
+    /// Vim Normal-mode full buffer ring cycle (`[b`/`]b`).
+    VimCycleBuffer { forward: bool },
+    /// Vim Normal-mode switch to workspace Home view (`Space h`).
+    VimOpenHome,
+    /// Vim Normal-mode open version history drawer (`Space H`).
+    VimOpenHistory,
+    /// Vim Normal-mode toggle shortcuts cheatsheet (`Space ?`/`Space /`).
+    VimToggleShortcuts,
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -164,6 +176,7 @@ pub struct Editor {
     /// Painted bounds of the callout bar and its colour panel (last frame).
     pub callout_zone: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     pub caret_visible: bool,
+    pub(super) caret_anim: Rc<RefCell<super::text::CaretAnim>>,
     blink: Option<Task<()>>,
     pub goal_x: Option<Pixels>,
     /// The caret was placed on a wrap boundary from the row above: draw it at
@@ -216,6 +229,8 @@ pub struct Editor {
     /// Heading just clicked in the catalogue.
     pub(super) cat_jump: Option<BlockId>,
     pub(super) cat_scroll: UniformListScrollHandle,
+    pub(super) cat_focused: bool,
+    pub(super) cat_cursor: Option<BlockId>,
     pub(super) scrollbar: Rc<super::scrollbar::Scrollbar>,
     /// Column-gap hover: (grid, gap index, over the 新增分栏 circle).
     pub(super) gap_hover: Option<(BlockId, usize, bool)>,
@@ -269,6 +284,7 @@ pub struct Editor {
     /// 阅读位置: where to put the page once this document's rows are laid out
     /// (item index, offset in item). Applied by the next render, then dropped.
     pub restore_top: Option<(usize, f32)>,
+    pub(super) vim: fdl_core::editor::vim::VimState,
     _subs: Vec<Subscription>,
 }
 
@@ -418,6 +434,7 @@ impl Editor {
             handle_targets: vec![],
             callout_zone: Rc::default(),
             caret_visible: true,
+            caret_anim: Rc::default(),
             blink: None,
             goal_x: None,
             caret_row_end: None,
@@ -456,6 +473,8 @@ impl Editor {
             cat_seen: ((usize::MAX, 0), TITLE),
             cat_jump: None,
             cat_scroll: UniformListScrollHandle::new(),
+            cat_focused: false,
+            cat_cursor: None,
             scrollbar: Rc::default(),
             gap_hover: None,
             col_drag: None,
@@ -485,6 +504,7 @@ impl Editor {
             boards: Default::default(),
             btn,
             rm,
+            vim: Default::default(),
             _subs: subs,
         };
         e.cat_seen.1 = e.core.sel.head.block;
@@ -546,6 +566,7 @@ impl Editor {
         self.slash = None;
         self.cat_generation = None;
         self.ro_doc = self.read_only.then(|| self.core.doc.clone());
+        self.vim = Default::default();
         self.refresh_find(false, cx);
         cx.notify();
     }
@@ -650,6 +671,7 @@ impl Editor {
     pub fn close_menu_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.menu = None;
         self.menu_hovered = false;
+        self.cat_focused = false;
         window.focus(&self.focus);
         cx.notify();
     }
@@ -1315,7 +1337,15 @@ impl Editor {
         }
     }
 
-    fn move_v(&mut self, down: bool, extend: bool) {
+    pub(super) fn move_v(&mut self, down: bool, extend: bool) {
+        self.move_v_inner(down, extend, true);
+    }
+
+    pub(super) fn move_v_vim(&mut self, down: bool, extend: bool) {
+        self.move_v_inner(down, extend, false);
+    }
+
+    fn move_v_inner(&mut self, down: bool, extend: bool, block_escalate: bool) {
         let h = self.core.sel.head;
         let us = self.core.units();
         let Some(i) = us.iter().position(|u| u.id == h.block) else { return };
@@ -1344,7 +1374,7 @@ impl Editor {
                 return;
             }
         }
-        if extend && h.block != TITLE {
+        if block_escalate && extend && h.block != TITLE {
             drop(cache);
             let len = self.core.len_of(h.block);
             // At the edge of a block Shift+↑/↓ goes to the block edge first, then into block selection.
@@ -1373,6 +1403,9 @@ impl Editor {
                 Pos::new(u.id, o.min(self.core.len_of(u.id)))
             }
             Some(u) => Pos::new(u.id, 0),
+            None if down && !block_escalate && extend => {
+                return;
+            }
             None if down && h.block != TITLE => {
                 drop(cache);
                 let id = self.core.trailing_line();
@@ -1837,12 +1870,22 @@ impl Editor {
             self.core.cell_sel = None;
         } else if self.core.in_block_mode() {
             self.core.clear_block_sel();
+        } else if self.vim_enabled() {
+            self.discard_marked();
+            self.vim.enter_normal(&mut self.core);
         } else {
             let h = self.core.sel.head.block;
             self.core.select_block(h);
         }
         self.toolbar_hidden = true;
         self.changed(window, cx);
+    }
+
+    pub(super) fn discard_marked(&mut self) {
+        if let Some((b, r)) = self.marked.take() {
+            self.core.replace_in_block(b, r.clone(), "");
+            self.core.sel = Selection::caret(Pos::new(b, r.start));
+        }
     }
 
     fn on_select_all(&mut self, _: &k::SelectAll, window: &mut Window, cx: &mut Context<Self>) {
@@ -2337,6 +2380,7 @@ impl Editor {
         self.reminder_blur(window, cx);
         self.menu = None;
         self.menu_hovered = false;
+        self.cat_focused = false;
         self.slash = None;
         self.toolbar_hidden = false;
         self.marked = None;
@@ -2448,6 +2492,15 @@ impl Editor {
             self.drag_at = None;
             self.drag_scrolled = None;
             self.drag_active = None;
+            if self.vim_enabled() {
+                if !self.core.sel.is_collapsed() && !self.core.in_block_mode() {
+                    if self.vim.mode == fdl_core::editor::vim::VimMode::Normal {
+                        self.vim.mode = fdl_core::editor::vim::VimMode::VisualChar;
+                    }
+                } else if self.vim.mode != fdl_core::editor::vim::VimMode::Insert {
+                    self.vim.enter_normal(&mut self.core);
+                }
+            }
             cx.notify();
         }
     }
@@ -2641,6 +2694,9 @@ impl Editor {
             return;
         }
         self.core.insert_text(&s);
+        if self.vim_enabled() {
+            self.vim.note_inserted_text(&s);
+        }
         if s == " " {
             let _ = self.core.markdown_block_shortcut() || self.core.markdown_divider() || self.core.autolink();
         } else if s == "-" {

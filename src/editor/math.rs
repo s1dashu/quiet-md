@@ -586,7 +586,7 @@ impl Engine<'_> {
         let font = Font {
             family: cx.family.into(),
             features: FontFeatures::default(),
-            fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into()])),
+            fallbacks: Some(crate::theme::font_fallbacks(false)),
             weight: if cx.bold { FontWeight::BOLD } else { FontWeight::NORMAL },
             style: if cx.italic { FontStyle::Italic } else { FontStyle::Normal },
         };

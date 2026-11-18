@@ -202,6 +202,104 @@ pub struct RowMenu {
     pub batch: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PaneFocus {
+    #[default]
+    Main,
+    Sidebar,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SidebarItem {
+    Home,
+    Pinned(String),
+    Doc(String),
+    Local(String),
+    Settings,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NavTarget {
+    Doc(String),
+    Home,
+    Folder(String),
+    Trash,
+    Settings(crate::settings::Page),
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct DocHistory {
+    pub entries: Vec<NavTarget>,
+    pub ix: usize,
+    pub navigating: bool,
+}
+
+impl DocHistory {
+    pub fn record(&mut self, target: NavTarget) {
+        if self.navigating {
+            return;
+        }
+        if !self.entries.is_empty() && self.entries.get(self.ix) == Some(&target) {
+            return;
+        }
+        if self.ix + 1 < self.entries.len() {
+            self.entries.truncate(self.ix + 1);
+        }
+        if self.entries.last() != Some(&target) {
+            self.entries.push(target);
+        }
+        if self.entries.len() > 100 {
+            self.entries.remove(0);
+        }
+        self.ix = self.entries.len().saturating_sub(1);
+    }
+
+    pub fn step<F: Fn(&NavTarget) -> bool>(&self, forward: bool, valid: F) -> Option<(usize, NavTarget)> {
+        if self.entries.len() < 2 {
+            return None;
+        }
+        let cur = self.entries.get(self.ix);
+        if forward {
+            for i in (self.ix + 1)..self.entries.len() {
+                let t = &self.entries[i];
+                if Some(t) != cur && valid(t) {
+                    return Some((i, t.clone()));
+                }
+            }
+        } else {
+            for i in (0..self.ix).rev() {
+                let t = &self.entries[i];
+                if Some(t) != cur && valid(t) {
+                    return Some((i, t.clone()));
+                }
+            }
+        }
+        None
+    }
+}
+
+pub(crate) fn build_buffer_ring(entries: &[Entry], local: &[&Entry]) -> Vec<String> {
+    let mut ring = Vec::new();
+    let mut seen = HashSet::new();
+    let tree = crate::tree::Tree::new(entries);
+    for (e, _) in tree.rows(|_| true) {
+        if e.meta.folder.is_none() && seen.insert(e.id.clone()) {
+            ring.push(e.id.clone());
+        }
+    }
+    for e in local {
+        if e.meta.folder.is_none() && seen.insert(e.id.clone()) {
+            ring.push(e.id.clone());
+        }
+    }
+    for e in entries {
+        if e.meta.folder.is_none() && seen.insert(e.id.clone()) {
+            ring.push(e.id.clone());
+        }
+    }
+    ring
+}
+
 /// What the main pane shows: the open document, 主页 or 回收站.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum View {
@@ -268,6 +366,11 @@ pub struct Workspace {
     pub theme_menu: Option<String>,
     /// Where the theme dropdown's button was drawn last frame.
     pub theme_anchor: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// 外观's font / preset dropdown while open: target and highlighted value.
+    pub font_menu: Option<(crate::settings::FontTarget, String)>,
+    pub font_anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<crate::settings::FontTarget, Bounds<Pixels>>>>,
+    pub doc_font_list: Vec<String>,
+    pub mono_font_list: Vec<String>,
     /// 通用's language dropdown while open: the highlighted language.
     pub lang_menu: Option<crate::settings::Lang>,
     pub lang_anchor: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
@@ -355,6 +458,17 @@ pub struct Workspace {
     pub more_btn_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The 快捷键 drawer, and the help button's menu (open while hovered).
     pub shortcuts: bool,
+    pub pane_focus: PaneFocus,
+    pub sidebar_cursor: Option<SidebarItem>,
+    pub sidebar_pending_g: bool,
+    pub sidebar_pending_ctrl_w: bool,
+    pub non_doc_pending: Option<char>,
+    pub home_cursor: Option<String>,
+    pub trash_scroll: ScrollHandle,
+    pub trash_cursor: Option<String>,
+    pub settings_nav_cursor: usize,
+    pub settings_row_cursor: usize,
+    pub doc_history: DocHistory,
     pub(crate) focus: FocusHandle,
     save_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
@@ -408,6 +522,7 @@ impl Workspace {
     }
 
     fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        crate::settings::init_available_fonts(|| cx.text_system().all_font_names());
         crate::settings::load();
         if !cx.has_global::<SharedStore>() { cx.set_global(SharedStore::open().expect("open document library")); }
         let mut store = cx.global::<SharedStore>().clone();
@@ -423,7 +538,17 @@ impl Workspace {
             f
         });
         let subs = vec![
-            cx.subscribe(&settings_filter, |_, _, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { cx.notify(); }),
+            cx.subscribe_in(&settings_filter, window, |this, _, ev: &TextFieldEvent, window, cx| {
+                match ev {
+                    TextFieldEvent::Changed => { this.settings_row_cursor = 0; }
+                    TextFieldEvent::Cancel | TextFieldEvent::Submit | TextFieldEvent::Down => {
+                        this.settings_row_cursor = 0;
+                        window.focus(&this.focus);
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            }),
             cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.quick_note, cx)),
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
@@ -520,6 +645,10 @@ impl Workspace {
             history_limit,
             theme_menu: None,
             theme_anchor: Default::default(),
+            font_menu: None,
+            font_anchors: Default::default(),
+            doc_font_list: vec![],
+            mono_font_list: vec![],
             lang_menu: None,
             lang_anchor: Default::default(),
             pref_menu: None,
@@ -576,6 +705,17 @@ impl Workspace {
             sidebar_drop: None,
             move_dlg: None,
             export_md: None,
+            pane_focus: PaneFocus::Main,
+            sidebar_cursor: None,
+            sidebar_pending_g: false,
+            sidebar_pending_ctrl_w: false,
+            non_doc_pending: None,
+            home_cursor: None,
+            trash_scroll: ScrollHandle::new(),
+            trash_cursor: None,
+            settings_nav_cursor: 0,
+            settings_row_cursor: 0,
+            doc_history: DocHistory::default(),
             focus: cx.focus_handle(),
             save_task: None,
             dirty_since: None,
@@ -591,7 +731,10 @@ impl Workspace {
         match document.or_else(|| (!quick).then(|| ws.entries.first().map(|e| e.id.clone())).flatten()) {
             Some(id) => ws.open(&id, window, cx),
             None if quick => ws.new_doc(window, cx),
-            None => ws.view = View::Home,
+            None => {
+                ws.view = View::Home;
+                ws.doc_history.record(NavTarget::Home);
+            }
         }
         // Kept in the top bar (not just a toast): the user should notice.
         let warnings = ws.store.take_warnings();
@@ -724,9 +867,26 @@ impl Workspace {
                     let _ = this.store.set_catalogue(&id, *pinned);
                 }
             }
+            EditorEvent::VimFocusPane(pane) => this.vim_focus_pane(*pane, window, cx),
+            EditorEvent::VimJumpHistory { forward } => this.jump_doc_history(*forward, window, cx),
+            EditorEvent::VimCycleBuffer { forward } => this.cycle_buffer(*forward, window, cx),
+            EditorEvent::VimOpenHome => {
+                this.show_view(View::Home, cx);
+                this.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx);
+            }
+            EditorEvent::VimOpenHistory => {
+                if let Some(id) = this.current.clone() {
+                    this.open_history(&id, window, cx);
+                }
+            }
+            EditorEvent::VimToggleShortcuts => {
+                this.shortcuts = !this.shortcuts;
+                cx.notify();
+            }
         }));
         // Opening a document puts the caret in it, unless the user is typing a search.
         if !self.search_open {
+            self.pane_focus = PaneFocus::Main;
             editor.read(cx).focus(window);
         }
         // A 画板 opens straight into its board, over the whole window.
@@ -739,6 +899,7 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
+        self.doc_history.record(NavTarget::Doc(id.to_string()));
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
         crate::quick_note::used(id, cx);
@@ -914,19 +1075,204 @@ impl Workspace {
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
         self.close_history(cx);
+        if !matches!(self.view, View::Settings | View::Trash) && matches!(view, View::Settings | View::Trash) {
+            self.pane_focus = PaneFocus::Main;
+        }
         // 阅读位置: leaving the document with ⌘H or 回收站 also counts.
         if view != View::Doc { self.remember_scroll(cx) }
         if view == View::Trash {
             self.trash = self.store.list_trash();
+            self.settings_nav_cursor = 4;
+        } else if view == View::Settings {
+            self.settings_nav_cursor = crate::settings::nav_index(self.settings_page);
         }
         self.view = view;
+        let target = match view {
+            View::Doc => self.current.as_ref().map(|id| NavTarget::Doc(id.clone())),
+            View::Home => Some(NavTarget::Home),
+            View::Folder => self.folder_current.as_ref().map(|id| NavTarget::Folder(id.clone())),
+            View::Trash => Some(NavTarget::Trash),
+            View::Settings => Some(NavTarget::Settings(self.settings_page)),
+        };
+        if let Some(t) = target {
+            self.doc_history.record(t);
+        }
+        self.non_doc_pending = None;
         self.row_menu = None;
         self.trash_menu = None;
         self.theme_menu = None;
+        self.font_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
         self.home.sort_menu = false;
         cx.notify();
+    }
+
+    pub fn buffer_ring(&self) -> Vec<String> {
+        let local = self.local_entries();
+        build_buffer_ring(&self.entries, &local)
+    }
+
+    pub fn cycle_buffer(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let ring = self.buffer_ring();
+        if ring.is_empty() {
+            return;
+        }
+        let target = if self.view == View::Doc
+            && let Some(cur) = self.current.as_deref()
+            && let Some(ix) = ring.iter().position(|id| id == cur)
+        {
+            if ring.len() == 1 {
+                return;
+            }
+            let next_ix = if forward { (ix + 1) % ring.len() } else { (ix + ring.len() - 1) % ring.len() };
+            ring[next_ix].clone()
+        } else if self.view == View::Folder
+            && let Some(fid) = self.folder_current.as_deref()
+        {
+            let sub = crate::tree::Tree::new(&self.entries).subtree(fid);
+            let in_folder: Vec<&String> = ring.iter().filter(|id| sub.contains(id)).collect();
+            if let Some(id) = if forward { in_folder.first() } else { in_folder.last() } {
+                (*id).clone()
+            } else if let Some(cur) = self.current.as_ref().filter(|id| ring.contains(id)) {
+                cur.clone()
+            } else if forward {
+                ring[0].clone()
+            } else {
+                ring[ring.len() - 1].clone()
+            }
+        } else if let Some(cur) = self.current.as_ref().filter(|id| ring.contains(id)) {
+            cur.clone()
+        } else if forward {
+            ring[0].clone()
+        } else {
+            ring[ring.len() - 1].clone()
+        };
+        if self.try_open(&target, window, cx) {
+            self.pane_focus = PaneFocus::Main;
+            if let Some(ed) = &self.editor {
+                ed.read(cx).focus(window);
+            }
+        }
+    }
+
+    pub fn jump_doc_history(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((next_ix, target)) = self.doc_history.step(forward, |t| match t {
+            NavTarget::Doc(id) => self.entries.iter().any(|e| e.id == *id && e.meta.folder.is_none()),
+            NavTarget::Folder(id) => self.entries.iter().any(|e| e.id == *id && e.meta.folder.is_some()),
+            NavTarget::Home | NavTarget::Trash | NavTarget::Settings(_) => true,
+        }) {
+            self.doc_history.navigating = true;
+            let ok = match target {
+                NavTarget::Doc(id) => self.try_open(&id, window, cx),
+                NavTarget::Folder(id) => self.open_folder(&id, window, cx),
+                NavTarget::Home => { self.show_view(View::Home, cx); true }
+                NavTarget::Trash => { self.show_view(View::Trash, cx); true }
+                NavTarget::Settings(page) => { self.open_settings(page, cx); true }
+            };
+            self.doc_history.navigating = false;
+            if ok {
+                self.doc_history.ix = next_ix;
+                self.pane_focus = PaneFocus::Main;
+                if self.view == View::Doc && let Some(ed) = &self.editor {
+                    ed.read(cx).focus(window);
+                } else {
+                    window.focus(&self.focus);
+                }
+            }
+        } else if !forward && self.view != View::Doc && let Some(cur) = self.current.clone() {
+            self.doc_history.navigating = true;
+            let ok = self.try_open(&cur, window, cx);
+            self.doc_history.navigating = false;
+            if ok {
+                self.pane_focus = PaneFocus::Main;
+                if let Some(ed) = &self.editor {
+                    ed.read(cx).focus(window);
+                }
+            }
+        }
+    }
+
+    fn handle_non_doc_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        use fdl_core::editor::vim::VimPane;
+        if self.settings_filter.read(cx).is_focused(window) {
+            return false;
+        }
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        if self.non_doc_pending == Some('?') {
+            self.non_doc_pending = None;
+            cx.notify();
+            if ks.key == "escape" || (!ks.modifiers.control && ch == Some('?')) {
+                return true;
+            }
+        }
+        if let Some(prefix) = self.non_doc_pending.filter(|p| matches!(p, 'w' | '[' | ']' | ' ')) {
+            self.non_doc_pending = None;
+            match prefix {
+                'w' => match ks.key.as_str() {
+                    "h" => { self.vim_focus_pane(VimPane::Left, window, cx); return true; }
+                    "l" => { self.vim_focus_pane(VimPane::Right, window, cx); return true; }
+                    "w" => { self.vim_focus_pane(VimPane::Cycle, window, cx); return true; }
+                    _ => { cx.notify(); return true; }
+                },
+                '[' if !ks.modifiers.control && ks.key == "b" => {
+                    self.cycle_buffer(false, window, cx);
+                    return true;
+                }
+                ']' if !ks.modifiers.control && ks.key == "b" => {
+                    self.cycle_buffer(true, window, cx);
+                    return true;
+                }
+                ' ' if !ks.modifiers.control => {
+                    if matches!(ch, Some('b' | ' ')) || matches!(ks.key.as_str(), "b" | "space") {
+                        self.open_search(window, cx);
+                    } else if matches!(ch, Some('e')) || ks.key == "e" {
+                        self.vim_focus_pane(VimPane::Left, window, cx);
+                    } else if ch == Some('h') || (ks.key == "h" && !ks.modifiers.shift) {
+                        self.show_view(View::Home, cx);
+                        self.vim_focus_pane(VimPane::Right, window, cx);
+                    } else if (ch == Some('H') || (ks.key == "h" && ks.modifiers.shift)) && self.current.is_some() {
+                        if let Some(id) = self.current.clone() {
+                            self.open_history(&id, window, cx);
+                        }
+                    } else if matches!(ch, Some('?' | '/')) || matches!(ks.key.as_str(), "?" | "/") {
+                        self.shortcuts = !self.shortcuts;
+                        cx.notify();
+                    } else {
+                        cx.notify();
+                    }
+                    return true;
+                }
+                _ => { cx.notify(); return true; }
+            }
+        }
+        if ks.modifiers.control {
+            return match ks.key.as_str() {
+                "w" => { self.non_doc_pending = Some('w'); cx.notify(); true }
+                "o" => { self.jump_doc_history(false, window, cx); true }
+                "i" => { self.jump_doc_history(true, window, cx); true }
+                _ => false,
+            };
+        }
+        let handled = match self.view {
+            View::Home | View::Folder => self.handle_home_vim_key(ev, window, cx),
+            View::Trash => self.handle_trash_vim_key(ev, window, cx),
+            View::Settings => self.handle_settings_vim_key(ev, window, cx),
+            View::Doc => false,
+        };
+        if handled {
+            return true;
+        }
+        if matches!(ch, Some('[' | ']' | ' ' | '?')) || ks.key == "space" {
+            self.non_doc_pending = Some(ch.unwrap_or(' '));
+            cx.notify();
+            return true;
+        }
+        false
     }
 
     /// A success toast (删除成功, 移动成功 …).
@@ -1539,6 +1885,199 @@ impl Workspace {
                     ).into_any_element()
             )
     }
+
+    fn render_workspace_vim_hud(&self) -> Option<AnyElement> {
+        use crate::editor::vim::{vim_badge_pill, which_key_card};
+        use crate::settings::tr;
+        if !crate::settings::vim_mode()
+            || self.search_open
+            || self.rename.is_some()
+            || self.version_rename.is_some()
+            || self.move_dlg.is_some()
+            || self.onboarding.is_some()
+            || self.confirm.is_some()
+            || self.export_md.is_some()
+            || self.shortcut_recording.is_some()
+        {
+            return None;
+        }
+        if self.view == View::Doc && self.pane_focus == PaneFocus::Main && self.history.is_none() {
+            return None;
+        }
+        let mode = if self.history.is_some() {
+            "HISTORY"
+        } else if self.pane_focus == PaneFocus::Sidebar {
+            if matches!(self.view, View::Settings | View::Trash) { "SETTINGS NAV" } else { "SIDEBAR" }
+        } else {
+            match self.view {
+                View::Home => if self.batch.is_some() { "HOME · BATCH" } else { "HOME" },
+                View::Folder => if self.batch.is_some() { "FOLDER · BATCH" } else { "FOLDER" },
+                View::Trash => "TRASH",
+                View::Settings => "SETTINGS",
+                View::Doc => return None,
+            }
+        };
+        let pend = if self.sidebar_pending_ctrl_w || self.non_doc_pending == Some('w') {
+            Some("^W".to_string())
+        } else if self.sidebar_pending_g {
+            Some("g".to_string())
+        } else {
+            self.non_doc_pending.map(|c| if c == ' ' { "␣".to_string() } else { c.to_string() })
+        };
+        let badge_label = match &pend {
+            Some(p) => format!("{mode} · {p}"),
+            None => mode.to_string(),
+        };
+        let accent = pend.is_some() || self.batch.is_some() || self.pane_focus == PaneFocus::Sidebar || self.history.is_some();
+        let guide: Option<AnyElement> = if self.sidebar_pending_ctrl_w || self.non_doc_pending == Some('w') {
+            Some(which_key_card(
+                tr("分栏导航 · ^W", "Window · ^W"),
+                &[
+                    ("h", tr("聚焦左侧栏", "Focus sidebar")),
+                    ("l", tr("聚焦右侧主区", "Focus main pane")),
+                    ("w", tr("循环切换分栏", "Cycle panes")),
+                ],
+            ))
+        } else if self.non_doc_pending == Some(' ') {
+            Some(which_key_card(
+                tr("Leader · 空格", "Leader · Space"),
+                &[
+                    ("b / ␣", tr("搜索与切换文档", "Search / switch docs")),
+                    ("h", tr("进入主页", "Go to Home")),
+                    ("e", tr("切换侧栏 / 主区焦点", "Toggle sidebar focus")),
+                    ("H", tr("版本历史 (已打开文档)", "Version history (if doc)")),
+                    ("?", tr("快捷键速查", "Shortcuts cheatsheet")),
+                ],
+            ))
+        } else if matches!(self.non_doc_pending, Some('[' | ']')) {
+            Some(which_key_card(
+                tr("切换文档 · [ / ]", "Buffer · [ / ]"),
+                &[("b", tr("上 / 下一篇文档 (Buffer 环)", "Prev / next doc (buffer ring)"))],
+            ))
+        } else if self.sidebar_pending_g || self.non_doc_pending == Some('g') {
+            Some(which_key_card(
+                tr("跳转 · g", "Goto · g"),
+                &[("g", tr("跳到列表第一项", "Jump to first item"))],
+            ))
+        } else if self.non_doc_pending == Some('d') {
+            Some(which_key_card(
+                tr("删除 · d", "Delete · d"),
+                &[("d", tr("删除当前选中项", "Delete selected item"))],
+            ))
+        } else if self.non_doc_pending == Some('?') {
+            Some(if self.history.is_some() {
+                which_key_card(
+                    tr("版本历史 · History", "Version history"),
+                    &[
+                        ("j / k", tr("上下选择并预览版本", "Select & preview version")),
+                        ("Enter", tr("恢复所选版本", "Restore selected version")),
+                        ("m / f", tr("显示改动 / 仅看命名", "Toggle marks / named")),
+                        ("r / s", tr("命名版本 / 保存快照", "Name / save snapshot")),
+                        ("c / x", tr("另存副本 / 删除版本", "Save copy / delete")),
+                        ("^D / ^U", tr("滚动右侧预览正文", "Scroll preview")),
+                        ("q / Esc", tr("关闭 / 退出预览", "Close / exit preview")),
+                    ],
+                )
+            } else if self.pane_focus == PaneFocus::Sidebar {
+                if matches!(self.view, View::Settings | View::Trash) {
+                    which_key_card(
+                        tr("设置导航 · Sidebar", "Settings Nav"),
+                        &[
+                            ("j / k", tr("切换设置分类 / 回收站", "Switch section / Trash")),
+                            ("gg / G", tr("首项 / 末项（返回）", "First / last (Back)")),
+                            ("l / Enter", tr("进入右侧配置 / 返回", "Focus pane / back")),
+                            ("Esc / q", tr("关闭设置", "Close settings")),
+                        ],
+                    )
+                } else {
+                    which_key_card(
+                        tr("侧栏导航 · Sidebar", "Sidebar"),
+                        &[
+                            ("j / k", tr("上下移动光标", "Move cursor up / down")),
+                            ("h / l", tr("折叠 / 展开或打开", "Collapse / expand or open")),
+                            ("gg / G", tr("跳到顶部 / 底部", "Jump to top / bottom")),
+                            ("Enter", tr("打开文档并聚焦正文", "Open & focus main")),
+                            ("a / A", tr("新建文档 / 文件夹", "New doc / folder")),
+                            ("r / d", tr("重命名 / 删除", "Rename / delete")),
+                            ("p / s", tr("置顶 / 收藏", "Pin / favorite")),
+                            ("Esc / q", tr("回到主内容区", "Return to main pane")),
+                        ],
+                    )
+                }
+            } else {
+                match self.view {
+                    View::Home | View::Folder => {
+                        if self.batch.is_some() {
+                            which_key_card(
+                                tr("批量操作 · Batch", "Batch Select"),
+                                &[
+                                    ("h/j/k/l", tr("移动选中光标", "Move cursor")),
+                                    ("Space / a", tr("勾选当前 / 全选", "Toggle item / all")),
+                                    ("c / m", tr("创建副本 / 移动到", "Duplicate / move to")),
+                                    ("d / x", tr("批量删除", "Delete selected")),
+                                    ("Esc / q", tr("退出批量操作", "Exit batch mode")),
+                                ],
+                            )
+                        } else {
+                            let title = if self.view == View::Home { tr("主页导航 · Home", "Home") } else { tr("文件夹 · Folder", "Folder") };
+                            which_key_card(
+                                title,
+                                &[
+                                    ("h/j/k/l", tr("移动选框（宫格 / 列表）", "Move selection")),
+                                    ("Enter", tr("打开文档 / 进入文件夹", "Open doc / folder")),
+                                    ("Tab / v", tr("切换标签 / 宫格列表", "Tab / grid-list")),
+                                    ("b", tr("进入批量管理", "Enter batch mode")),
+                                    ("n / N", tr("新建文档 / 文件夹", "New doc / folder")),
+                                    ("r / p / s", tr("重命名 / 置顶 / 收藏", "Rename / pin / star")),
+                                    ("x / dd", tr("删除当前项", "Delete item")),
+                                    ("- / Esc", tr("返回上级 / 打开的文档", "Go up / back to doc")),
+                                ],
+                            )
+                        }
+                    }
+                    View::Trash => which_key_card(
+                        tr("回收站 · Trash", "Trash"),
+                        &[
+                            ("j / k", tr("上下选择已删文档", "Move selection")),
+                            ("gg / G", tr("首项 / 末项", "First / last item")),
+                            ("r / Enter", tr("恢复所选文档", "Restore selected")),
+                            ("d / x", tr("彻底删除所选文档", "Purge selected")),
+                            ("E", tr("清空回收站", "Empty trash")),
+                            ("Esc / q", tr("退出回收站", "Leave trash")),
+                        ],
+                    ),
+                    View::Settings => which_key_card(
+                        tr("设置操作 · Settings", "Settings"),
+                        &[
+                            ("j / k", tr("上下选择配置项", "Select setting row")),
+                            ("h/l/Enter", tr("调整值 / 开关 / 菜单", "Adjust / toggle / menu")),
+                            ("Tab", tr("切换左侧导航 / 配置区", "Switch nav / content")),
+                            ("/", tr("搜索快捷键（快捷键页）", "Filter shortcuts")),
+                            ("r / x", tr("恢复默认 / 移除快捷键", "Reset / clear key")),
+                            ("Esc / q", tr("关闭设置", "Close settings")),
+                        ],
+                    ),
+                    View::Doc => return None,
+                }
+            })
+        } else {
+            None
+        };
+        let right = if self.history.is_some() { 324. } else if self.view == View::Doc && self.shortcuts { 338. } else { 34. };
+        Some(
+            div()
+                .absolute()
+                .bottom(px(10.))
+                .right(px(right))
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap(px(6.))
+                .children(guide)
+                .child(vim_badge_pill(badge_label, accent))
+                .into_any_element(),
+        )
+    }
 }
 
 /// Header and action group share an 8px top/right inset.
@@ -1552,7 +2091,36 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
-        if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus); }
+        let modal_busy = self.search_open
+            || self.rename.is_some()
+            || self.version_rename.is_some()
+            || self.move_dlg.is_some()
+            || self.onboarding.is_some()
+            || self.shortcut_recording.is_some()
+            || self.confirm.is_some()
+            || self.export_md.is_some();
+        if self.view != View::Doc
+            && !modal_busy
+            && !self.settings_filter.read(cx).is_focused(window)
+            && (self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) || window.focused(cx).is_none())
+        {
+            window.focus(&self.focus);
+        }
+        if self.pane_focus == PaneFocus::Sidebar
+            && (!self.sidebar_open
+                || (self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window))))
+        {
+            self.pane_focus = PaneFocus::Main;
+        }
+        if crate::settings::vim_mode()
+            && crate::settings::vim_auto_ime()
+            && !modal_busy
+            && !self.settings_filter.read(cx).is_focused(window)
+            && (self.pane_focus == PaneFocus::Sidebar || self.view != View::Doc || self.history.is_some())
+            && window.is_window_active()
+        {
+            window.set_ime_active(false);
+        }
         crate::editor::image::frame_drawn(window, cx);
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());
@@ -1584,6 +2152,7 @@ impl Render for Workspace {
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
+        let font_menu = self.render_font_menu(cx);
         let lang_menu = self.render_lang_menu(cx);
         let pref_menu = self.render_pref_menu(cx);
         let toast = self.render_toast(window);
@@ -1626,13 +2195,15 @@ impl Render for Workspace {
         // them (no gutter, radius, border or shadow).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
+        let vim_hud = self.render_workspace_vim_hud();
         let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).child(main)
             // Files from the Finder dropped on 主页 or a folder's page are imported there.
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
                 .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| w.file_dropped(paths, window, cx))))
             .children(file_drop)
-            .children(history);
+            .children(history)
+            .children(vim_hud);
         div()
             .id("workspace")
             .key_context("Workspace")
@@ -1650,7 +2221,7 @@ impl Render for Workspace {
             .size_full()
             .flex()
             .bg(Theme::window())
-            .font_family(theme::UI_FONT)
+            .font(theme::font_with_fallbacks(theme::UI_FONT, false))
             .text_color(Theme::text())
             // Window keys act on the window they were pressed in, not on
             // whichever window macOS considers active.
@@ -1672,9 +2243,13 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
             .on_action(cx.listener(|w, _: &OpenFile, window, cx| w.open_file_dialog(window, cx)))
             .on_action(cx.listener(|w, _: &ImportFolder, window, cx| w.open_import_folder(window, cx)))
-            .on_action(cx.listener(|w, _: &ToggleSidebar, _, cx| {
+            .on_action(cx.listener(|w, _: &ToggleSidebar, window, cx| {
                 w.sidebar_open = !w.sidebar_open;
-                cx.notify();
+                if !w.sidebar_open && w.pane_focus == PaneFocus::Sidebar {
+                    w.vim_focus_pane(fdl_core::editor::vim::VimPane::Right, window, cx);
+                } else {
+                    cx.notify();
+                }
             }))
             .on_action(cx.listener(|w, _: &FindInDoc, window, cx| w.find_in_doc(false, window, cx)))
             .on_action(cx.listener(|w, _: &ReplaceInDoc, window, cx| {
@@ -1689,29 +2264,54 @@ impl Render for Workspace {
             }))
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
                 // The theme dropdown: ↑ ↓ preview, ↩ applies, Esc closes it (not 设置).
-                if (w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx)) || (w.lang_menu.is_some() && w.lang_menu_key(&ev.keystroke.key, cx))
-                    || (w.pref_menu.is_some() && w.pref_menu_key(&ev.keystroke.key, cx)) {
+                if (w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx)) || (w.font_menu.is_some() && w.font_menu_key(&ev.keystroke.key, cx))
+                    || (w.lang_menu.is_some() && w.lang_menu_key(&ev.keystroke.key, cx)) || (w.pref_menu.is_some() && w.pref_menu_key(&ev.keystroke.key, cx)) {
                     cx.stop_propagation();
                     return;
                 }
-                // Esc leaves 设置 (unless its filter field has the caret).
-                if ev.keystroke.key == "escape" && w.view == View::Settings && !w.settings_filter.read(cx).is_focused(window) {
+                // Esc leaves 设置 (unless its filter field has the caret or a Vim prefix is pending).
+                if ev.keystroke.key == "escape" && w.view == View::Settings && !w.settings_filter.read(cx).is_focused(window) && w.non_doc_pending.is_none() {
                     w.close_settings(cx);
+                    if w.view == View::Doc && let Some(ed) = &w.editor { ed.read(cx).focus(window); }
                     cx.stop_propagation();
                     return;
                 }
                 if ev.keystroke.key == "escape" && (w.doc_info.is_some() || w.history.is_some() || w.doc_menu || w.mode_menu) {
                     w.doc_info = None;
-                    if w.history.is_some() { w.close_history(cx); }
+                    if w.history.is_some() {
+                        w.close_history(cx);
+                        if let Some(ed) = &w.editor { ed.read(cx).focus(window); }
+                    }
                     w.mode_menu = false;
                     w.doc_menu = false;
                     w.doc_sub = None;
                     cx.stop_propagation();
                     cx.notify();
+                    return;
+                }
+                if crate::settings::vim_mode()
+                    && !w.search_open
+                    && w.rename.is_none()
+                    && w.version_rename.is_none()
+                    && w.confirm.is_none()
+                    && w.export_md.is_none()
+                    && w.move_dlg.is_none()
+                    && w.onboarding.is_none()
+                    && w.row_menu.is_none()
+                    && !w.doc_menu
+                    && !w.mode_menu
+                {
+                    if w.pane_focus == PaneFocus::Sidebar && w.focus.is_focused(window) {
+                        if w.handle_sidebar_vim_key(ev, window, cx) {
+                            cx.stop_propagation();
+                        }
+                    } else if w.view != View::Doc && w.handle_non_doc_vim_key(ev, window, cx) {
+                        cx.stop_propagation();
+                    }
                 }
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
-            .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
+            .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
                 let undo = ev.keystroke.modifiers.secondary() && matches!(ev.keystroke.key.as_str(), "z" | "y");
                 if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 // 版本历史: the editor keeps the caret, so Esc has to be taken
@@ -1720,7 +2320,13 @@ impl Render for Workspace {
                     w.exit_preview(cx); cx.stop_propagation(); return;
                 }
                 if ev.keystroke.key == "escape" && w.history.is_some() {
-                    w.close_history(cx); cx.stop_propagation(); return;
+                    if w.non_doc_pending.take().is_some() {
+                        cx.notify();
+                    } else {
+                        w.close_history(cx);
+                        if let Some(ed) = &w.editor { ed.read(cx).focus(window); }
+                    }
+                    cx.stop_propagation(); return;
                 }
                 if ev.keystroke.key == "escape" && w.has_home_drag() {
                     w.cancel_home_drag(cx); cx.stop_propagation(); return;
@@ -1729,14 +2335,139 @@ impl Render for Workspace {
                     w.end_folder_drag(true, cx); cx.stop_propagation(); return;
                 }
                 if w.record_shortcut(ev, cx) { return; }
-                // Esc cancels a confirmation dialog.
+                // Esc cancels a confirmation dialog; in Vim mode Enter/y confirms and n/q cancels.
                 if ev.keystroke.key == "escape" && (w.confirm.is_some() || w.export_md.is_some()) {
-                    w.confirm = None;
-                    w.after_save = None;
-                    w.export_md = None;
+                    if w.confirm.is_some() { w.cancel_confirm(cx); } else { w.export_md = None; cx.notify(); }
                     cx.stop_propagation();
-                    cx.notify();
                     return;
+                }
+                if ev.keystroke.key == "escape"
+                    && !ev.keystroke.modifiers.platform
+                    && !ev.keystroke.modifiers.control
+                    && !ev.keystroke.modifiers.alt
+                    && w.shortcuts
+                    && !w.search_open
+                    && w.rename.is_none()
+                    && w.version_rename.is_none()
+                    && w.move_dlg.is_none()
+                    && w.onboarding.is_none()
+                    && w.doc_info.is_none()
+                    && !w.doc_menu
+                    && !w.mode_menu
+                    && w.row_menu.is_none()
+                    && w.batch.is_none()
+                    && w.theme_menu.is_none()
+                    && w.font_menu.is_none()
+                    && w.lang_menu.is_none()
+                    && w.pref_menu.is_none()
+                    && !w.settings_filter.read(cx).is_focused(window)
+                    && w.non_doc_pending.is_none()
+                    && !w.sidebar_pending_g
+                    && !w.sidebar_pending_ctrl_w
+                    && (!crate::settings::vim_mode() || w.pane_focus == PaneFocus::Main)
+                    && (w.view != View::Doc || w.editor.as_ref().is_none_or(|ed| ed.read(cx).can_close_shortcuts_on_esc(window, cx)))
+                {
+                    w.shortcuts = false;
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
+                }
+                if crate::settings::vim_mode()
+                    && w.confirm.is_some()
+                    && !w.search_open
+                    && w.rename.is_none()
+                    && w.onboarding.is_none()
+                {
+                    let ks = &ev.keystroke;
+                    if !ks.modifiers.platform && !ks.modifiers.control && !ks.modifiers.alt {
+                        if ks.key == "enter" || ks.key == "y" {
+                            w.accept_confirm(window, cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            return;
+                        }
+                        if ks.key == "n" || ks.key == "q" {
+                            w.cancel_confirm(cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            return;
+                        }
+                    }
+                }
+                if crate::settings::vim_mode()
+                    && w.confirm.is_none()
+                    && w.export_md.is_none()
+                    && w.rename.is_none()
+                    && w.version_rename.is_none()
+                    && w.move_dlg.is_none()
+                    && w.onboarding.is_none()
+                {
+                    let ks = &ev.keystroke;
+                    if w.search_open {
+                        if (ks.modifiers.control && !ks.modifiers.alt && !ks.modifiers.platform && matches!(ks.key.as_str(), "n" | "j"))
+                            || (ks.modifiers.alt && !ks.modifiers.control && !ks.modifiers.platform && ks.key == "j")
+                        {
+                            w.move_search_sel(1, cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            return;
+                        }
+                        if (ks.modifiers.control && !ks.modifiers.alt && !ks.modifiers.platform && matches!(ks.key.as_str(), "p" | "k"))
+                            || (ks.modifiers.alt && !ks.modifiers.control && !ks.modifiers.platform && ks.key == "k")
+                        {
+                            w.move_search_sel(-1, cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            return;
+                        }
+                        if ks.modifiers.control && !ks.modifiers.alt && !ks.modifiers.platform && ks.key == "[" {
+                            w.close_search(window, cx);
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            return;
+                        }
+                    } else if ks.modifiers.alt && !ks.modifiers.platform && !ks.modifiers.control && !ks.modifiers.shift {
+                        use fdl_core::editor::vim::VimPane;
+                        match ks.key.as_str() {
+                            "h" => {
+                                w.vim_focus_pane(VimPane::Left, window, cx);
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                return;
+                            }
+                            "l" => {
+                                w.vim_focus_pane(VimPane::Right, window, cx);
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                return;
+                            }
+                            "j" => {
+                                if w.pane_focus == PaneFocus::Sidebar {
+                                    w.move_sidebar_cursor(1, cx);
+                                } else {
+                                    w.cycle_buffer(true, window, cx);
+                                }
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                return;
+                            }
+                            "k" => {
+                                if w.pane_focus == PaneFocus::Sidebar {
+                                    w.move_sidebar_cursor(-1, cx);
+                                } else {
+                                    w.cycle_buffer(false, window, cx);
+                                }
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                return;
+                            }
+                            _ => {}
+                        }
+                    } else if w.history.is_some() && w.handle_history_vim_key(ev, window, cx) {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
                 }
                 if ev.keystroke.key != "escape" || w.batch.is_none() || w.search_open || w.rename.is_some() {
                     return;
@@ -1764,6 +2495,7 @@ impl Render for Workspace {
             .children(trash_menu)
             .children(home_menus)
             .children(theme_menu)
+            .children(font_menu)
             .children(lang_menu)
             .children(pref_menu)
             .children(confirm)
@@ -1864,5 +2596,80 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
         }).unwrap();
         eprintln!("save-safety: PASS; remaining conflict blocked quit; copy preserved; edit after reload saved cleanly");
         for (handle, _) in windows { handle.update(cx, |_, window, _| window.remove_window()).unwrap(); }
+    }
+}
+
+#[cfg(test)]
+mod doc_history_tests {
+    use super::{DocHistory, NavTarget, build_buffer_ring};
+    use crate::settings::Page;
+    use crate::store::{Entry, Meta};
+
+    fn entry(id: &str, parent: Option<&str>, folder: Option<&str>, local: bool) -> Entry {
+        let mut meta = Meta::default();
+        meta.parent = parent.map(str::to_string);
+        meta.folder = folder.map(str::to_string);
+        if local {
+            meta.path = Some(format!("/tmp/{id}.md"));
+        }
+        Entry { id: id.to_string(), title: id.to_string(), body: "".into(), icon: None, meta, reminders: vec![], links: vec![] }
+    }
+
+    #[test]
+    fn doc_history_back_forward_and_branch_truncation() {
+        let mut h = DocHistory::default();
+        h.record(NavTarget::Doc("a".into()));
+        h.record(NavTarget::Doc("a".into()));
+        assert_eq!(h.entries, vec![NavTarget::Doc("a".into())]);
+        assert_eq!(h.ix, 0);
+
+        h.record(NavTarget::Home);
+        h.record(NavTarget::Folder("f1".into()));
+        h.record(NavTarget::Settings(Page::General));
+        h.record(NavTarget::Trash);
+        h.record(NavTarget::Doc("b".into()));
+        assert_eq!(h.ix, 5);
+
+        // Jump back across views and documents: Doc(b) -> Trash -> Settings -> Folder(f1) -> Home -> Doc(a).
+        for expected in [NavTarget::Trash, NavTarget::Settings(Page::General), NavTarget::Folder("f1".into()), NavTarget::Home, NavTarget::Doc("a".into())] {
+            let (ix, target) = h.step(false, |_| true).unwrap();
+            assert_eq!(target, expected);
+            h.ix = ix;
+        }
+        assert!(h.step(false, |_| true).is_none());
+
+        // Forward skips deleted doc/folder entries.
+        let (ix, target) = h.step(true, |_| true).unwrap();
+        assert_eq!((ix, target), (1, NavTarget::Home));
+        h.ix = ix;
+        let (ix, target) = h.step(true, |t| !matches!(t, NavTarget::Folder(f) if f == "f1")).unwrap();
+        assert_eq!((ix, target), (3, NavTarget::Settings(Page::General)));
+
+        // Recording a new branch while at `Doc(a)` truncates forward entries.
+        h.ix = 0;
+        h.record(NavTarget::Doc("d".into()));
+        assert_eq!(h.entries, vec![NavTarget::Doc("a".into()), NavTarget::Doc("d".into())]);
+        assert_eq!(h.ix, 1);
+
+        // Recording while navigating is ignored.
+        h.navigating = true;
+        h.record(NavTarget::Home);
+        h.navigating = false;
+        assert_eq!(h.entries, vec![NavTarget::Doc("a".into()), NavTarget::Doc("d".into())]);
+    }
+
+    #[test]
+    fn buffer_ring_covers_nested_unopened_and_local_docs() {
+        let f1 = entry("f1", None, Some("f1"), false);
+        let d1 = entry("d1", Some("f1"), None, false);
+        let d2 = entry("d2", None, None, false);
+        let loc = entry("loc", None, None, true);
+        let entries = vec![f1, d1, d2, loc.clone()];
+        let ring = build_buffer_ring(&entries, &[&loc]);
+        assert_eq!(ring.len(), 3);
+        assert!(ring.contains(&"d1".to_string()));
+        assert!(ring.contains(&"d2".to_string()));
+        assert!(ring.contains(&"loc".to_string()));
+        assert!(!ring.contains(&"f1".to_string()));
     }
 }

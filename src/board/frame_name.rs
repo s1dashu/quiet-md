@@ -81,7 +81,7 @@ pub fn labels(me: &mut BoardView, window: &mut Window) -> Vec<AnyElement> {
     // keeps window rects (the pointer's coordinates)
     let cb = me.bounds.get();
     let (o, vp) = (cb.origin, cb.size);
-    let font = gpui::font(crate::board::chrome::style::UI_FONT);
+    let font = crate::theme::font_with_fallbacks(crate::board::chrome::style::UI_FONT, false);
     let fs = px(FrameStyle::NAME_FONT_SIZE as f32);
     let mut out = vec![];
     for f in me.scene.non_deleted_frame_likes() {

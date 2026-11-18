@@ -81,6 +81,7 @@ pub(crate) fn snippet(body: &str, q: &str) -> Option<(String, Vec<Range<usize>>)
 pub(crate) fn summary_text(text: String, mut hits: Vec<Range<usize>>, width: f32, window: &Window) -> StyledText {
     let mut style = window.text_style();
     style.font_family = theme::UI_FONT.into();
+    style.font_fallbacks = Some(theme::font_fallbacks(false));
     style.font_size = px(12.).into();
     style.color = Theme::text_caption();
     let lines = |s: &str| {
@@ -224,6 +225,12 @@ impl Workspace {
         self.row_menu = None;
         self.doc_menu = false;
         self.doc_sub = None;
+        self.non_doc_pending = None;
+        self.sidebar_pending_g = false;
+        self.sidebar_pending_ctrl_w = false;
+        if let Some(ed) = &self.editor {
+            ed.update(cx, |e, cx| e.clear_vim_pending(cx));
+        }
         let search = self.search.clone();
         search.update(cx, |s, cx| {
             // The dialog's query reads at body size, above the 13pt rows.
@@ -231,6 +238,7 @@ impl Workspace {
             s.line_height = 22.;
             s.set_text("", cx)
         });
+        window.set_ime_active(true);
         window.focus(&search.focus_handle(cx));
         self.search_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
@@ -241,8 +249,12 @@ impl Workspace {
             return;
         }
         self.search_open = false;
-        if let Some(ed) = &self.editor {
-            ed.read(cx).focus(window);
+        if self.view == crate::app::View::Doc && self.pane_focus == crate::app::PaneFocus::Main {
+            if let Some(ed) = &self.editor {
+                ed.read(cx).focus(window);
+            }
+        } else {
+            window.focus(&self.focus);
         }
         cx.notify();
     }
@@ -256,8 +268,10 @@ impl Workspace {
         let Some(id) = self.search_results(cx).get(row).map(|e| e.id.clone()) else { return };
         self.close_search(window, cx);
         self.open(&id, window, cx);
-        if let Some(ed) = &self.editor {
+        if self.view == crate::app::View::Doc && let Some(ed) = &self.editor {
             ed.read(cx).focus(window);
+        } else {
+            window.focus(&self.focus);
         }
     }
 

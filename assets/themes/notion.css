@@ -142,7 +142,7 @@
   color: var(--notion-text);
   font-family: system-ui;
   font-size: 16px;
-  line-height: 24px;
+  line-height: 25px;
   max-width: 708px;
   caret-color: var(--notion-text);
 }
@@ -152,7 +152,7 @@
 }
 
 p {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .title {
@@ -160,17 +160,19 @@ p {
   font-size: 40px;
   line-height: 48px;
   font-weight: 700;
-  color: var(--notion-text);
+  letter-spacing: -0.025em;
+  color: #1f1e1a;
 }
 
 h1 {
   font-family: system-ui;
   font-size: 30px;
-  line-height: 39px;
-  font-weight: 600;
-  color: inherit;
-  margin-top: 32px;
-  margin-bottom: 4px;
+  line-height: 38px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1f1e1a;
+  margin-top: 34px;
+  margin-bottom: 8px;
 }
 
 h2 {
@@ -178,78 +180,86 @@ h2 {
   font-size: 24px;
   line-height: 31px;
   font-weight: 600;
+  letter-spacing: -0.015em;
   color: inherit;
-  margin-top: 22px;
-  margin-bottom: 4px;
+  margin-top: 26px;
+  margin-bottom: 6px;
 }
 
 h3 {
   font-family: system-ui;
   font-size: 20px;
-  line-height: 26px;
+  line-height: 27px;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: inherit;
-  margin-top: 16px;
-  margin-bottom: 4px;
+  margin-top: 20px;
+  margin-bottom: 6px;
 }
 
 h4 {
   font-family: system-ui;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 24px;
   font-weight: 600;
+  letter-spacing: 0px;
   color: inherit;
-  margin-top: 12px;
-  margin-bottom: 4px;
+  margin-top: 16px;
+  margin-bottom: 5px;
 }
 
 h5 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 15.5px;
+  line-height: 23px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 8px;
+  letter-spacing: 0.015em;
+  color: #55534e;
+  margin-top: 14px;
   margin-bottom: 4px;
 }
 
 h6 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 15px;
+  line-height: 22px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 8px;
+  letter-spacing: 0.02em;
+  color: var(--notion-secondary);
+  margin-top: 12px;
   margin-bottom: 4px;
 }
 
 h7 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 15px;
+  line-height: 22px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 8px;
+  letter-spacing: 0.02em;
+  color: var(--notion-secondary);
+  margin-top: 12px;
   margin-bottom: 4px;
 }
 
 h8 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 15px;
+  line-height: 22px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 8px;
+  letter-spacing: 0.02em;
+  color: var(--notion-secondary);
+  margin-top: 12px;
   margin-bottom: 4px;
 }
 
 h9 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 15px;
+  line-height: 22px;
   font-weight: 600;
-  color: inherit;
-  margin-top: 8px;
+  letter-spacing: 0.02em;
+  color: var(--notion-secondary);
+  margin-top: 12px;
   margin-bottom: 4px;
 }
 
@@ -269,6 +279,8 @@ a:hover {
 }
 
 code {
+  font-family: ui-monospace;
+  font-size: 0.875em;
   color: #eb5757;
   background-color: rgba(135, 131, 120, 0.15);
   border-color: transparent;

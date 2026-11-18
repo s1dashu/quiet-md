@@ -104,6 +104,20 @@ impl TextLayout {
         }
     }
 
+    /// Baseline y-coordinate (window coords) for the row where the caret at
+    /// `index` sits, matching `WrappedLine::paint_rows`, or `None` for empty lines.
+    pub fn baseline_y_for(&self, index: usize, at_row_end: bool) -> Option<Pixels> {
+        let ri = self.row_index_for_caret(index, at_row_end);
+        let r = self.rows.get(ri)?;
+        let (_, line) = self.lines.get(r.hard)?;
+        let l = &line.unwrapped_layout;
+        if l.ascent == px(0.) && l.descent == px(0.) {
+            return None;
+        }
+        let padding_top = (self.line_height - l.ascent - l.descent) / 2.;
+        Some(self.bounds.top() + r.y + r.base_dy + padding_top + l.ascent)
+    }
+
     /// `index` starts a wrapped row, so the caret may move to the end of the
     /// row above instead.
     pub fn starts_row(&self, index: usize) -> bool {
@@ -259,6 +273,195 @@ impl TextSpec {
     }
 }
 
+/// Key identifying a logical caret position so scrolling doesn't trigger a false smear.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct CaretKey {
+    pub block: BlockId,
+    pub offset: usize,
+    pub row_end: bool,
+    pub block_caret: bool,
+}
+
+/// Active animated cursor polygon ready to be painted in window coordinates.
+#[derive(Clone, Copy)]
+pub struct ActiveCaretDraw {
+    pub corners: [[f32; 2]; 4],
+    pub block_caret: bool,
+}
+
+fn caret_color(block_caret: bool, smearing: bool) -> Hsla {
+    let mut c = Theme::primary_500();
+    c.a = match (block_caret, smearing) {
+        (true, _) => 0.55,
+        (false, true) => 0.65,
+        (false, false) => 1.0,
+    };
+    c
+}
+
+impl ActiveCaretDraw {
+    pub fn paint(&self, clip: Bounds<Pixels>, window: &mut Window) {
+        let mut pb = PathBuilder::fill();
+        let c = self.corners;
+        pb.move_to(point(px(c[0][0]), px(c[0][1])));
+        pb.line_to(point(px(c[1][0]), px(c[1][1])));
+        pb.line_to(point(px(c[2][0]), px(c[2][1])));
+        pb.line_to(point(px(c[3][0]), px(c[3][1])));
+        pb.close();
+        if let Ok(path) = pb.build() {
+            let fill_c = caret_color(self.block_caret, true);
+            window.with_content_mask(Some(ContentMask { bounds: clip }), |window| {
+                window.paint_path(path, fill_c);
+            });
+        }
+    }
+}
+
+/// Classic Neovide-style corner-damped cursor animation across blocks.
+pub struct CaretAnim {
+    corners: Option<[[f32; 2]; 4]>,
+    speeds: [f32; 4],
+    target: Option<Bounds<Pixels>>,
+    last_key: Option<CaretKey>,
+    last_t: Option<std::time::Instant>,
+    animating: bool,
+    active_this_frame: Option<ActiveCaretDraw>,
+}
+
+impl Default for CaretAnim {
+    fn default() -> Self {
+        Self {
+            corners: None,
+            speeds: [42.0; 4],
+            target: None,
+            last_key: None,
+            last_t: None,
+            animating: false,
+            active_this_frame: None,
+        }
+    }
+}
+
+impl CaretAnim {
+    pub fn begin_frame(&mut self, active: bool) {
+        self.active_this_frame = None;
+        if !active {
+            self.corners = None;
+            self.target = None;
+            self.last_key = None;
+            self.last_t = None;
+            self.animating = false;
+        }
+    }
+
+    pub fn active_draw(&self) -> Option<ActiveCaretDraw> {
+        self.active_this_frame
+    }
+
+    /// Advances the 4 cursor corners toward `target_rect`. Returns `true` while
+    /// mid-flight so the caller lets `active_draw` paint the trailing quad.
+    pub fn step(&mut self, target_rect: Bounds<Pixels>, key: CaretKey) -> bool {
+        let (l, t, r, b) = (
+            f32::from(target_rect.left()),
+            f32::from(target_rect.top()),
+            f32::from(target_rect.right()),
+            f32::from(target_rect.bottom()),
+        );
+        let dest = [[l, t], [r, t], [r, b], [l, b]];
+
+        if std::env::var_os("FDL_NOBLINK").is_some() {
+            self.corners = Some(dest);
+            self.target = Some(target_rect);
+            self.last_key = Some(key);
+            self.last_t = None;
+            self.animating = false;
+            return false;
+        }
+
+        let Some(mut corners) = self.corners else {
+            self.corners = Some(dest);
+            self.target = Some(target_rect);
+            self.last_key = Some(key);
+            self.last_t = Some(std::time::Instant::now());
+            self.animating = false;
+            return false;
+        };
+
+        let now = std::time::Instant::now();
+        let was_animating = self.animating;
+
+        if self.last_key == Some(key) {
+            // Keep the cursor (and any ongoing tail) locked to scrolled text.
+            if let Some(prev) = self.target {
+                let sx = f32::from(target_rect.origin.x - prev.origin.x);
+                let sy = f32::from(target_rect.origin.y - prev.origin.y);
+                if sx != 0. || sy != 0. {
+                    for c in &mut corners {
+                        c[0] += sx;
+                        c[1] += sy;
+                    }
+                }
+            }
+        } else {
+            let prev_cx = (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) * 0.25;
+            let prev_cy = (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) * 0.25;
+            let dest_cx = (l + r) * 0.5;
+            let dest_cy = (t + b) * 0.5;
+            let dx = dest_cx - prev_cx;
+            let dy = dest_cy - prev_cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > 0.5 {
+                let dir = [dx / dist, dy / dist];
+                const K: f32 = std::f32::consts::FRAC_1_SQRT_2;
+                const CORNER_DIRS: [[f32; 2]; 4] = [[-K, -K], [K, -K], [K, K], [-K, K]];
+                // Leading corners snap quickly; trailing corners glide smoothly behind.
+                const TRAIL_SPEED: f32 = 15.0;
+                const LEAD_SPEED: f32 = 58.0;
+                for i in 0..4 {
+                    let dot = dir[0] * CORNER_DIRS[i][0] + dir[1] * CORNER_DIRS[i][1];
+                    let u = ((dot + 1.0) * 0.5).clamp(0.0, 1.0);
+                    self.speeds[i] = TRAIL_SPEED + (LEAD_SPEED - TRAIL_SPEED) * u;
+                }
+            } else {
+                self.speeds = [38.0; 4];
+            }
+        }
+
+        let dt = if was_animating {
+            self.last_t.map_or(1.0 / 60.0, |t0| (now - t0).as_secs_f32().clamp(0.001, 0.05))
+        } else {
+            1.0 / 75.0
+        };
+
+        for i in 0..4 {
+            let alpha = 1.0 - (-self.speeds[i] * dt).exp();
+            corners[i][0] += (dest[i][0] - corners[i][0]) * alpha;
+            corners[i][1] += (dest[i][1] - corners[i][1]) * alpha;
+        }
+
+        let max_err = corners
+            .iter()
+            .zip(dest.iter())
+            .map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()))
+            .fold(0.0_f32, f32::max);
+
+        self.target = Some(target_rect);
+        self.last_key = Some(key);
+        self.last_t = Some(now);
+
+        if max_err < 0.35 {
+            self.corners = Some(dest);
+            self.animating = false;
+            false
+        } else {
+            self.corners = Some(corners);
+            self.animating = true;
+            self.active_this_frame = Some(ActiveCaretDraw { corners, block_caret: key.block_caret });
+            true
+        }
+    }
+}
+
 pub struct RichTextElement {
     pub id: BlockId,
     pub text: RichText,
@@ -269,6 +472,7 @@ pub struct RichTextElement {
     /// Horizontal nudge for the placeholder glyphs only (caret stays put).
     pub placeholder_dx: f32,
     pub selection: Option<Range<usize>>,
+    pub selection_full_line: bool,
     pub caret: Option<usize>,
     /// The caret sits at the end of a wrapped row: draw it there rather than
     /// at the start of the row below (both are the same text offset).
@@ -276,6 +480,8 @@ pub struct RichTextElement {
     pub marked: Option<Range<usize>>,
     pub cache: LayoutCache,
     pub show_caret: bool,
+    pub block_caret: bool,
+    pub caret_anim: Option<Rc<RefCell<CaretAnim>>>,
     pub highlight: Option<Box<dyn Fn(&str) -> Vec<crate::highlight::Span>>>,
     /// 查找和替换 hits as (range, is_current), tinted over the glyphs.
     pub found: Vec<(Range<usize>, bool)>,
@@ -374,7 +580,7 @@ fn doc_geom(ix: usize, l: &crate::model::InlineDocLink, spec: &TextSpec, row_w: 
     let font = Font {
         family: theme::UI_FONT.into(),
         features: FontFeatures::default(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into(), "Apple Color Emoji".into()])),
+        fallbacks: Some(crate::theme::font_fallbacks(false)),
         weight: if spec.weight.0 > 500. { spec.weight } else { FontWeight(500.) },
         style: FontStyle::Normal,
     };
@@ -411,7 +617,7 @@ fn reminder_geom(ix: usize, r: &crate::model::InlineReminder, spec: &TextSpec, w
     let font = Font {
         family: theme::UI_FONT.into(),
         features: FontFeatures::default(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into(), "Apple Color Emoji".into()])),
+        fallbacks: Some(crate::theme::font_fallbacks(false)),
         weight: spec.weight,
         style: FontStyle::Normal,
     };
@@ -446,7 +652,7 @@ fn file_geom(ix: usize, f: &crate::model::FileBlock, spec: &TextSpec, row_w: f32
     let font = Font {
         family: theme::UI_FONT.into(),
         features: FontFeatures::default(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into(), "Apple Color Emoji".into()])),
+        fallbacks: Some(crate::theme::font_fallbacks(false)),
         weight: spec.weight,
         style: FontStyle::Normal,
     };
@@ -477,7 +683,7 @@ fn button_geom(ix: usize, b: &crate::model::InlineButton, editing: bool, spec: &
     let font = Font {
         family: theme::UI_FONT.into(),
         features: FontFeatures::default(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into(), "Apple Color Emoji".into()])),
+        fallbacks: Some(crate::theme::font_fallbacks(false)),
         weight,
         style: FontStyle::Normal,
     };
@@ -520,7 +726,7 @@ fn eq_geom(ix: usize, src: &str, fs: f32, row_w: f32, color: Hsla, eqno: u32, wi
         let font = Font {
             family: theme::UI_FONT.into(),
             features: FontFeatures::default(),
-            fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into()])),
+            fallbacks: Some(crate::theme::font_fallbacks(false)),
             weight: FontWeight::NORMAL,
             style: FontStyle::Normal,
         };
@@ -612,11 +818,29 @@ fn eq_geom(ix: usize, src: &str, fs: f32, row_w: f32, color: Hsla, eqno: u32, wi
 }
 
 fn font_for(spec: &TextSpec, m: &Marks) -> Font {
-    let family: SharedString = if spec.mono || m.code { theme::mono_font().into() } else if let Some(f) = spec.font { f.into() } else if spec.doc_font { theme::body_font().into() } else { theme::UI_FONT.into() };
+    let mono = spec.mono || m.code;
+    let family_str = if spec.mono {
+        theme::mono_font()
+    } else if m.code {
+        theme::code_font()
+    } else if let Some(f) = spec.font {
+        f
+    } else if spec.doc_font {
+        theme::body_font()
+    } else {
+        theme::UI_FONT
+    };
+    let fallbacks = if mono {
+        if spec.doc_font { crate::theme::doc_font_fallbacks_for(family_str) } else { crate::theme::font_fallbacks(true) }
+    } else if spec.doc_font {
+        crate::theme::doc_font_fallbacks_for(family_str)
+    } else {
+        crate::theme::font_fallbacks(false)
+    };
     Font {
-        family,
+        family: family_str.into(),
         features: FontFeatures::default(),
-        fallbacks: Some(FontFallbacks::from_fonts(vec!["PingFang SC".into(), "Apple Color Emoji".into()])),
+        fallbacks: Some(fallbacks),
         weight: if m.bold { bold_weight() } else { spec.weight },
         style: if m.italic || spec.italic { FontStyle::Italic } else { FontStyle::Normal },
     }
@@ -644,7 +868,10 @@ fn span_color(spec: &TextSpec, m: &Marks) -> Hsla {
 
 use crate::editor_ui::{CJK_PUNCT_FONT, is_cjk_punct};
 
+#[cfg(not(target_os = "linux"))]
 const QUOTE_FONT: &str = "Helvetica Neue";
+#[cfg(target_os = "linux")]
+const QUOTE_FONT: &str = crate::theme::UI_FONT;
 
 /// Shaped in place of an equation's U+FFFC: same UTF-8 length, a glyph of
 /// the text font (so the line's ascent is unchanged).
@@ -732,7 +959,12 @@ pub fn build_runs(
                 if text.text[a..b].chars().all(is_quote) {
                     font.family = QUOTE_FONT.into();
                 } else if text.text[a..b].chars().all(is_cjk_punct) {
-                    font.family = CJK_PUNCT_FONT.into();
+                    font.family = if spec.doc_font {
+                        let primary = spec.font.unwrap_or_else(theme::body_font);
+                        crate::theme::doc_cjk_punct_font(primary)
+                    } else {
+                        CJK_PUNCT_FONT
+                    }.into();
                 }
             }
             if hl_italic {
@@ -1081,7 +1313,18 @@ impl Element for RichTextElement {
             let _ = line.paint_background_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
         }
         if let Some(sel) = &self.selection {
-            let rects = if self.text.is_empty() {
+            let rects = if self.selection_full_line {
+                if self.text.is_empty() {
+                    vec![Bounds::new(bounds.origin, size(bounds.size.width, lh))]
+                } else {
+                    layout
+                        .rows
+                        .iter()
+                        .filter(|r| r.range.start >= sel.start && r.range.end <= sel.end)
+                        .map(|r| Bounds::new(point(bounds.left(), bounds.top() + r.y), size(bounds.size.width, r.h)))
+                        .collect()
+                }
+            } else if self.text.is_empty() {
                 vec![Bounds::new(bounds.origin, size(px(5.), lh))]
             } else {
                 // Equations show their own selected background instead
@@ -1125,6 +1368,50 @@ impl Element for RichTextElement {
             if let Some(bg) = bg {
                 window.paint_quad(fill(eq.view, bg).corner_radii(px(4.)));
             }
+        }
+        let caret_target = (self.show_caret).then_some(self.caret).flatten().map(|c| {
+            let p = if self.text.is_empty() {
+                let dx = match self.align {
+                    Align::Left => px(0.),
+                    Align::Center => bounds.size.width / 2.,
+                    Align::Right => bounds.size.width - px(2.),
+                };
+                point(bounds.left() + dx, bounds.top())
+            } else if self.caret_row_end {
+                layout.position_at_row_end(c)
+            } else {
+                layout.position_for(c)
+            };
+            let baseline = layout.baseline_y_for(c, self.caret_row_end);
+            let (top, font_h) = caret_v_bounds(baseline, p.y, lh, self.spec.size);
+            let rect = if self.block_caret {
+                let next = crate::editor::core::next_grapheme(&self.text.text, c);
+                let char_w = if !self.caret_row_end && c < self.text.len() && !self.text.text[c..].starts_with('\n') {
+                    layout
+                        .rects_for(c..next)
+                        .first()
+                        .map(|r| r.size.width - px(self.spec.letter_spacing))
+                        .filter(|w| *w > px(0.))
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| px(self.spec.size * 0.55).max(px(7.)));
+                Bounds::new(point(p.x, top), size(char_w, font_h))
+            } else {
+                Bounds::new(point(p.x, top), size(px(2.), font_h))
+            };
+            let animating = self.caret_anim.as_ref().is_some_and(|anim| {
+                anim.borrow_mut().step(
+                    rect,
+                    CaretKey { block: self.id, offset: c, row_end: self.caret_row_end, block_caret: self.block_caret },
+                )
+            });
+            (rect, animating)
+        });
+        if self.block_caret
+            && let Some((rect, false)) = caret_target
+        {
+            window.paint_quad(fill(rect, caret_color(true, false)));
         }
         for (hi, (_, line)) in layout.lines.iter().enumerate() {
             let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
@@ -1173,25 +1460,14 @@ impl Element for RichTextElement {
                 window.paint_quad(fill(Bounds::new(point(r.left(), top), size(r.size.width, box_h)), color));
             }
         }
-        if self.show_caret
-            && let Some(c) = self.caret
+        if !self.block_caret
+            && let Some((rect, false)) = caret_target
         {
-            let p = if self.text.is_empty() {
-                let dx = match self.align {
-                    Align::Left => px(0.),
-                    Align::Center => bounds.size.width / 2.,
-                    Align::Right => bounds.size.width - px(2.),
-                };
-                point(bounds.left() + dx, bounds.top())
-            } else if self.caret_row_end {
-                layout.position_at_row_end(c)
+            if self.caret_anim.is_some() {
+                window.paint_quad(fill(rect, caret_color(false, false)));
             } else {
-                layout.position_for(c)
-            };
-            // The caret: the accent, 2pt wide, the font's ascent + descent tall.
-            let font_h = px(self.spec.size * 1.18);
-            let top = p.y + (lh - font_h) / 2.;
-            window.paint_quad(fill(Bounds::new(point(p.x, top), size(px(2.), font_h)), Theme::caret()).corner_radii(px(1.)));
+                window.paint_quad(fill(rect, Theme::caret()).corner_radii(px(1.)));
+            }
         }
     }
 }
@@ -1522,6 +1798,64 @@ pub fn hit_test(cache: &LayoutCache, p: Point<Pixels>, candidates: &[BlockId]) -
     Some((Pos::new(id, offset), at_row_end))
 }
 
+/// Vertical `(top, height)` for a caret / block caret. Anchored to the
+/// shaped row's baseline (matching `paint_rows`) so CJK glyphs (~0.85em above,
+/// ~0.12em below baseline) sit vertically centered instead of sinking to the
+/// bottom of a line-centered box when `ascent` is much larger than `descent`.
+fn caret_v_bounds(baseline: Option<Pixels>, row_top: Pixels, lh: Pixels, size: f32) -> (Pixels, Pixels) {
+    let above = px(size * 0.96);
+    let below = px(size * 0.24);
+    let h = above + below;
+    let top = match baseline {
+        Some(b) => b - above,
+        None => row_top + (lh - h) / 2.,
+    };
+    (top, h)
+}
+
+#[cfg(test)]
+mod caret_tests {
+    use super::{Row, TextLayout, caret_v_bounds};
+    use gpui::{Bounds, WrappedLine, point, px, size};
+
+    #[test]
+    fn cjk_caret_bounds_follow_baseline_symmetrically() {
+        // Noto Sans CJK SC at 26px (Feishu H1, line-height 36.4):
+        // ascent = 1.16 * 26 = 30.16, descent = 0.288 * 26 = 7.488.
+        let (fs, lh) = (26.0, px(36.4));
+        let (asc, desc) = (px(fs * 1.16), px(fs * 0.288));
+        let baseline = (lh - asc - desc) / 2. + asc;
+        let (top, h) = caret_v_bounds(Some(baseline), px(0.), lh, fs);
+        let bottom = top + h;
+        // CJK ideograph ink spans ~[-0.84em, +0.12em] relative to baseline.
+        let glyph_top = baseline - px(fs * 0.84);
+        let glyph_bot = baseline + px(fs * 0.12);
+        let top_pad = f32::from(glyph_top - top);
+        let bot_pad = f32::from(bottom - glyph_bot);
+        assert!(top_pad > 2.5 && bot_pad > 2.5, "glyph must not touch or exit box: top={top_pad}, bot={bot_pad}");
+        assert!((top_pad - bot_pad).abs() < 0.1, "padding should be balanced: top={top_pad}, bot={bot_pad}");
+    }
+
+    #[test]
+    fn empty_line_caret_centers_in_line_height() {
+        let mut layout = TextLayout {
+            bounds: Bounds::new(point(px(10.), px(20.)), size(px(100.), px(22.))),
+            lines: vec![(0, WrappedLine::default())],
+            rows: vec![Row { range: 0..0, hard: 0, y: px(0.), h: px(22.), base_dy: px(0.), x0: px(0.), align_dx: px(0.) }],
+            line_height: px(22.),
+            mono: false,
+            eqs: vec![],
+            buttons: vec![],
+        };
+        assert_eq!(layout.baseline_y_for(0, false), None);
+        let (top, h) = caret_v_bounds(None, px(20.), px(22.), 15.);
+        assert_eq!(h, px(18.));
+        assert_eq!(top, px(22.));
+        layout.rows.clear();
+        assert_eq!(layout.baseline_y_for(0, false), None);
+    }
+}
+
 #[cfg(test)]
 mod wrap_tests {
     use super::can_break;
@@ -1539,6 +1873,48 @@ mod wrap_tests {
         assert_eq!(breaks("你好世界"), [1, 2, 3]);
         assert_eq!(breaks("中文。한국어"), [1, 3], "Chinese still breaks, but not before closing punctuation");
         assert_eq!(breaks("Hello world"), [6]);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    #[test]
+    fn linux_font_pairing_and_fallbacks() {
+        let ts = gpui::test_text_system();
+        let ui_id = ts.resolve_font(&gpui::font(crate::theme::UI_FONT));
+        let mono_id = ts.resolve_font(&gpui::font(crate::theme::MONO_FONT));
+        let punct_id = ts.resolve_font(&gpui::font(crate::editor_ui::CJK_PUNCT_FONT));
+        assert!(ui_id != mono_id || ts.all_font_names().is_empty());
+        let _ = punct_id;
+
+        let prose = gpui::linux_shaped_run_families("Hello 中文", crate::theme::UI_FONT, Some(crate::theme::font_fallbacks(false))).unwrap();
+        let code = gpui::linux_shaped_run_families("fn 中文()", crate::theme::MONO_FONT, Some(crate::theme::font_fallbacks(true))).unwrap();
+        let all = ts.all_font_names();
+        let cjk = if all.iter().any(|n| n == "TsangerJinKai05") { "TsangerJinKai05" } else { "LXGW WenKai" };
+        if all.iter().any(|n| n == "Noto Sans") && all.iter().any(|n| n == cjk) {
+            assert_eq!(prose, vec!["Noto Sans", cjk]);
+        }
+        if all.iter().any(|n| n == "JetBrainsMono Nerd Font") && all.iter().any(|n| n == "LXGW WenKai Mono") {
+            assert_eq!(code, vec!["JetBrainsMono Nerd Font", "LXGW WenKai Mono", "JetBrainsMono Nerd Font"]);
+        }
+        // Without explicit FontFallbacks (e.g. sidebar / UI elements), LinuxFallback still picks LXGW WenKai.
+        let ui_auto = gpui::linux_shaped_run_families("Settings 设置", crate::theme::UI_FONT, None).unwrap();
+        if all.iter().any(|n| n == "Noto Sans") && all.iter().any(|n| n == "LXGW WenKai") {
+            assert_eq!(ui_auto, vec!["Noto Sans", "LXGW WenKai"]);
+        }
+        let emoji = gpui::linux_shaped_run_families("Hi 👋 中文", crate::theme::UI_FONT, Some(crate::theme::font_fallbacks(false))).unwrap();
+        if all.iter().any(|n| n == "Noto Sans") && all.iter().any(|n| n == cjk) && all.iter().any(|n| n == "Noto Color Emoji") {
+            assert_eq!(emoji, vec!["Noto Sans", "Noto Color Emoji", "Noto Sans", cjk]);
+        }
+        if all.iter().any(|n| n == "TsangerJinKai05") {
+            let reg_f = crate::theme::font_with_fallbacks(crate::theme::UI_FONT, false);
+            let mut bold_f = reg_f.clone();
+            bold_f.weight = gpui::FontWeight::BOLD;
+            let run_for = |font| [gpui::TextRun { len: "中文".len(), font, color: gpui::black(), background_color: None, underline: None, strikethrough: None }];
+            let reg_line = ts.shape_line("中文".into(), gpui::px(15.), &run_for(reg_f), None);
+            let bold_line = ts.shape_line("中文".into(), gpui::px(15.), &run_for(bold_f), None);
+            assert_ne!(reg_line.runs[0].font_id, bold_line.runs[0].font_id);
+        }
     }
 }
 

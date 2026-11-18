@@ -48,6 +48,9 @@ impl Editor {
         if on {
             self.core.clear_block_sel();
             self.core.cell_sel = None;
+            self.cat_focused = false;
+        } else if crate::settings::vim_mode() {
+            self.vim.enter_normal(&mut self.core);
         }
         cx.notify();
     }

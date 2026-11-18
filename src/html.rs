@@ -14,17 +14,18 @@ pub struct Options<'a> {
 const CSS: &str = r#"
 * { box-sizing: border-box; }
 html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-body { margin: 0; color: #1f2225; font: 15px/22px -apple-system, "SF Pro Text", "PingFang SC", sans-serif; word-wrap: break-word; }
+body { margin: 0; color: #1f2225; font: 15px/24px -apple-system, "SF Pro Text", "PingFang SC", sans-serif; word-wrap: break-word; }
 .cover { height: 200px; margin-bottom: 24px; background-size: cover; background-position: center; border-radius: 12px; }
 .icon { font-size: 48px; line-height: 56px; margin-bottom: 8px; }
-h1.title { font-size: 21px; line-height: 27px; font-weight: 700; margin: 0 0 16px; padding-bottom: 16px; border-bottom: 1px solid rgba(0,0,0,0.045); }
-.b { margin: 13px 0; min-height: 22px; }
+h1.title { font-size: 34px; line-height: 42px; font-weight: 700; letter-spacing: -0.85px; color: #141517; margin: 0 0 20px; padding-bottom: 16px; border-bottom: 1px solid rgba(0,0,0,0.045); }
+.b { margin: 12px 0; min-height: 24px; }
 .h { font-weight: 600; }
-.h1 { font-size: 21px; line-height: 27px; font-weight: 700; margin-top: 48px; margin-bottom: 16px; }
-.h2 { font-size: 19px; line-height: 25px; font-weight: 700; margin-top: 36px; margin-bottom: 16px; }
-.h3 { font-size: 18px; line-height: 24px; margin-top: 28px; margin-bottom: 12px; }
-.h4 { font-size: 16px; line-height: 25px; margin-top: 16px; margin-bottom: 16px; }
-.h5, .h6, .h7, .h8, .h9 { font-size: 15px; margin-top: 13px; }
+.h1 { font-size: 26px; line-height: 33px; font-weight: 700; letter-spacing: -0.52px; color: #141517; margin-top: 36px; margin-bottom: 12px; }
+.h2 { font-size: 21px; line-height: 28px; font-weight: 700; letter-spacing: -0.32px; margin-top: 28px; margin-bottom: 10px; }
+.h3 { font-size: 18px; line-height: 25px; font-weight: 600; letter-spacing: -0.18px; margin-top: 22px; margin-bottom: 8px; }
+.h4 { font-size: 16.5px; line-height: 24px; font-weight: 600; margin-top: 18px; margin-bottom: 6px; }
+.h5 { font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: 0.22px; color: #3f4143; margin-top: 14px; margin-bottom: 5px; }
+.h6, .h7, .h8, .h9 { font-size: 14.5px; line-height: 21px; font-weight: 600; letter-spacing: 0.29px; color: #5d6064; margin-top: 12px; margin-bottom: 4px; }
 .hn { margin-right: 6px; color: #737477; }
 .li { display: flex; margin: 13px 0; }
 .mk { flex: none; min-width: 18px; margin-right: 6px; color: #1f2225; white-space: nowrap; }

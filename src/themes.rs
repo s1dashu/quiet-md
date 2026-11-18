@@ -74,32 +74,45 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
     use Def::*;
     use Kind::*;
     let p = |sel: &'static str, prop: &'static str, key: &str, kind: Kind, craft: Def, feishu: Def| Prop { sel, prop, key: key.to_string(), kind, craft, feishu };
+    let def_rgb = |c: Option<Hsla>| -> Def {
+        match c {
+            Some(c) => {
+                let r = gpui::Rgba::from(c);
+                let b = |v: f32| (v * 255.).round() as u32;
+                Rgb((b(r.r) << 16) | (b(r.g) << 8) | b(r.b))
+            }
+            None => Inherit,
+        }
+    };
     let mut v = vec![
         p(".page", "background-color", "page.bg", Color, Tok("bg_body"), Tok("bg_body")),
         p(".page", "color", "page.color", Color, Tok("text"), Tok("text")),
         p(".page", "font-family", "page.font", Font, Family(SYSTEM), Family(SYSTEM)),
         p(".page", "font-size", "page.size", Len, N(crate::theme::BODY_SIZE), N(16.)),
-        p(".page", "line-height", "page.line", Len, N(22.), N(26.)),
+        p(".page", "line-height", "page.line", Len, N(crate::theme::BODY_LINE), N(26.)),
         p(".page", "max-width", "page.width", Len, N(820.), N(820.)),
         p(".page", "caret-color", "page.caret", Color, Tok("caret"), Tok("caret")),
         p("::selection", "background-color", "selection", Color, Tok("selection"), Tok("selection")),
-        p("p", "margin-bottom", "p.gap", Len, N(crate::theme::BLOCK_GAP), N(8.)),
+        p("p", "margin-bottom", "p.gap", Len, N(crate::theme::BLOCK_GAP), N(10.)),
         p(".title", "font-family", "title.font", Font, Family(SYSTEM), Family(SYSTEM)),
-        p(".title", "font-size", "title.size", Len, N(crate::theme::TITLE.size), N(crate::theme::TITLE.size)),
-        p(".title", "line-height", "title.line", Len, N(crate::theme::TITLE.line_height), N(crate::theme::TITLE.line_height)),
-        p(".title", "font-weight", "title.weight", Weight, N(700.), N(500.)),
-        p(".title", "color", "title.color", Color, Inherit, Inherit),
+        p(".title", "font-size", "title.size", Len, N(crate::theme::TITLE.size), N(crate::feishu_theme::TITLE.size)),
+        p(".title", "line-height", "title.line", Len, N(crate::theme::TITLE.line_height), N(crate::feishu_theme::TITLE.line_height)),
+        p(".title", "font-weight", "title.weight", Weight, N(700.), N(700.)),
+        p(".title", "letter-spacing", "title.tracking", Len, N(crate::theme::TITLE_TRACKING), N(crate::feishu_theme::TITLE_TRACKING)),
+        p(".title", "color", "title.color", Color, Rgb(crate::theme::craft::N950), Rgb(crate::feishu_theme::ud::N950)),
     ];
     const H: [&str; 9] = ["h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8", "h9"];
     for (i, h) in H.iter().enumerate() {
         let l = i as u8 + 1;
         let (c, f) = (crate::theme::heading_metrics(l), crate::feishu_theme::heading_metrics(l));
+        let (cc, fc) = (def_rgb(crate::theme::light(|| crate::theme::heading_color(l))), def_rgb(crate::theme::light(|| crate::feishu_theme::heading_color(l))));
         v.extend([
-            p(h, "font-family", &format!("{h}.font"), Font, Family(SYSTEM), Unused),
+            p(h, "font-family", &format!("{h}.font"), Font, Family(SYSTEM), Family(SYSTEM)),
             p(h, "font-size", &format!("{h}.size"), Len, N(c.size), N(f.size)),
             p(h, "line-height", &format!("{h}.line"), Len, N(c.line_height), N(f.line_height)),
-            p(h, "font-weight", &format!("{h}.weight"), Weight, N(crate::theme::heading_weight(l).0), N(500.)),
-            p(h, "color", &format!("{h}.color"), Color, Inherit, Unused),
+            p(h, "font-weight", &format!("{h}.weight"), Weight, N(crate::theme::heading_weight(l).0), N(crate::feishu_theme::heading_weight(l).0)),
+            p(h, "letter-spacing", &format!("{h}.tracking"), Len, N(crate::theme::heading_tracking(l)), N(crate::feishu_theme::heading_tracking(l))),
+            p(h, "color", &format!("{h}.color"), Color, cc, fc),
             p(h, "margin-top", &format!("{h}.mt"), Len, N(c.mt), N(f.mt)),
             p(h, "margin-bottom", &format!("{h}.mb"), Len, N(c.mb), N(f.mb)),
         ]);
@@ -111,6 +124,8 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
         p("a", "text-decoration", "a.underline", Underline, B(false), Unused),
         p("a", "text-decoration-color", "a.underline-color", Color, Inherit, Unused),
         p("a:hover", "color", "a.hover", Color, Tok("link_hover"), Tok("link_hover")),
+        p("code", "font-family", "code.font", Font, Family(SYSTEM_MONO), Family(crate::feishu_theme::MONO_FONT)),
+        p("code", "font-size", "code.size", Len, N(13.), N(14.)),
         p("code", "color", "code.color", Color, Inherit, Unused),
         p("code", "background-color", "code.bg", Color, Tok("code_chip"), Unused),
         p("code", "border-color", "code.border", Color, Tok("code_chip_border"), Unused),
@@ -129,7 +144,7 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
         p("blockquote", "border-left-width", "quote.bar", Len, N(4.), Unused),
         p("blockquote", "border-left-color", "quote.bar-color", Color, Tok("quote_bar"), Tok("quote_bar")),
         p("blockquote", "padding-left", "quote.indent", Len, N(16.), Unused),
-        p("blockquote", "color", "quote.color", Color, Inherit, Unused),
+        p("blockquote", "color", "quote.color", Color, Rgb(crate::theme::craft::N700), Unused),
         p("blockquote", "font-style", "quote.italic", Italic, B(false), Unused),
         p("ul", "padding-left", "list.indent", Len, N(25.), Unused),
         p("ul li::marker", "color", "bullet.color", Color, Inherit, Unused),
@@ -451,7 +466,10 @@ fn parse_font<'a>(v: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> Option<&'
         let alias = match f.to_lowercase().as_str() {
             "system-ui" | "-apple-system" | "blinkmacsystemfont" | "ui-sans-serif" | "sans-serif" => Some(SYSTEM),
             "ui-monospace" | "monospace" | "sfmono-regular" | "sf mono" => Some(SYSTEM_MONO),
+            #[cfg(not(target_os = "linux"))]
             "ui-serif" | "serif" => Some("Times New Roman"),
+            #[cfg(target_os = "linux")]
+            "ui-serif" | "serif" => Some(".SystemSerifFont"),
             _ => None,
         };
         if let Some(a) = alias { return Some(a) }
@@ -594,7 +612,14 @@ fn parse_with_fonts<'a>(css: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> R
         let em = match el { "page" | "p" | "list" | "quote" | "task" | "code" | "callout" | "hr" | "strong" | "a" | "done" | "bullet" | "number" | "selection" | "th" => body, e => size_of(e) };
         let unitless = (p.prop == "line-height").then_some(em);
         let val = match p.kind {
-            Kind::Len => parse_len(v, if p.prop == "font-size" { body } else { em }, unitless).filter(|n| (0. ..2000.).contains(n)).map(Val::N),
+            Kind::Len => {
+                if p.prop == "letter-spacing" && v.trim().eq_ignore_ascii_case("normal") {
+                    Some(Val::N(0.))
+                } else {
+                    let ok = |n: &f32| if p.prop == "letter-spacing" { (-16. ..64.).contains(n) } else { (0. ..2000.).contains(n) };
+                    parse_len(v, if p.prop == "font-size" { body } else { em }, unitless).filter(ok).map(Val::N)
+                }
+            }
             Kind::Weight => parse_weight(v).map(Val::N),
             Kind::Color if matches!(v.trim().to_lowercase().as_str(), "inherit" | "currentcolor") => Some(Val::Inherit),
             Kind::Color => parse_color(v).map(Val::C),
@@ -817,7 +842,7 @@ fn base_css(feishu: bool, name: &str, name_en: &str, description: &str) -> Strin
             Kind::Weight => css_num(st.num(&p.key)),
             Kind::Color => st.color(&p.key).map_or_else(|| "inherit".into(), css_color),
             // Keep bundled CSS portable and stable; Linux resolves the Feishu monospace default separately.
-            Kind::Font if feishu && p.key == "pre.font" => "Menlo".into(),
+            Kind::Font if feishu && matches!(p.key.as_str(), "pre.font" | "code.font") => "Menlo".into(),
             Kind::Font => css_font(st.font(&p.key)),
             Kind::Underline => if st.flag(&p.key) { "underline" } else { "none" }.into(),
             Kind::Strike => if st.flag(&p.key) { "line-through" } else { "none" }.into(),
@@ -832,9 +857,9 @@ fn base_css(feishu: bool, name: &str, name_en: &str, description: &str) -> Strin
 }
 
 #[cfg(test)]
-const CRAFT_DESCRIPTION: &str = "Craft for macOS 的文档样式：SF Pro 15 / 22，虚点分隔线，蓝色强调。";
+const CRAFT_DESCRIPTION: &str = "Craft for macOS 的文档样式：15 / 24 清晰字阶，虚点分隔线，蓝色强调。";
 #[cfg(test)]
-const FEISHU_DESCRIPTION: &str = "飞书文档的正文样式：16 / 26，标题 Medium，蓝色链接。";
+const FEISHU_DESCRIPTION: &str = "飞书文档的正文样式：16 / 26 通透版面，加粗标题字阶，蓝色链接。";
 
 #[cfg(test)]
 mod tests {
@@ -881,7 +906,9 @@ mod tests {
             /* comment */
             :root { --theme-name: "T"; --accent: hsl(254, 80%, 68%); --color-red: #d44c47; --token-block-hover: rgba(0,0,0,.05); --mine: 1px; }
             .page, body { font-size: 16px; line-height: 1.5; font-family: "No Such", -apple-system, sans-serif; }
-            h1 { font-size: 1.875em; line-height: 1.3; margin-top: 2em; font-weight: 600; }
+            h1 { font-size: 1.875em; line-height: 1.3; margin-top: 2em; font-weight: 600; letter-spacing: -0.02em; }
+            h2 { letter-spacing: normal; }
+            code { font-size: 0.875em; }
             blockquote { border-left: 3px solid var(--accent); }
             a { text-decoration: underline rgba(55, 53, 47, .4); }
             hr { border-top: 1px solid #e0e0e0; }
@@ -894,6 +921,9 @@ mod tests {
         assert_eq!(st.num("page.line"), 24.);
         assert_eq!(st.font("page.font"), SYSTEM);
         assert_eq!((st.num("h1.size"), st.num("h1.line"), st.num("h1.mt")), (30., 39., 60.));
+        assert!((st.num("h1.tracking") + 0.6).abs() < 1e-5);
+        assert_eq!(st.num("h2.tracking"), 0.);
+        assert_eq!(st.num("code.size"), 14.);
         assert_eq!(st.num("quote.bar"), 3.);
         assert!(st.color("quote.bar-color").is_some());
         assert!(st.flag("a.underline") && st.color("a.underline-color").is_some());

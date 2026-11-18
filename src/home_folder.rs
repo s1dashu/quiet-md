@@ -283,7 +283,7 @@ impl Workspace {
 
     /// `w`: the grid's column width, this frame's (the recorded bounds are last
     /// frame's, stale for a frame after the sidebar opens or closes).
-    pub(crate) fn render_folder_card(&mut self, e: &Entry, w: f32, card_h: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_folder_card(&mut self, e: &Entry, w: f32, card_h: f32, vim_cur: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let id = e.id.clone();
         let h = card_h;
         let hot = self.home.folders.hovered.as_ref() == Some(&id) && self.home.folders.drag.is_none();
@@ -391,6 +391,7 @@ impl Workspace {
                     cx.notify();
                 })))
             .child(back).children(title).child(front_glass).child(label)
+            .when(vim_cur, |d| d.child(div().absolute().inset(px(-3.)).rounded(px(21.)).border_2().border_color(Theme::primary())))
             .into_any_element()
     }
 

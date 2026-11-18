@@ -121,7 +121,9 @@ fn system_fallbacks(family: u32) -> Vec<String> {
         if mono { &["Menlo", "PingFang SC", "Apple Color Emoji"] } else { &["Helvetica", "PingFang SC", "Apple Color Emoji"] }
     } else if cfg!(target_os = "windows") {
         if mono { &["Consolas", "Microsoft YaHei", "Segoe UI Emoji"] } else { &["Arial", "Microsoft YaHei", "Segoe UI Emoji"] }
-    } else { &[] };
+    } else {
+        if mono { &[".SystemCJKMonoFont", "TsangerJinKai05", ".SystemCJKFont", "Noto Color Emoji"] } else { &["TsangerJinKai05", ".SystemCJKFont", "Noto Color Emoji"] }
+    };
     v.iter().map(|s| s.to_string()).collect()
 }
 

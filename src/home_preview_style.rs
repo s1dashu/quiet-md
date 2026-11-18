@@ -31,8 +31,7 @@ pub fn typography(kind: &BlockKind) -> theme::BlockMetrics {
 }
 
 pub fn weight(kind: &BlockKind) -> FontWeight {
-    if crate::settings::feishu() { return if matches!(kind, BlockKind::Heading { .. }) { FontWeight::MEDIUM } else { FontWeight::NORMAL }; }
-    match kind { BlockKind::Heading { level: 1 | 2, .. } => FontWeight::BOLD, BlockKind::Heading { .. } => FontWeight::SEMIBOLD, _ => FontWeight::NORMAL }
+    match kind { BlockKind::Heading { level, .. } => theme::heading_weight(*level), _ => FontWeight::NORMAL }
 }
 
 pub fn gap(kind: &BlockKind) -> (f32, f32) {

@@ -9,7 +9,7 @@ use crate::sidebar as sb;
 use gpui::{prelude::FluentBuilder, *};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
 // ---- preferences
@@ -17,7 +17,76 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 static FEISHU: AtomicBool = AtomicBool::new(false);
 static LANG: AtomicU8 = AtomicU8::new(Lang::En as u8);
 static MOTION_HIGH: AtomicBool = AtomicBool::new(false);
+static VIM_MODE: AtomicBool = AtomicBool::new(false);
+static VIM_AUTO_IME: AtomicBool = AtomicBool::new(true);
+static FONT_PRESET: RwLock<&'static str> = RwLock::new("");
+static HEADING_FONT: RwLock<&'static str> = RwLock::new("");
+static DOC_FONT: RwLock<&'static str> = RwLock::new("");
+static MONO_FONT: RwLock<&'static str> = RwLock::new("");
+static TYPE_CONTRAST: AtomicU8 = AtomicU8::new(1);
+static DOC_FONT_SIZE: AtomicU32 = AtomicU32::new(0);
+static AVAILABLE_FONTS: RwLock<Vec<String>> = RwLock::new(Vec::new());
 static PREFS: RwLock<Option<Preferences>> = RwLock::new(None);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TypeContrast { Compact = 0, Standard = 1, Expressive = 2 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub enum FontTarget { Preset, Heading, Body, Mono }
+
+pub const FONT_PRESETS: &[(&str, &str, &str)] = &[
+    ("", "跟随主题", "Follow theme"),
+    ("modern", "现代清晰（无衬线）", "Modern (Sans)"),
+    ("editorial", "编辑人文（衬线标题）", "Editorial (Serif + Sans)"),
+    ("literary", "温润手记（楷体正文）", "Literary (WenKai)"),
+    ("technical", "技术文档（等宽强化）", "Technical (Sans + Mono)"),
+];
+
+/// Populate system font names once so typography presets pick installed faces.
+pub(crate) fn init_available_fonts(f: impl FnOnce() -> Vec<String>) {
+    if AVAILABLE_FONTS.read().unwrap().is_empty() {
+        let list = f();
+        if !list.is_empty() { *AVAILABLE_FONTS.write().unwrap() = list; }
+    }
+}
+
+fn pick_installed(candidates: &[&'static str]) -> Option<&'static str> {
+    let fonts = AVAILABLE_FONTS.read().unwrap();
+    if fonts.is_empty() { return None }
+    candidates.iter().copied().find(|c| fonts.iter().any(|f| f.eq_ignore_ascii_case(c)))
+}
+
+fn preset_fonts(preset: &str) -> (Option<&'static str>, Option<&'static str>, Option<&'static str>) {
+    match preset {
+        "modern" => (
+            pick_installed(&["SF Pro Display", "Inter", "Noto Sans", "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", "Adwaita Sans"]),
+            pick_installed(&["SF Pro Text", "PingFang SC", "Adwaita Sans", "Inter", "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei"]),
+            pick_installed(&["SF Mono", "JetBrainsMono Nerd Font", "JetBrains Mono", "Menlo", "Consolas", "Noto Sans Mono"]),
+        ),
+        "editorial" => (
+            pick_installed(&["New York", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "Georgia", "Noto Serif", "C059", "SimSun"]),
+            pick_installed(&["SF Pro Text", "PingFang SC", "Inter", "Adwaita Sans", "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei"]),
+            pick_installed(&["SF Mono", "JetBrains Mono", "Menlo", "Consolas", "Noto Sans Mono"]),
+        ),
+        "literary" => (
+            pick_installed(&["PingFang SC", "Noto Serif CJK SC", "Noto Sans CJK SC", "Songti SC", "Inter", "Noto Serif"]),
+            pick_installed(&["LXGW WenKai", "TsangerJinKai05", "Kaiti SC", "KaiTi", "Noto Serif CJK SC"]),
+            pick_installed(&["LXGW WenKai Mono", "Maple Mono NF CN", "JetBrains Mono", "Menlo", "Consolas"]),
+        ),
+        "technical" => (
+            pick_installed(&["Inter", "SF Pro Display", "Noto Sans", "Adwaita Sans", "PingFang SC", "Noto Sans CJK SC"]),
+            pick_installed(&["Inter", "SF Pro Text", "Adwaita Sans", "Noto Sans", "PingFang SC", "Noto Sans CJK SC"]),
+            pick_installed(&["JetBrainsMono Nerd Font", "Maple Mono NF CN", "JetBrains Mono", "SF Mono", "Menlo", "Consolas"]),
+        ),
+        _ => (None, None, None),
+    }
+}
+
+pub fn font_preset() -> &'static str { *FONT_PRESET.read().unwrap() }
+
+pub fn type_contrast() -> TypeContrast {
+    match TYPE_CONTRAST.load(Ordering::Relaxed) { 0 => TypeContrast::Compact, 2 => TypeContrast::Expressive, _ => TypeContrast::Standard }
+}
 
 /// The active document theme draws blocks the 飞书 way (else Craft's).
 pub fn feishu() -> bool { FEISHU.load(Ordering::Relaxed) }
@@ -40,6 +109,27 @@ pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).cop
 pub fn english() -> bool { lang() != Lang::Zh }
 /// 外观 › 动画 is 丰富: folding, the selection and hover animate too (else they answer at once).
 pub fn motion_high() -> bool { MOTION_HIGH.load(Ordering::Relaxed) }
+pub fn vim_mode() -> bool { VIM_MODE.load(Ordering::Relaxed) }
+pub fn vim_auto_ime() -> bool { VIM_AUTO_IME.load(Ordering::Relaxed) }
+pub fn doc_font() -> Option<&'static str> {
+    let s = *DOC_FONT.read().unwrap();
+    if !s.is_empty() { Some(s) } else { preset_fonts(font_preset()).1 }
+}
+pub fn heading_font() -> Option<&'static str> {
+    let s = *HEADING_FONT.read().unwrap();
+    if s == "@body" { return doc_font() }
+    if !s.is_empty() { return Some(s) }
+    preset_fonts(font_preset()).0
+}
+pub fn mono_font() -> Option<&'static str> {
+    let s = *MONO_FONT.read().unwrap();
+    if !s.is_empty() { Some(s) } else { preset_fonts(font_preset()).2 }
+}
+pub fn doc_font_size() -> u32 { DOC_FONT_SIZE.load(Ordering::Relaxed) }
+pub(crate) fn effective_doc_font_size() -> u32 {
+    let sz = doc_font_size();
+    if sz == 0 { themes::active().num("page.size").round().clamp(12., 28.) as u32 } else { sz }
+}
 pub fn tr(zh: &'static str, en: &'static str) -> &'static str { match lang() { Lang::Zh => zh, Lang::En => en, l => crate::l10n::get(l, zh).unwrap_or(en) } }
 /// `localized_format!` for a given language: `zh` / `en` build the two
 /// originals; other languages refill their translation of `template`.
@@ -119,9 +209,32 @@ pub struct Preferences {
     pub opaque_window: bool,
     /// 外观 › 界面字号: "small" or "large"; empty is the 13pt standard.
     pub ui_font: String,
+    /// 外观 › 排版预设: empty follows the document theme; otherwise "modern", "editorial", "literary", "technical".
+    #[serde(default)]
+    pub font_preset: String,
+    /// 外观 › 标题字体: empty follows the preset/theme, "@body" matches doc_font, else a font family name.
+    #[serde(default)]
+    pub heading_font: String,
+    /// 外观 › 正文字体: empty follows the preset/theme; otherwise a font family name.
+    pub doc_font: String,
+    /// 外观 › 代码字体: empty follows the preset/theme; otherwise a monospace font family name.
+    #[serde(default)]
+    pub mono_font: String,
+    /// 外观 › 层次对比: "compact", empty (standard), or "expressive".
+    #[serde(default)]
+    pub type_contrast: String,
+    /// 外观 › 正文字号: 0 follows the document theme; otherwise px in 12..=28.
+    pub doc_font_size: u32,
+    /// 通用 › Vim 编辑模式: enable Vim keybindings in the editor (default off).
+    pub vim_mode: bool,
+    /// 通用 › Vim 自动切换中英文输入法: pause/switch OS IME outside Insert mode (default on).
+    #[serde(default = "yes")]
+    pub vim_auto_ime: bool,
     /// When 稍后 put off moving the library to real folders (Unix seconds; 0 never).
     pub migrate_later: u64,
 }
+
+fn yes() -> bool { true }
 
 /// A week between asks to move the library to real folders.
 const MIGRATE_ASK_EVERY: u64 = 7 * 24 * 3600;
@@ -148,7 +261,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0 }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), browser: String::new(), opaque_window: false, ui_font: String::new(), font_preset: String::new(), heading_font: String::new(), doc_font: String::new(), mono_font: String::new(), type_contrast: String::new(), doc_font_size: 0, vim_mode: false, vim_auto_ime: true, migrate_later: 0 }
     }
 }
 
@@ -179,10 +292,26 @@ pub fn load() {
     apply(p);
 }
 
+fn store_leaked(lock: &RwLock<&'static str>, val: &str) {
+    let val = val.trim();
+    let mut g = lock.write().unwrap();
+    if *g != val {
+        *g = if val.is_empty() { "" } else { Box::leak(val.to_string().into_boxed_str()) };
+    }
+}
+
 fn apply(p: Preferences) {
     FEISHU.store(p.feishu, Ordering::Relaxed);
     LANG.store(p.lang() as u8, Ordering::Relaxed);
     MOTION_HIGH.store(p.motion == "high", Ordering::Relaxed);
+    VIM_MODE.store(p.vim_mode, Ordering::Relaxed);
+    VIM_AUTO_IME.store(p.vim_auto_ime, Ordering::Relaxed);
+    store_leaked(&FONT_PRESET, &p.font_preset);
+    store_leaked(&HEADING_FONT, &p.heading_font);
+    store_leaked(&DOC_FONT, &p.doc_font);
+    store_leaked(&MONO_FONT, &p.mono_font);
+    TYPE_CONTRAST.store(match p.type_contrast.as_str() { "compact" => 0, "expressive" => 2, _ => 1 }, Ordering::Relaxed);
+    DOC_FONT_SIZE.store(if p.doc_font_size == 0 { 0 } else { p.doc_font_size.clamp(12, 28) }, Ordering::Relaxed);
     // Before the themes are read (startup) the base comes from `feishu`.
     themes::select(&p.theme_id());
     *PREFS.write().unwrap() = Some(p);
@@ -311,6 +440,30 @@ impl Page {
     }
 }
 
+pub(crate) fn nav_index(page: Page) -> usize {
+    NAV.iter().position(|p| *p == Some(page)).unwrap_or(0)
+}
+
+fn norm_menu_key(key: &str) -> &str {
+    if !vim_mode() { return key }
+    match key {
+        "j" => "down",
+        "k" => "up",
+        "q" => "escape",
+        _ => key,
+    }
+}
+
+fn trigger_update_action(cx: &mut App) {
+    use crate::update::State;
+    match crate::update::state(cx) {
+        State::Available(_) => crate::update::download(cx),
+        State::Ready(..) => crate::update::install(cx),
+        State::Checking | State::Downloading(_) | State::Installing(_) => {}
+        _ => crate::update::check(true, cx),
+    }
+}
+
 /// The sidebar list, one evenly spaced run (six rows need no unlabelled
 /// groups); `None` is 回收站 (its own view, shown with this sidebar).
 const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), None, Some(Page::About)];
@@ -413,21 +566,37 @@ const PAGE_S: f32 = 0.78;
 /// (headings, inline styles, lists, a task, quote, callout, table, divider,
 /// highlighted code), at scale `s`, in two columns so it reads at a glance.
 fn sample_page(t: &themes::Theme, s: f32) -> Div {
+    use crate::editor_theme as et;
     let st = t.style;
     let sc = |v: f32| px((v * s).max(0.5));
+    let doc_scale = {
+        let sz = doc_font_size();
+        if sz == 0 { 1. } else { sz as f32 / st.num("page.size").max(1.) }
+    };
+    let fsc = |v: f32| px((v * doc_scale * s).max(0.5));
     let text = st.color("page.color").unwrap_or_else(|| st.token("text"));
-    let (body, line) = (st.num("page.size"), st.num("page.line"));
-    let (font, mono): (SharedString, SharedString) = (st.font("page.font").into(), st.font("pre.font").into());
-    let gap = sc(st.num("p.gap")).clamp(px(4.), px(9.));
+    let (body, line) = (et::body_size_of(st), et::body_line_of(st));
+    let body_font_name = et::body_font_of(st);
+    let title_font_name = et::title_font_of(st);
+    let mono: SharedString = et::mono_font_of(st).into();
+    let code_font: SharedString = et::code_font_of(st).into();
+    let gap = sc(et::block_gap_of(st)).clamp(px(4.), px(10.));
+    let make_font = |fam: &'static str| {
+        let mut f = gpui::font(fam);
+        f.fallbacks = Some(theme::doc_font_fallbacks_for(fam));
+        f
+    };
     let p = |c: Div| c.text_size(sc(body)).line_height(sc(line));
-    let heading = |l: u8, s: &'static str| {
-        let h = format!("h{l}");
-        div().text_size(sc(st.num(&format!("{h}.size")))).line_height(sc(st.num(&format!("{h}.line")))).font_weight(FontWeight(st.num(&format!("{h}.weight"))))
-            .text_color(st.color(&format!("{h}.color")).unwrap_or(text)).child(s)
+    let heading = |l: u8, label: &'static str| {
+        let m = et::heading_metrics_of(st, l);
+        let hf = et::heading_font_of(st, l);
+        div().mt(sc((m.mt * 0.35).max(2.))).mb(sc((m.mb * 0.25).max(1.))).font(make_font(hf))
+            .text_size(sc(m.size)).line_height(sc(m.line_height)).font_weight(et::heading_weight_of(st, l))
+            .text_color(st.color(&format!("h{l}.color")).unwrap_or(text)).child(label)
     };
     let link = st.color("a.color").unwrap_or(text);
     let chip = |s: &'static str| div().px(sc(st.num("code.pad")).max(px(2.))).rounded(sc(st.num("code.radius"))).bg(st.color("code.bg").unwrap_or_else(|| st.token("code_chip")))
-        .border_1().border_color(st.color("code.border").unwrap_or_else(|| st.token("code_chip_border"))).font_family(mono.clone()).text_color(st.color("code.color").unwrap_or(text)).child(s);
+        .border_1().border_color(st.color("code.border").unwrap_or_else(|| st.token("code_chip_border"))).font_family(code_font.clone()).text_size(sc(et::inline_code_size_of(st))).text_color(st.color("code.color").unwrap_or(text)).child(s);
     let para = p(div().flex().flex_wrap().items_center())
         .child(tr("Quiet.md 是一款", "Quiet.md is a "))
         .child(div().font_weight(FontWeight(st.num("strong.weight"))).text_color(st.color("strong.color").unwrap_or(text)).child(tr("安静的本地笔记应用", "quiet, local notes app")))
@@ -464,7 +633,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let row = |a: &'static str, b: &'static str, head: bool, last: bool| div().flex().when(!last, |d| d.border_b_1().border_color(line_c))
         .child(cell(a, head).border_r_1().border_color(line_c)).child(cell(b, head));
     let table = div().w_full().rounded(sc(st.num("table.radius"))).border_1().border_color(line_c).overflow_hidden()
-        .text_size(sc(st.num("table.size"))).line_height(sc(st.num("table.line-height")))
+        .text_size(fsc(st.num("table.size"))).line_height(fsc(st.num("table.line-height")))
         .child(row(tr("按键", "Keys"), tr("作用", "Does"), true, false)).child(row(crate::shortcuts::keys("⌘ N"), tr("新建文档", "New document"), false, false)).child(row(crate::shortcuts::keys("⌘ J"), tr("搜索所有文档", "Search documents"), false, true));
     let (hr_c, hr_w) = (st.color("hr.color").unwrap_or_else(|| st.token("separator_dots")), (st.num("hr.width") * s).max(0.6));
     // Painted to the column's width: a row of fixed-size dots would set the
@@ -485,7 +654,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         .children(parts);
     let code = div().w_full().overflow_hidden().px(px(10.)).py(px(7.)).rounded(sc(st.num("pre.radius"))).bg(st.color("pre.bg").unwrap_or_else(|| st.token("code_bg")))
         .border_1().border_color(st.color("pre.border").unwrap_or_else(|| st.token("code_border")))
-        .font_family(mono.clone()).text_size(sc(st.num("pre.size"))).line_height(sc(st.num("pre.line"))).text_color(st.color("pre.color").unwrap_or_else(|| st.token("code_text")))
+        .font_family(mono).text_size(sc(et::pre_size_of(st))).line_height(sc(et::pre_line_of(st))).text_color(st.color("pre.color").unwrap_or_else(|| st.token("code_text")))
         .child(code_line("1", vec![tok("# ", syn("comment")), tok(tr("备份文档库", "back up your documents"), syn("comment"))]))
         .child(code_line("2", vec![tok("cd ", syn("function")), tok("~/Documents ", text), tok("&& ", syn("keyword")), tok("tar ", syn("function")), tok("-czf ", syn("attr")), tok("\"Quiet.tar.gz\" ", syn("string")), tok("Quiet.md", text)]))
         .child(code_line("3", vec![tok("echo ", syn("function")), tok("\"done\"", syn("string"))]));
@@ -495,12 +664,12 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
     let paper = st.color("page.bg").unwrap_or_else(|| st.token("bg_body"));
     // Its own bottom corners too: nothing clips it to the page's radius.
     let fade = div().absolute().left_0().right_0().bottom_0().h(px(56.)).rounded_b(px(7.)).bg(linear_gradient(180., linear_color_stop(paper.opacity(0.), 0.), linear_color_stop(paper, 1.)));
-    // items_start: a column stretched to the frame would shrink its blocks to fit.
-    div().relative().size_full().flex().justify_center().items_start().bg(paper).font_family(font).text_color(text).overflow_hidden()
+    let tm = et::title_of(st);
+    div().relative().size_full().flex().justify_center().items_start().bg(paper).font(make_font(body_font_name)).text_color(text).overflow_hidden()
         // min_w_0: the column follows the frame, not its widest unbreakable line.
         .child(div().w_full().min_w_0().overflow_hidden().max_w((sc(st.num("page.width")) * 1.35).min(px(760.))).px(px(32.)).pt(px(22.)).flex().flex_col().gap(gap)
-            .child(div().text_size(sc(st.num("title.size"))).line_height(sc(st.num("title.size") * 1.25)).font_weight(FontWeight(st.num("title.weight")))
-                .font_family(SharedString::from(st.font("title.font"))).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
+            .child(div().text_size(sc(tm.size)).line_height(sc(tm.line_height)).font_weight(et::title_weight_of(st))
+                .font(make_font(title_font_name)).text_color(st.color("title.color").unwrap_or(text)).child(tr("开始指南", "Getting started")))
             .child(para)
             .child(callout)
             .child(heading(1, tr("五分钟上手", "Five minutes")))
@@ -510,6 +679,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
             .child(div().flex().flex_col().child(number("1.", tr("先读「写作基础」", "Read Writing basics first"))).child(number("2.", tr("再看「内容块」", "Then Content blocks"))))
             .child(quote)
             .child(heading(3, tr("最常用的快捷键", "Shortcuts to know")))
+            .child(heading(5, tr("常用操作速查", "Quick reference")))
             .child(table)
             .child(div().w_full().py(px(2.)).child(hr))
             .child(code))
@@ -528,6 +698,84 @@ fn popup_button(id: impl Into<ElementId>, label: impl Into<SharedString>, open: 
         .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text())
         .child(div().min_w_0().truncate().child(label.into()))
         .child(ui::icon("chevron-down", 12., Theme::icon()))
+}
+
+const PREFERRED_FONTS: &[&str] = &[
+    "TsangerJinKai05", "LXGW WenKai", "LXGW WenKai Mono", "Noto Sans CJK SC", "Noto Serif CJK SC",
+    "Noto Sans CJK TC", "Noto Serif CJK TC", "Source Han Sans SC", "Source Han Serif SC",
+    "PingFang SC", "Hiragino Sans GB", "Songti SC", "Kaiti SC", "Microsoft YaHei", "SimSun", "KaiTi",
+    "Maple Mono NF CN", "iA Writer Quattro S", "iA Writer Duo S", "iA Writer Duospace",
+    "Adwaita Sans", "Inter", "Noto Sans", "Noto Serif", "JetBrainsMono Nerd Font", "JetBrains Mono",
+];
+
+const PREFERRED_MONO_FONTS: &[&str] = &[
+    "JetBrainsMono Nerd Font", "JetBrains Mono", "Maple Mono NF CN", "LXGW WenKai Mono",
+    "SF Mono", "Menlo", "Consolas", "iA Writer Mono S", "iA Writer Duospace",
+    "Adwaita Mono", "Fira Code", "Cascadia Code", "Noto Sans Mono", "Noto Sans Mono CJK SC",
+];
+
+fn clean_font_names(all: Vec<String>) -> Vec<String> {
+    let mut rest: Vec<String> = all.into_iter().filter(|n| {
+        !n.is_empty() && !n.starts_with('.') && !n.starts_with("KaTeX_")
+            && !matches!(n.as_str(), "Xiaolai" | "Excalifont" | "Nunito" | "Cascadia" | "Assistant" | "Noto Color Emoji" | "Noto Sans Test")
+    }).collect();
+    rest.sort_by_key(|a| a.to_ascii_lowercase());
+    rest.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    rest
+}
+
+fn ranked_font_choices(all: Vec<String>, preferred: &[&str]) -> Vec<String> {
+    let mut rest = clean_font_names(all);
+    let mut out = vec![String::new()];
+    for &p in preferred {
+        if let Some(ix) = rest.iter().position(|n| n.eq_ignore_ascii_case(p)) {
+            out.push(rest.remove(ix));
+        }
+    }
+    out.extend(rest);
+    out
+}
+
+pub(crate) fn system_font_choices(all: Vec<String>) -> Vec<String> {
+    ranked_font_choices(all, PREFERRED_FONTS)
+}
+
+pub(crate) fn mono_font_choices(all: Vec<String>) -> Vec<String> {
+    ranked_font_choices(all, PREFERRED_MONO_FONTS)
+}
+
+fn apply_font_choice(w: &mut Workspace, target: FontTarget, val: String, cx: &mut Context<Workspace>) {
+    w.font_menu = None;
+    w.set_pref(move |p| match target {
+        FontTarget::Preset => {
+            p.font_preset = val;
+            p.heading_font.clear();
+            p.doc_font.clear();
+            p.mono_font.clear();
+        }
+        FontTarget::Heading => p.heading_font = val,
+        FontTarget::Body => p.doc_font = val,
+        FontTarget::Mono => p.mono_font = val,
+    }, cx);
+}
+
+fn preset_label(id: &str) -> &'static str {
+    let (_, zh, en) = FONT_PRESETS.iter().find(|(k, _, _)| *k == id).copied().unwrap_or(FONT_PRESETS[0]);
+    tr(zh, en)
+}
+
+fn font_choice_label(target: FontTarget, val: &str) -> String {
+    match target {
+        FontTarget::Preset => preset_label(val).to_string(),
+        FontTarget::Heading => match val {
+            "" => tr("跟随预设/主题", "Follow preset / theme").to_string(),
+            "@body" => tr("同正文字体", "Same as body").to_string(),
+            s => s.to_string(),
+        },
+        FontTarget::Body | FontTarget::Mono => {
+            if val.is_empty() { tr("跟随预设/主题", "Follow preset / theme").to_string() } else { val.to_string() }
+        }
+    }
 }
 
 fn apply_theme(w: &mut Workspace, id: String, cx: &mut Context<Workspace>) {
@@ -566,6 +814,60 @@ impl Workspace {
                 cx.notify();
             }))
             .child(div().id("theme-menu-list").w(px(200.)).max_h(px(302.)).overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
+        Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+    }
+
+    fn font_menu_items(&self, target: FontTarget) -> Vec<String> {
+        match target {
+            FontTarget::Preset => FONT_PRESETS.iter().map(|(id, _, _)| (*id).to_string()).collect(),
+            FontTarget::Heading => {
+                let mut v = vec![String::new(), "@body".into()];
+                v.extend(self.doc_font_list.iter().filter(|s| !s.is_empty()).cloned());
+                v
+            }
+            FontTarget::Body => self.doc_font_list.clone(),
+            FontTarget::Mono => self.mono_font_list.clone(),
+        }
+    }
+
+    pub(crate) fn render_font_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (target, focused) = self.font_menu.as_ref()?;
+        let target = *target;
+        if self.view != View::Settings || self.settings_page != Page::Appearance { return None }
+        let b = *self.font_anchors.borrow().get(&target)?;
+        let p = prefs();
+        let current = match target {
+            FontTarget::Preset => p.font_preset,
+            FontTarget::Heading => p.heading_font,
+            FontTarget::Body => p.doc_font,
+            FontTarget::Mono => p.mono_font,
+        };
+        let items = self.font_menu_items(target);
+        let rows: Vec<AnyElement> = items.into_iter().enumerate().map(|(i, val)| {
+            let g = SharedString::from(format!("font-opt-{target:?}-{i}"));
+            let label = font_choice_label(target, &val);
+            let hover_val = val.clone();
+            ui::menu_row(g.clone(), g.clone())
+                .when(&val == focused, |d| d.bg(Theme::fill_hover()))
+                .child(div().flex_1().min_w_0().overflow_hidden().child(ui::menu_label(label, g.clone(), gpui::white())))
+                .child(div().flex_none().w(px(14.)).when(val == current, |d| d.child(ui::menu_glyph("check", 14., g.clone()))))
+                .on_hover(cx.listener(move |w, hovered: &bool, _, cx| {
+                    if *hovered && w.font_menu.as_ref().is_some_and(|(t, f)| *t == target && f != &hover_val) {
+                        w.font_menu = Some((target, hover_val.clone()));
+                        cx.notify();
+                    }
+                }))
+                .on_click(cx.listener(move |w, _, _, cx| apply_font_choice(w, target, val.clone(), cx)))
+                .into_any_element()
+        }).collect();
+        let anchors = self.font_anchors.clone();
+        let menu = ui::popover().id("font-menu").occlude().flex()
+            .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
+                if anchors.borrow().get(&target).is_some_and(|b| b.contains(&ev.position)) { return }
+                w.font_menu = None;
+                cx.notify();
+            }))
+            .child(div().id("font-menu-list").w(px(236.)).max_h(px(302.)).overflow_y_scroll().py(px(ui::MENU_PAD_Y)).flex().flex_col().children(rows));
         Some(deferred(anchored().anchor(Corner::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
@@ -618,7 +920,7 @@ impl Workspace {
     /// Keys while a 通用 dropdown is open; true when used.
     pub(crate) fn pref_menu_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let Some(m) = &mut self.pref_menu else { return false };
-        match key {
+        match norm_menu_key(key) {
             "escape" => self.pref_menu = None,
             "up" => m.focused = m.focused.saturating_sub(1),
             "down" => m.focused = (m.focused + 1).min(m.labels.len().saturating_sub(1)),
@@ -658,7 +960,7 @@ impl Workspace {
     /// Keys while the language dropdown is open; true when used.
     pub(crate) fn lang_menu_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let at = self.lang_menu.map_or(0, |l| l as usize);
-        match key {
+        match norm_menu_key(key) {
             "escape" => self.lang_menu = None,
             "up" => self.lang_menu = Some(Lang::ALL[at.saturating_sub(1)]),
             "down" => self.lang_menu = Some(Lang::ALL[(at + 1).min(Lang::ALL.len() - 1)]),
@@ -669,11 +971,28 @@ impl Workspace {
         true
     }
 
+    /// Keys while a font/preset dropdown is open; true when used.
+    pub(crate) fn font_menu_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
+        let Some((target, focused)) = self.font_menu.clone() else { return false };
+        let ids = self.font_menu_items(target);
+        if ids.is_empty() { self.font_menu = None; return false }
+        let at = ids.iter().position(|id| id == &focused).unwrap_or(0);
+        match norm_menu_key(key) {
+            "escape" => self.font_menu = None,
+            "up" => self.font_menu = Some((target, ids[at.saturating_sub(1)].clone())),
+            "down" => self.font_menu = Some((target, ids[(at + 1).min(ids.len().saturating_sub(1))].clone())),
+            "enter" | "space" => { let pick = ids[at].clone(); apply_font_choice(self, target, pick, cx); return true }
+            _ => return false,
+        }
+        cx.notify();
+        true
+    }
+
     /// Keys while the theme dropdown is open; true when used.
     pub(crate) fn theme_menu_key(&mut self, key: &str, cx: &mut Context<Self>) -> bool {
         let ids: Vec<String> = themes::themes().iter().map(|t| t.id.clone()).collect();
         let at = self.theme_menu.as_ref().and_then(|p| ids.iter().position(|id| id == p)).unwrap_or(0);
-        match key {
+        match norm_menu_key(key) {
             "escape" => self.theme_menu = None,
             "up" => self.theme_menu = Some(ids[at.saturating_sub(1)].clone()),
             "down" => self.theme_menu = Some(ids[(at + 1).min(ids.len().saturating_sub(1))].clone()),
@@ -699,8 +1018,13 @@ impl Workspace {
             if p.quick_hotkey { crate::quick_note::register(cx); } else { crate::quick_note::suspend_hotkey(); }
         }
         if p.appearance != old.appearance { apply_appearance(&p.appearance); }
-        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || sync_dark(cx) {
+        let typo_changed = p.font_preset != old.font_preset || p.heading_font != old.heading_font || p.doc_font != old.doc_font || p.mono_font != old.mono_font || p.type_contrast != old.type_contrast || p.doc_font_size != old.doc_font_size;
+        if typo_changed { themes::touch(); }
+        if p.theme_id() != old.theme_id() || p.lang() != old.lang() || typo_changed || sync_dark(cx) {
             refresh_all(self, cx);
+        }
+        if (p.vim_mode != old.vim_mode || p.vim_auto_ime != old.vim_auto_ime) && let Some(ed) = &self.editor {
+            ed.update(cx, |e, cx| e.sync_vim_pref(cx));
         }
         cx.notify();
     }
@@ -744,30 +1068,49 @@ impl Workspace {
     pub(crate) fn open_settings(&mut self, page: Page, cx: &mut Context<Self>) {
         self.cancel_shortcut_recording(cx);
         self.settings_page = page;
+        self.settings_row_cursor = 0;
+        self.settings_nav_cursor = nav_index(page);
         self.theme_menu = None;
+        self.font_menu = None;
         self.lang_menu = None;
         self.pref_menu = None;
         self.settings_scroll.set_offset(point(px(0.), px(0.)));
         self.shortcut_error = None;
+        self.doc_history.record(crate::app::NavTarget::Settings(page));
         if self.view != View::Settings { self.show_view(View::Settings, cx); }
         cx.notify();
+    }
+
+    fn settings_row_selected(&self, idx: usize) -> bool {
+        vim_mode() && self.pane_focus == crate::app::PaneFocus::Main && self.view == View::Settings && self.settings_row_cursor == idx
+    }
+
+    fn s_row(&self, idx: usize, title: impl Into<SharedString>, desc: Option<SharedString>, control: impl IntoElement) -> Div {
+        let sel = self.settings_row_selected(idx);
+        row(title, desc, control).relative().when(sel, |d| d.bg(Theme::fill_hover()).child(div().absolute().inset_0().border_1().border_color(Theme::primary())))
     }
 
     pub(crate) fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let current = (self.view == View::Settings).then_some(self.settings_page);
         let in_trash = self.view == View::Trash;
-        let nav_row = |page: Option<Page>, cx: &mut Context<Self>| {
+        let vim_sidebar = vim_mode() && self.pane_focus == crate::app::PaneFocus::Sidebar;
+        let cur_ix = self.settings_nav_cursor.min(NAV.len());
+        let nav_row = |idx: usize, page: Option<Page>, cx: &mut Context<Self>| {
             let on = if page.is_some() { page == current } else { in_trash };
+            let vim_cur = vim_sidebar && cur_ix == idx;
             let (title, icon) = page.map_or((tr("回收站", "Trash"), "bin"), |p| (p.title(), p.icon()));
-            div().id(SharedString::from(format!("settings-nav-{page:?}"))).h(px(sb::ROW_H)).flex().items_center().pl(px(6.)).pr(px(4.)).rounded(px(sb::ROW_R))
+            div().id(SharedString::from(format!("settings-nav-{page:?}"))).relative().h(px(sb::ROW_H)).flex().items_center().pl(px(6.)).pr(px(4.)).rounded(px(sb::ROW_R))
                 .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).cursor_pointer()
                 .when(on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
-                .when(!on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
+                .when(!on && vim_cur, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text()))
+                .when(!on && !vim_cur, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
                 .child(div().size(px(20.)).flex_none().flex().items_center().justify_center().mr(px(9.)).child(ui::icon(icon, sb::ROW_ICON, Theme::icon())))
                 .child(title)
+                .when(vim_cur, |d| d.child(div().absolute().inset_0().rounded(px(sb::ROW_R)).border_1().border_color(Theme::primary())))
                 .on_click(cx.listener(move |w, _, _, cx| match page { Some(p) => w.open_settings(p, cx), None => w.show_view(View::Trash, cx) }))
         };
-        div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::UI_FONT)
+        let back_cur = vim_sidebar && cur_ix == NAV.len();
+        div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font(theme::font_with_fallbacks(theme::UI_FONT, false))
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).pr(px(12.)).title_bar().child(self.header_navigation(cx))
                 .child(div().flex_1()).children(update_pill(cx)))
             // The document sidebar's rhythm: 主页 sits 8 under the bar, a section
@@ -776,10 +1119,13 @@ impl Workspace {
             .child(div().pt(px(8.)).px(px(sb::SB_X)).flex().flex_col()
                 .child(div().h(px(sb::SECTION_H)).pl(px(4.)).pt(px((sb::SECTION_TOP + sb::SECTION_H) / 2. - sb::ROW_H / 2.))
                     .child(div().px(px(4.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section()).child(tr("设置", "Settings"))))
-                .child(div().flex().flex_col().gap(px(sb::ROW_GAP)).children(NAV.iter().map(|p| nav_row(*p, cx)).collect::<Vec<_>>())))
+                .child(div().flex().flex_col().gap(px(sb::ROW_GAP)).children(NAV.iter().enumerate().map(|(i, p)| nav_row(i, *p, cx)).collect::<Vec<_>>())))
             // Where 设置 was: 返回, back to the page 设置 was opened from.
             .child(div().flex_1())
-            .child(sb::footer_slot(sb::footer_row("ft-back", "arrow-left", tr("返回", "Back")).tip(tr("返回", "Back"), Some("Esc"))
+            .child(sb::footer_slot(sb::footer_row("ft-back", "arrow-left", tr("返回", "Back")).relative()
+                .when(back_cur, |d| d.bg(Theme::sidebar_hover()).text_color(Theme::text())
+                    .child(div().absolute().inset_0().rounded(px(sb::ROW_R)).border_1().border_color(Theme::primary())))
+                .tip(tr("返回", "Back"), Some("Esc"))
                 .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx)))))
             .into_any_element()
     }
@@ -818,7 +1164,7 @@ impl Workspace {
             Page::Library => self.library_page(cx),
             Page::About => self.about_page(cx),
         };
-        div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::UI_FONT)
+        div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font(theme::font_with_fallbacks(theme::UI_FONT, false))
             // The bar only drags the window; the page title heads the centred column.
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().title_bar()
                 .when(!self.sidebar_open, |d| d.pl(px(theme::TRAFFIC_LIGHTS_W)).child(self.header_navigation(cx))))
@@ -843,7 +1189,7 @@ impl Workspace {
         } else {
             let sel = browsers.iter().position(|b| *b == p.browser).map_or(0, |i| i + 1);
             let labels: Vec<&'static str> = std::iter::once(tr("系统默认", "Default")).chain(browsers.iter().copied()).collect();
-            vec![row(tr("打开链接", "Open links"), desc(tr("点击链接时用哪个浏览器打开；网页搜索也用它。", "Which browser a link opens in; “Web search” uses it too.")), {
+            vec![self.s_row(7, tr("打开链接", "Open links"), desc(tr("点击链接时用哪个浏览器打开；网页搜索也用它。", "Which browser a link opens in; “Web search” uses it too.")), {
                 self.select("browser", labels, sel, |w, i, cx| {
                     let app = crate::settings::browser_at(i);
                     w.set_pref(|p| p.browser = app.clone(), cx)
@@ -852,7 +1198,7 @@ impl Workspace {
         };
         div().w_full().flex().flex_col().gap(px(28.))
             .child(group(None, vec![
-                row(tr("界面语言", "Interface language"), None, {
+                self.s_row(0, tr("界面语言", "Interface language"), None, {
                     let anchor = self.lang_anchor.clone();
                     let current = p.lang();
                     popup_button("lang-picker", current.name(), self.lang_menu.is_some())
@@ -860,18 +1206,22 @@ impl Workspace {
                         .relative()
                         .on_click(cx.listener(move |w, _, _, cx| { w.pref_menu = None; w.lang_menu = if w.lang_menu.is_some() { None } else { Some(current) }; cx.notify(); }))
                 }).into_any_element(),
-                row(tr("自动下载网络图片", "Download web images"), desc(tr("关闭后不联网，网络图片显示为占位，点击单独加载。", "When off the app stays offline; web images show a placeholder you can click to load.")),
+                self.s_row(1, tr("自动下载网络图片", "Download web images"), desc(tr("关闭后不联网，网络图片显示为占位，点击单独加载。", "When off the app stays offline; web images show a placeholder you can click to load.")),
                     switch("pref-remote", p.remote_images).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.remote_images = !p.remote_images, cx)))).into_any_element(),
-                row(tr("自动检查更新", "Check for updates automatically"), desc(tr("只读取一份版本信息，不发送任何数据；新版本由你决定何时下载安装。", "Reads a version file and sends nothing about you; you decide when to download and install.")),
+                self.s_row(2, tr("自动检查更新", "Check for updates automatically"), desc(tr("只读取一份版本信息，不发送任何数据；新版本由你决定何时下载安装。", "Reads a version file and sends nothing about you; you decide when to download and install.")),
                     switch("pref-update", p.auto_update).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.auto_update = !p.auto_update, cx)))).into_any_element(),
-                row(tr("快捷新建默认类型", "Quick new (⌘N)"), desc(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.")), {
+                self.s_row(3, tr("Vim 编辑模式", "Vim mode"), desc(tr("在正文中使用 Vim 键位（Normal / Insert / Visual 模式及 Flash 快速跳转）。", "Use Vim keybindings (Normal / Insert / Visual modes and Flash jump) in the editor.")),
+                    switch("pref-vim", p.vim_mode).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.vim_mode = !p.vim_mode, cx)))).into_any_element(),
+                self.s_row(4, tr("Vim 自动切换输入法", "Auto-switch IME in Vim mode"), desc(tr("离开 Insert 模式时自动暂停中文输入法（或切回英文），回到 Insert 或切出正文时恢复。", "Automatically pause/switch CJK IME to ASCII outside Insert mode, and restore it when entering Insert or leaving the editor.")),
+                    switch("pref-vim-ime", p.vim_auto_ime).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.vim_auto_ime = !p.vim_auto_ime, cx)))).into_any_element(),
+                self.s_row(5, tr("快捷新建默认类型", "Quick new (⌘N)"), desc(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.")), {
                     let sel = match p.new_default.as_str() { "doc" => 1, "markdown" => 2, _ => 0 };
                     self.select("quick-new", vec![tr("记住上次", "Last used"), tr("文档", "Document"), "Markdown"], sel,
                         |w, i, cx| w.set_pref(|p| p.new_default = ["", "doc", "markdown"][i].into(), cx), cx)
                 }).into_any_element(),
                 // 网页搜索 opens the selection in the browser; which site is the
                 // user's habit, so it is a preference rather than a constant.
-                row(tr("网页搜索", "Web search"), desc(tr("选中文字后「网页搜索」用哪个网站。", "Which site “Web search” opens the selected text in.")), {
+                self.s_row(6, tr("网页搜索", "Web search"), desc(tr("选中文字后「网页搜索」用哪个网站。", "Which site “Web search” opens the selected text in.")), {
                     let sel = match p.search_engine.as_str() { "baidu" => 1, "bing" => 2, "duckduckgo" => 3, _ => 0 };
                     self.select("search-engine", vec!["Google", tr("百度", "Baidu"), "Bing", "DuckDuckGo"], sel,
                         |w, i, cx| w.set_pref(|p| p.search_engine = ["", "baidu", "bing", "duckduckgo"][i].into(), cx), cx)
@@ -901,12 +1251,48 @@ impl Workspace {
             .child(canvas(move |b, _, _| anchor.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
             .relative()
             .on_click(cx.listener(move |w, _, _, cx| {
+                w.font_menu = None;
+                w.lang_menu = None;
+                w.pref_menu = None;
                 if w.theme_menu.is_none() && !themes::all_loaded() {
                     themes::load(&prefs().theme_id(), true, || cx.text_system().all_font_names());
                 }
                 w.theme_menu = if w.theme_menu.is_some() { None } else { Some(open_id.clone()) };
                 cx.notify();
             }));
+        let p = prefs();
+        let font_picker = |id: &'static str, target: FontTarget, cur: String| {
+            let label: SharedString = font_choice_label(target, &cur).into();
+            let open = self.font_menu.as_ref().is_some_and(|(t, _)| *t == target);
+            let anchors = self.font_anchors.clone();
+            popup_button(id, label, open)
+                .child(canvas(move |b, _, _| { anchors.borrow_mut().insert(target, b); }, |_, _, _, _| {}).absolute().inset_0())
+                .relative()
+                .on_click(cx.listener(move |w, _, _, cx| {
+                    w.theme_menu = None;
+                    w.lang_menu = None;
+                    w.pref_menu = None;
+                    if w.font_menu.as_ref().is_some_and(|(t, _)| *t == target) {
+                        w.font_menu = None;
+                    } else {
+                        w.ensure_font_lists(target, cx);
+                        w.font_menu = Some((target, cur.clone()));
+                    }
+                    cx.notify();
+                }))
+        };
+        let preset_picker = font_picker("font-preset-picker", FontTarget::Preset, p.font_preset.clone());
+        let hf_picker = font_picker("heading-font-picker", FontTarget::Heading, p.heading_font.clone());
+        let df_picker = font_picker("doc-font-picker", FontTarget::Body, p.doc_font.clone());
+        let mf_picker = font_picker("mono-font-picker", FontTarget::Mono, p.mono_font.clone());
+        let doc_sz = effective_doc_font_size();
+        let custom_sz = p.doc_font_size != 0;
+        let size_ctrl = div().flex_none().flex().items_center().gap(px(10.))
+            .when(custom_sz, |d| d.child(link_button("doc-font-size-reset", tr("默认", "Default"))
+                .on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.doc_font_size = 0, cx)))))
+            .child(button("doc-font-size-minus", "−").on_click(cx.listener(|w, _, _, cx| w.change_doc_font_size(-1, cx))))
+            .child(div().w(px(46.)).flex().items_center().justify_center().text_size(px(theme::ui_font())).text_color(Theme::text()).child(format!("{doc_sz} px")))
+            .child(button("doc-font-size-plus", "+").on_click(cx.listener(|w, _, _, cx| w.change_doc_font_size(1, cx))));
         // One group, top to bottom: the choice, how it looks, its stylesheet.
         // The preview is a page of the theme on a quiet band, like a sheet on a desk.
         let shown = { let list = themes::themes(); list.iter().find(|t| t.id == current).or_else(|| list.first()).map(|t| sample_page(t, PAGE_S).rounded(px(7.))) };
@@ -915,29 +1301,39 @@ impl Workspace {
         div().w_full().flex().flex_col().gap(px(28.))
             .child(div().w_full().flex().flex_col().gap(px(8.))
                 .child(group(None, vec![
-                    row(tr("外观", "Appearance"), None, {
+                    self.s_row(0, tr("外观", "Appearance"), None, {
                         let at = match prefs().appearance.as_str() { "light" => 1, "dark" => 2, _ => 0 };
                         segmented("appearance", &[tr("跟随系统", "System"), tr("浅色", "Light"), tr("深色", "Dark")], at,
                             |w, i, cx| w.set_pref(|p| p.appearance = ["", "light", "dark"][i].into(), cx), cx)
                     }).into_any_element(),
-                    row(tr("动画", "Animation"), Some(tr("克制：切换即时，只有拖拽带动画。丰富：展开收起、选中和悬停也带动画。", "Low: switching is instant, only dragging animates. High: folding, selection and hover animate too.").into()),
+                    self.s_row(1, tr("动画", "Animation"), Some(tr("克制：切换即时，只有拖拽带动画。丰富：展开收起、选中和悬停也带动画。", "Low: switching is instant, only dragging animates. High: folding, selection and hover animate too.").into()),
                         segmented("motion", &[tr("克制", "Low"), tr("丰富", "High")], usize::from(prefs().motion == "high"),
                             |w, i, cx| w.set_pref(|p| p.motion = ["", "high"][i].into(), cx), cx)).into_any_element(),
                     // 窗口背景: the sidebar sits on the desktop material by
                     // default; a busy wallpaper behind it can be distracting.
-                    row(tr("窗口背景", "Window background"), Some(tr("默认让侧栏透出桌面的毛玻璃。开启后整个窗口不透明，背景里动的东西不会透进来。", "By default the sidebar shows the desktop through a frosted surface. Turn this on for an opaque window.").into()),
+                    self.s_row(2, tr("窗口背景", "Window background"), Some(tr("默认让侧栏透出桌面的毛玻璃。开启后整个窗口不透明，背景里动的东西不会透进来。", "By default the sidebar shows the desktop through a frosted surface. Turn this on for an opaque window.").into()),
                         switch("pref-opaque", prefs().opaque_window).on_click(cx.listener(|w, _, window, cx| {
                             w.set_pref(|p| p.opaque_window = !p.opaque_window, cx);
                             window.refresh();
                         }))).into_any_element(),
                     // 界面字号: the sidebar and this page together, so the pairs
                     // (label, description) stay in proportion.
-                    row(tr("界面字号", "Interface size"), None, {
+                    self.s_row(3, tr("界面字号", "Interface size"), None, {
                         let sel = match prefs().ui_font.as_str() { "small" => 0, "large" => 2, _ => 1 };
                         segmented("ui-font", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large")], sel,
                             |w, i, cx| w.set_pref(|p| p.ui_font = ["small", "", "large"][i].into(), cx), cx)
                     }).into_any_element(),
-                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                    self.s_row(4, tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                    self.s_row(5, tr("排版预设", "Typography preset"), Some(tr("按角色搭配标题、正文与等宽字体；切换预设会重置下方的单项字体。", "Pairs heading, body and code fonts by role; picking a preset clears individual font overrides.").into()), preset_picker).into_any_element(),
+                    self.s_row(6, tr("标题字体", "Heading font"), None, hf_picker).into_any_element(),
+                    self.s_row(7, tr("正文字体", "Body font"), None, df_picker).into_any_element(),
+                    self.s_row(8, tr("代码字体", "Code font"), None, mf_picker).into_any_element(),
+                    self.s_row(9, tr("层次对比", "Heading contrast"), Some(tr("调整标题与正文的字阶跨度和章节留白。", "Controls heading-to-body size ratio and section breathing room.").into()), {
+                        let sel = match prefs().type_contrast.as_str() { "compact" => 0, "expressive" => 2, _ => 1 };
+                        segmented("type-contrast", &[tr("紧凑", "Compact"), tr("标准", "Standard"), tr("鲜明", "Expressive")], sel,
+                            |w, i, cx| w.set_pref(|p| p.type_contrast = ["compact", "", "expressive"][i].into(), cx), cx)
+                    }).into_any_element(),
+                    self.s_row(10, tr("正文字号", "Document font size"), None, size_ctrl).into_any_element(),
                     sample.into_any_element(),
                 ].into_iter().chain(THEME_CSS.then(|| {
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
@@ -950,6 +1346,11 @@ impl Workspace {
                 .children(errors.into_iter().chain(warnings.into_iter().take(8).map(|w| format!("{}：{w}", tr("未生效", "Ignored")))).map(|e| div().px(px(4.)).text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 6.)).text_color(Theme::danger()).child(e)))
                 )
             .into_any_element()
+    }
+
+    pub(crate) fn change_doc_font_size(&mut self, delta: i32, cx: &mut Context<Self>) {
+        let next = (effective_doc_font_size() as i32 + delta).clamp(12, 28) as u32;
+        self.set_pref(move |p| p.doc_font_size = next, cx);
     }
 
     /// 版本历史: the retention count is stored in the library, so every
@@ -980,13 +1381,13 @@ impl Workspace {
         } else { tr("在文件管理器中显示", "Show in File Manager") };
         div().w_full().flex().flex_col().gap(px(8.))
             .child(group(None, vec![
-                row(tr("文档库文件夹", "Documents folder"), Some(location.into()), div().flex_none().flex().gap(px(8.))
+                self.s_row(0, tr("文档库文件夹", "Documents folder"), Some(location.into()), div().flex_none().flex().gap(px(8.))
                     .child(button("reveal-library", reveal).on_click(|_, _, cx| cx.reveal_path(&crate::store::Store::root_dir())))
                     // A test run's library (`QUIET_MD_HOME`) is fixed: a restart would lose it.
                     .when(std::env::var_os("QUIET_MD_HOME").is_none(), |d| d.child(button("change-library", tr("更改…", "Change…")).on_click(cx.listener(|w, _, _, cx| w.pick_library(cx)))))).into_any_element(),
-                row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
+                self.s_row(1, tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
-                row(tr("版本历史", "Version history"),
+                self.s_row(2, tr("版本历史", "Version history"),
                     desc(tr("每篇文档保留的历史版本数（1–30 份）", "Snapshots kept for each document (1–30)")),
                     div().flex_none().flex().items_center().gap(px(12.))
                         .child(button("history-minus", "−").on_click(cx.listener(|w, _, window, cx| w.change_history_limit(-1, window, cx))))
@@ -1017,10 +1418,352 @@ impl Workspace {
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text_caption()).child(format!("{} {}", tr("版本", "Version"), env!("CARGO_PKG_VERSION"))))
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text_caption()).child(if cfg!(target_os = "macos") { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your Mac.") }
                 else { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your computer.") })))
-            .child(group(None, vec![update_row(cx).into_any_element()]))
-            .child(group(None, vec![row("Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
+            .child(group(None, vec![{
+                let sel = self.settings_row_selected(0);
+                update_row(cx).relative().when(sel, |d| d.bg(Theme::fill_hover()).child(div().absolute().inset_0().border_1().border_color(Theme::primary()))).into_any_element()
+            }]))
+            .child(group(None, vec![self.s_row(1, "Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
                 button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
+    }
+
+    fn ensure_font_lists(&mut self, target: FontTarget, cx: &App) {
+        if matches!(target, FontTarget::Heading | FontTarget::Body) && self.doc_font_list.is_empty() {
+            let all = cx.text_system().all_font_names();
+            init_available_fonts(|| all.clone());
+            self.doc_font_list = system_font_choices(all);
+        }
+        if target == FontTarget::Mono && self.mono_font_list.is_empty() {
+            let all = cx.text_system().all_font_names();
+            init_available_fonts(|| all.clone());
+            self.mono_font_list = mono_font_choices(all);
+        }
+    }
+
+    fn scroll_settings_to(&self, ix: usize) {
+        let vh = f32::from(self.settings_scroll.bounds().size.height);
+        if vh <= 0. { return }
+        let row_h = 56f32;
+        let top = ix as f32 * row_h;
+        let cur_top = (-f32::from(self.settings_scroll.offset().y)).max(0.);
+        if top < cur_top {
+            self.settings_scroll.set_offset(point(px(0.), px(-top)));
+        } else if top + row_h > cur_top + vh - 64. {
+            self.settings_scroll.set_offset(point(px(0.), px(-(top + row_h - (vh - 64.)))));
+        }
+    }
+
+    pub(crate) fn handle_settings_sidebar_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function || ks.modifiers.control {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        let max_ix = NAV.len();
+        if self.non_doc_pending == Some('g') {
+            self.non_doc_pending = None;
+            if ks.key == "g" && !ks.modifiers.shift {
+                self.settings_nav_cursor = 0;
+                if let Some(p) = NAV[0] { self.open_settings(p, cx); }
+            }
+            cx.notify();
+            return true;
+        }
+        if ks.key == "g" && !ks.modifiers.shift {
+            self.non_doc_pending = Some('g');
+            cx.notify();
+            return true;
+        }
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            self.settings_nav_cursor = max_ix;
+            cx.notify();
+            return true;
+        }
+        if ks.key == "j" || ks.key == "down" || ks.key == "k" || ks.key == "up" {
+            let next = if ks.key == "j" || ks.key == "down" {
+                (self.settings_nav_cursor + 1).min(max_ix)
+            } else {
+                self.settings_nav_cursor.saturating_sub(1)
+            };
+            self.settings_nav_cursor = next;
+            if next < NAV.len() {
+                match NAV[next] {
+                    Some(p) => self.open_settings(p, cx),
+                    None => self.show_view(View::Trash, cx),
+                }
+            }
+            cx.notify();
+            return true;
+        }
+        if ks.key == "escape" || (ks.key == "q" && !ks.modifiers.shift) {
+            self.close_settings(cx);
+            if self.view == View::Doc && let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+            return true;
+        }
+        if matches!(ks.key.as_str(), "l" | "right" | "enter" | "space" | "tab") || ch == Some(' ') {
+            if self.settings_nav_cursor >= NAV.len() {
+                self.close_settings(cx);
+                if self.view == View::Doc && let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+            } else {
+                self.pane_focus = crate::app::PaneFocus::Main;
+                cx.notify();
+            }
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn handle_settings_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if self.view != View::Settings || self.settings_filter.read(cx).is_focused(window) {
+            return false;
+        }
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function || ks.modifiers.control {
+            return false;
+        }
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+        if ks.key == "tab" {
+            self.vim_focus_pane(fdl_core::editor::vim::VimPane::Cycle, window, cx);
+            return true;
+        }
+        if ks.key == "escape" || (ks.key == "q" && !ks.modifiers.shift) {
+            self.close_settings(cx);
+            if self.view == View::Doc && let Some(ed) = &self.editor { ed.read(cx).focus(window); }
+            return true;
+        }
+        let shortcut_ids = if self.settings_page == Page::Shortcuts { self.visible_shortcut_ids(cx) } else { vec![] };
+        let row_count = match self.settings_page {
+            Page::General => if browsers().is_empty() { 7 } else { 8 },
+            Page::Appearance => 11,
+            Page::Shortcuts => shortcut_ids.len(),
+            Page::Library => 3,
+            Page::About => 2,
+        };
+        if self.non_doc_pending == Some('g') {
+            self.non_doc_pending = None;
+            if ks.key == "g" && !ks.modifiers.shift && row_count > 0 {
+                self.settings_row_cursor = 0;
+                self.scroll_settings_to(0);
+            }
+            cx.notify();
+            return true;
+        }
+        if ks.key == "g" && !ks.modifiers.shift {
+            self.non_doc_pending = Some('g');
+            cx.notify();
+            return true;
+        }
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            if let Some(last) = row_count.checked_sub(1) {
+                self.settings_row_cursor = last;
+                self.scroll_settings_to(last);
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "j" || ks.key == "down" {
+            if row_count > 0 {
+                let next = (self.settings_row_cursor + 1).min(row_count - 1);
+                self.settings_row_cursor = next;
+                self.scroll_settings_to(next);
+                cx.notify();
+            }
+            return true;
+        }
+        if ks.key == "k" || ks.key == "up" {
+            if row_count > 0 {
+                let next = self.settings_row_cursor.min(row_count - 1).saturating_sub(1);
+                self.settings_row_cursor = next;
+                self.scroll_settings_to(next);
+                cx.notify();
+            }
+            return true;
+        }
+        if self.settings_page == Page::Shortcuts {
+            if ch == Some('/') {
+                window.focus(&self.settings_filter.focus_handle(cx));
+                window.set_ime_active(true);
+                cx.notify();
+                return true;
+            }
+            if ch == Some('R') {
+                self.reset_all_shortcuts(cx);
+                return true;
+            }
+            let cur = self.settings_row_cursor.min(shortcut_ids.len().saturating_sub(1));
+            let Some(id) = shortcut_ids.get(cur).cloned() else { return false };
+            if id == "global" && matches!(ch, Some('t' | 'h' | 'l')) {
+                self.set_pref(|p| p.quick_hotkey = !p.quick_hotkey, cx);
+                return true;
+            }
+            if ks.key == "enter" {
+                if id != "global" || prefs().quick_hotkey {
+                    self.start_recording(&id, window, cx);
+                }
+                return true;
+            }
+            if matches!(ch, Some('r')) || ks.key == "backspace" {
+                self.reset_shortcut(&id, cx);
+                return true;
+            }
+            if matches!(ch, Some('x' | 'd')) || ks.key == "delete" {
+                if id != "global" {
+                    self.clear_shortcut(&id, cx);
+                }
+                return true;
+            }
+            return false;
+        }
+        let dir: Option<isize> = if matches!(ks.key.as_str(), "l" | "right") || ch == Some('+') || ch == Some('=') {
+            Some(1)
+        } else if matches!(ks.key.as_str(), "h" | "left") || ch == Some('-') {
+            Some(-1)
+        } else {
+            None
+        };
+        let activate = ks.key == "enter";
+        if dir.is_none() && !activate && ch != Some('r') && ks.key != "backspace" {
+            return false;
+        }
+        let row_ix = self.settings_row_cursor.min(row_count.saturating_sub(1));
+        let delta = dir.unwrap_or(1);
+        let cycle = |len: usize, cur: usize, d: isize| -> usize { ((cur as isize + d).rem_euclid(len as isize)) as usize };
+        match self.settings_page {
+            Page::General => match row_ix {
+                0 => {
+                    if activate {
+                        self.pref_menu = None;
+                        self.lang_menu = Some(prefs().lang());
+                        cx.notify();
+                    } else {
+                        let cur = prefs().lang() as usize;
+                        let next = Lang::ALL[cycle(Lang::ALL.len(), cur, delta)];
+                        self.set_pref(|p| p.set_lang(next), cx);
+                    }
+                }
+                1 => self.set_pref(|p| p.remote_images = !p.remote_images, cx),
+                2 => self.set_pref(|p| p.auto_update = !p.auto_update, cx),
+                3 => self.set_pref(|p| p.vim_mode = !p.vim_mode, cx),
+                4 => self.set_pref(|p| p.vim_auto_ime = !p.vim_auto_ime, cx),
+                5 => {
+                    let opts = ["", "doc", "markdown"];
+                    let cur = opts.iter().position(|x| *x == prefs().new_default).unwrap_or(0);
+                    if activate {
+                        let labels = vec![tr("记住上次", "Last used"), tr("文档", "Document"), "Markdown"];
+                        self.lang_menu = None;
+                        self.pref_menu = Some(PrefMenu { id: "quick-new", labels, selected: cur, focused: cur, on: std::rc::Rc::new(|w, i, cx| w.set_pref(|p| p.new_default = ["", "doc", "markdown"][i].into(), cx)) });
+                        cx.notify();
+                    } else {
+                        let next = opts[cycle(opts.len(), cur, delta)];
+                        self.set_pref(|p| p.new_default = next.into(), cx);
+                    }
+                }
+                6 => {
+                    let opts = ["", "baidu", "bing", "duckduckgo"];
+                    let cur = opts.iter().position(|x| *x == prefs().search_engine).unwrap_or(0);
+                    if activate {
+                        let labels = vec!["Google", tr("百度", "Baidu"), "Bing", "DuckDuckGo"];
+                        self.lang_menu = None;
+                        self.pref_menu = Some(PrefMenu { id: "search-engine", labels, selected: cur, focused: cur, on: std::rc::Rc::new(|w, i, cx| w.set_pref(|p| p.search_engine = ["", "baidu", "bing", "duckduckgo"][i].into(), cx)) });
+                        cx.notify();
+                    } else {
+                        let next = opts[cycle(opts.len(), cur, delta)];
+                        self.set_pref(|p| p.search_engine = next.into(), cx);
+                    }
+                }
+                7 => {
+                    let bs = browsers();
+                    let cur = bs.iter().position(|b| *b == prefs().browser).map_or(0, |i| i + 1);
+                    if activate {
+                        let labels: Vec<&'static str> = std::iter::once(tr("系统默认", "Default")).chain(bs.iter().copied()).collect();
+                        self.lang_menu = None;
+                        self.pref_menu = Some(PrefMenu { id: "browser", labels, selected: cur, focused: cur, on: std::rc::Rc::new(|w, i, cx| { let app = browser_at(i); w.set_pref(|p| p.browser = app.clone(), cx) }) });
+                        cx.notify();
+                    } else {
+                        let next = browser_at(cycle(bs.len() + 1, cur, delta));
+                        self.set_pref(|p| p.browser = next.clone(), cx);
+                    }
+                }
+                _ => return false,
+            },
+            Page::Appearance => match row_ix {
+                0 => {
+                    let opts = ["", "light", "dark"];
+                    let cur = opts.iter().position(|x| *x == prefs().appearance).unwrap_or(0);
+                    let next = opts[cycle(opts.len(), cur, delta)];
+                    self.set_pref(|p| p.appearance = next.into(), cx);
+                }
+                1 => self.set_pref(|p| p.motion = if p.motion == "high" { "" } else { "high" }.into(), cx),
+                2 => { self.set_pref(|p| p.opaque_window = !p.opaque_window, cx); window.refresh(); }
+                3 => {
+                    let opts = ["small", "", "large"];
+                    let cur = opts.iter().position(|x| *x == prefs().ui_font).unwrap_or(1);
+                    let next = opts[cycle(opts.len(), cur, delta)];
+                    self.set_pref(|p| p.ui_font = next.into(), cx);
+                }
+                4 => {
+                    if !themes::all_loaded() {
+                        themes::load(&prefs().theme_id(), true, || cx.text_system().all_font_names());
+                    }
+                    let ids: Vec<String> = themes::themes().iter().map(|t| t.id.clone()).collect();
+                    if activate {
+                        self.font_menu = None;
+                        self.theme_menu = Some(prefs().theme_id());
+                        cx.notify();
+                    } else if !ids.is_empty() {
+                        let cur = ids.iter().position(|id| id == &prefs().theme_id()).unwrap_or(0);
+                        apply_theme(self, ids[cycle(ids.len(), cur, delta)].clone(), cx);
+                    }
+                }
+                5..=8 => {
+                    let target = [FontTarget::Preset, FontTarget::Heading, FontTarget::Body, FontTarget::Mono][row_ix - 5];
+                    self.ensure_font_lists(target, cx);
+                    let items = self.font_menu_items(target);
+                    let p = prefs();
+                    let cur_val = match target {
+                        FontTarget::Preset => p.font_preset,
+                        FontTarget::Heading => p.heading_font,
+                        FontTarget::Body => p.doc_font,
+                        FontTarget::Mono => p.mono_font,
+                    };
+                    if activate {
+                        self.theme_menu = None;
+                        self.font_menu = Some((target, cur_val));
+                        cx.notify();
+                    } else if !items.is_empty() {
+                        let cur = items.iter().position(|x| x == &cur_val).unwrap_or(0);
+                        apply_font_choice(self, target, items[cycle(items.len(), cur, delta)].clone(), cx);
+                    }
+                }
+                9 => {
+                    let opts = ["compact", "", "expressive"];
+                    let cur = opts.iter().position(|x| *x == prefs().type_contrast).unwrap_or(1);
+                    let next = opts[cycle(opts.len(), cur, delta)];
+                    self.set_pref(|p| p.type_contrast = next.into(), cx);
+                }
+                10 => {
+                    if ch == Some('r') || ks.key == "backspace" {
+                        self.set_pref(|p| p.doc_font_size = 0, cx);
+                    } else {
+                        self.change_doc_font_size(delta as i32, cx);
+                    }
+                }
+                _ => return false,
+            },
+            Page::Library => match row_ix {
+                0 => if std::env::var_os("QUIET_MD_HOME").is_none() { self.pick_library(cx); },
+                1 => self.show_view(View::Trash, cx),
+                2 => if dir.is_some() { self.change_history_limit(delta as i32, window, cx); },
+                _ => return false,
+            },
+            Page::About => match row_ix {
+                0 => { trigger_update_action(cx); cx.notify(); }
+                1 => self.replay_onboarding(window, cx),
+                _ => return false,
+            },
+            Page::Shortcuts => return false,
+        }
+        true
     }
 }
 
@@ -1070,9 +1813,9 @@ fn update_row(cx: &mut Context<Workspace>) -> Div {
     };
     let control = match &state {
         State::Checking | State::Downloading(_) | State::Installing(_) => None,
-        State::Available(_) => Some(button("update-download", tr("下载更新", "Download")).on_click(|_, _, cx| crate::update::download(cx))),
-        State::Ready(..) => Some(button("update-install", tr("重启以更新", "Restart to Update")).on_click(|_, _, cx| crate::update::install(cx))),
-        _ => Some(button("update-check", tr("检查更新", "Check Now")).on_click(|_, _, cx| crate::update::check(true, cx))),
+        State::Available(_) => Some(button("update-download", tr("下载更新", "Download")).on_click(|_, _, cx| trigger_update_action(cx))),
+        State::Ready(..) => Some(button("update-install", tr("重启以更新", "Restart to Update")).on_click(|_, _, cx| trigger_update_action(cx))),
+        _ => Some(button("update-check", tr("检查更新", "Check Now")).on_click(|_, _, cx| trigger_update_action(cx))),
     };
     row(title, detail, div().children(control))
 }
@@ -1715,5 +2458,34 @@ mod preference_tests {
         assert_eq!((json["language"].as_str(), json["english"].as_bool()), (Some("ko"), Some(true)), "older builds read English");
         p.set_lang(Lang::Zh);
         assert!(!p.english);
+    }
+
+    #[test]
+    fn doc_font_preferences_default_and_round_trip() {
+        let d = Preferences::default();
+        assert_eq!(d.doc_font, "");
+        assert_eq!(d.heading_font, "");
+        assert_eq!(d.mono_font, "");
+        assert_eq!(d.font_preset, "");
+        assert_eq!(d.type_contrast, "");
+        assert_eq!(d.doc_font_size, 0);
+        let old: Preferences = serde_json::from_str(r#"{"theme":"craft"}"#).unwrap();
+        assert_eq!(old.doc_font, "");
+        assert_eq!(old.heading_font, "");
+        assert_eq!(old.mono_font, "");
+        assert_eq!(old.font_preset, "");
+        assert_eq!(old.type_contrast, "");
+        assert_eq!(old.doc_font_size, 0);
+        let custom: Preferences = serde_json::from_str(r#"{"font_preset":"editorial","heading_font":"Noto Serif CJK SC","doc_font":"LXGW WenKai","mono_font":"JetBrains Mono","type_contrast":"expressive","doc_font_size":18}"#).unwrap();
+        assert_eq!(custom.font_preset, "editorial");
+        assert_eq!(custom.heading_font, "Noto Serif CJK SC");
+        assert_eq!(custom.doc_font, "LXGW WenKai");
+        assert_eq!(custom.mono_font, "JetBrains Mono");
+        assert_eq!(custom.type_contrast, "expressive");
+        assert_eq!(custom.doc_font_size, 18);
+        let list = super::system_font_choices(vec!["Zed".into(), ".Hidden".into(), "KaTeX_Main".into(), "TsangerJinKai05".into(), "LXGW WenKai".into(), "Arial".into()]);
+        assert_eq!(list, vec!["", "TsangerJinKai05", "LXGW WenKai", "Arial", "Zed"]);
+        let mlist = super::mono_font_choices(vec!["Arial".into(), "JetBrains Mono".into(), "Menlo".into()]);
+        assert_eq!(mlist, vec!["", "JetBrains Mono", "Menlo", "Arial"]);
     }
 }

@@ -204,7 +204,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
                 cuts.sort_unstable(); cuts.dedup();
                 let runs = cuts.windows(2).map(|r| {
                     let h = spans.iter().find(|(h, _, _)| h.start <= r[0] && r[1] <= h.end);
-                    let mut f = font(theme::MONO_FONT); if h.is_some_and(|(_, _, it)| *it) { f.style = FontStyle::Italic; }
+                    let mut f = crate::theme::font_with_fallbacks(theme::MONO_FONT, true); if h.is_some_and(|(_, _, it)| *it) { f.style = FontStyle::Italic; }
                     TextRun { len: r[1] - r[0], font: f, color: h.map_or(Theme::text_code(), |(_, c, _)| *c), background_color: None, underline: None, strikethrough: None }
                 }).collect::<Vec<_>>();
                 body = body.child(div().flex().items_start()
@@ -262,7 +262,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
     }
     if b.kind.has_text() {
         let runs = b.text.runs.iter().map(|r| {
-            let mut f = font(if r.marks.code { theme::MONO_FONT } else { theme::UI_FONT });
+            let mut f = crate::theme::font_with_fallbacks(if r.marks.code { theme::MONO_FONT } else { theme::UI_FONT }, r.marks.code);
             f.weight = if r.marks.bold { FontWeight::BOLD } else { bs::weight(&b.kind) };
             if r.marks.italic || quote { f.style = FontStyle::Italic; }
             let mut ink = if r.marks.link.is_some() { Theme::link() } else { r.marks.text_color.as_ref().and_then(|c| theme::text_color(&c.0)).map(bs::display_ink).unwrap_or(color) };
@@ -424,6 +424,285 @@ fn entry_icon(e: &Entry) -> AnyElement {
 }
 
 impl Workspace {
+    pub(crate) fn active_home_entries(&self) -> Vec<Entry> {
+        if self.view == crate::app::View::Folder {
+            self.level_entries(self.folder_current.as_deref())
+        } else {
+            self.home_entries()
+        }
+    }
+
+    pub(crate) fn effective_home_cursor(&self, entries: &[Entry]) -> Option<String> {
+        if let Some(cur) = &self.home_cursor
+            && entries.iter().any(|e| &e.id == cur)
+        {
+            return Some(cur.clone());
+        }
+        entries.first().map(|e| e.id.clone())
+    }
+
+    pub(crate) fn active_home_cursor_id(&self, entries: &[Entry]) -> Option<String> {
+        (crate::settings::vim_mode()
+            && self.pane_focus == crate::app::PaneFocus::Main
+            && matches!(self.view, crate::app::View::Home | crate::app::View::Folder))
+        .then(|| self.effective_home_cursor(entries))
+        .flatten()
+    }
+
+    pub(crate) fn home_grid_cols(&self, entries: &[Entry], window: &Window) -> usize {
+        let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
+        let avail = (main_w - 48.).max(1.);
+        let mixed = entries.iter().any(|e| e.meta.folder.is_some());
+        let gap = if mixed { 24. } else { 16. };
+        let wide_cols = (((avail + gap) / (200. + gap)).floor() as usize).max(1);
+        if wide_cols >= 4 { (((avail + gap) / (240. + gap)).floor() as usize).max(4) } else { (((avail + gap) / (160. + gap)).floor() as usize).clamp(1, 3) }
+    }
+
+    fn scroll_home_to(&self, ix: usize, cols: usize, forward: bool) {
+        if self.home.grid {
+            let grid_scroll = if self.view == crate::app::View::Folder { &self.home.folder_grid_scroll } else { &self.home.grid_scroll };
+            let strategy = if ix == 0 {
+                ScrollStrategy::Top
+            } else if forward {
+                ScrollStrategy::Bottom
+            } else {
+                ScrollStrategy::Center
+            };
+            grid_scroll.scroll_to_item(ix / cols.max(1), strategy);
+        } else {
+            let list_scroll = if self.view == crate::app::View::Folder { &self.home.folder_list_scroll } else { &self.home.list_scroll };
+            list_scroll.scroll_to_item(ix);
+        }
+    }
+
+    fn home_go_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.view == crate::app::View::Folder {
+            let parent = self
+                .folder_current
+                .as_deref()
+                .and_then(|fid| self.entries.iter().find(|e| e.id == fid))
+                .and_then(|e| e.meta.parent.clone());
+            self.home_cursor = self.folder_current.clone();
+            if let Some(p) = parent {
+                self.open_folder(&p, window, cx);
+            } else {
+                self.show_view(crate::app::View::Home, cx);
+            }
+        } else if self.view == crate::app::View::Home && self.current.is_some() {
+            self.show_view(crate::app::View::Doc, cx);
+            if let Some(ed) = &self.editor {
+                ed.read(cx).focus(window);
+            }
+        }
+    }
+
+    pub(crate) fn handle_home_vim_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let ks = &ev.keystroke;
+        if ks.modifiers.platform || ks.modifiers.alt || ks.modifiers.function || ks.modifiers.control {
+            return false;
+        }
+        let entries = self.active_home_entries();
+        let cur_id = self.effective_home_cursor(&entries);
+        let cur_ix = cur_id.as_deref().and_then(|id| entries.iter().position(|e| e.id == id)).unwrap_or(0);
+        let cols = if self.home.grid { self.home_grid_cols(&entries, window) } else { 1 };
+        let ch = ks.key_char.as_deref().and_then(|s| s.chars().next()).filter(|_| ks.key_char.as_ref().is_some_and(|s| s.chars().count() == 1));
+
+        if let Some(pending) = self.non_doc_pending {
+            if pending == 'g' {
+                self.non_doc_pending = None;
+                if ks.key == "g" && !ks.modifiers.shift && let Some(first) = entries.first() {
+                    self.home_cursor = Some(first.id.clone());
+                    self.scroll_home_to(0, cols, false);
+                }
+                cx.notify();
+                return true;
+            }
+            if pending == 'd' {
+                self.non_doc_pending = None;
+                if ks.key == "d" && !ks.modifiers.shift {
+                    if self.batch.is_some() {
+                        self.ask_batch_delete(cx);
+                    } else if let Some(id) = cur_id {
+                        self.ask_delete(&id, cx);
+                    }
+                } else {
+                    cx.notify();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        if self.batch.is_some() {
+            if ks.key == "escape" || (ks.key == "q" && !ks.modifiers.shift) {
+                self.batch = None;
+                self.row_menu = None;
+                cx.notify();
+                return true;
+            }
+            if ks.key == "space" || ch == Some(' ') {
+                if let Some(id) = cur_id && !self.toggle_check(&id) {
+                    self.show_toast_kind(crate::ui::ToastKind::Error, &crate::localized_format!("一次最多选择 {} 项", "Select up to {} items at a time", crate::sidebar::BATCH_LIMIT), cx);
+                }
+                cx.notify();
+                return true;
+            }
+            match ch {
+                Some('a') => {
+                    let ids: Vec<String> = entries.iter().take(crate::sidebar::BATCH_LIMIT).map(|e| e.id.clone()).collect();
+                    let all = self.batch.as_ref().is_some_and(|sel| !sel.is_empty() && ids.iter().all(|id| sel.contains(id)));
+                    self.batch = Some(if all { vec![] } else { ids });
+                    cx.notify();
+                    return true;
+                }
+                Some('c') => { self.batch_copy(cx); return true; }
+                Some('m') => { self.batch_move(window, cx); return true; }
+                Some('d' | 'x') => { self.ask_batch_delete(cx); return true; }
+                _ => {}
+            }
+        }
+
+        if ks.key == "g" && !ks.modifiers.shift {
+            self.non_doc_pending = Some('g');
+            cx.notify();
+            return true;
+        }
+        if (ks.key == "g" && ks.modifiers.shift) || ch == Some('G') {
+            if let Some(last_ix) = entries.len().checked_sub(1) {
+                self.home_cursor = Some(entries[last_ix].id.clone());
+                self.scroll_home_to(last_ix, cols, true);
+                cx.notify();
+            }
+            return true;
+        }
+
+        let move_to = |w: &mut Self, next: usize, fwd: bool, cx: &mut Context<Self>| {
+            if let Some(e) = entries.get(next) {
+                w.home_cursor = Some(e.id.clone());
+                w.scroll_home_to(next, cols, fwd);
+                cx.notify();
+            }
+        };
+
+        if ks.key == "j" || ks.key == "down" {
+            if !entries.is_empty() {
+                let next = if self.home.grid {
+                    if cur_ix + cols < entries.len() {
+                        cur_ix + cols
+                    } else if cur_ix / cols < (entries.len() - 1) / cols {
+                        entries.len() - 1
+                    } else {
+                        cur_ix
+                    }
+                } else {
+                    (cur_ix + 1).min(entries.len() - 1)
+                };
+                move_to(self, next, true, cx);
+            }
+            return true;
+        }
+        if ks.key == "k" || ks.key == "up" {
+            if !entries.is_empty() {
+                let next = if self.home.grid {
+                    if cur_ix >= cols { cur_ix - cols } else { cur_ix }
+                } else {
+                    cur_ix.saturating_sub(1)
+                };
+                move_to(self, next, false, cx);
+            }
+            return true;
+        }
+        if ks.key == "l" || ks.key == "right" {
+            if self.home.grid {
+                if !entries.is_empty() {
+                    let next = (cur_ix + 1).min(entries.len() - 1);
+                    move_to(self, next, true, cx);
+                }
+            } else if let Some(id) = cur_id {
+                self.home_click(&id, window, cx);
+            }
+            return true;
+        }
+        if ks.key == "h" || ks.key == "left" {
+            if self.home.grid {
+                if !entries.is_empty() {
+                    let next = cur_ix.saturating_sub(1);
+                    move_to(self, next, false, cx);
+                }
+            } else {
+                self.home_go_up(window, cx);
+            }
+            return true;
+        }
+        if ks.key == "enter" {
+            if let Some(id) = cur_id {
+                self.home_click(&id, window, cx);
+            }
+            return true;
+        }
+        if ks.key == "backspace" || ch == Some('-') {
+            self.home_go_up(window, cx);
+            return true;
+        }
+        if ks.key == "escape" || (ks.key == "q" && !ks.modifiers.shift) {
+            self.home_go_up(window, cx);
+            return true;
+        }
+        if ks.key == "tab" && self.view == crate::app::View::Home && self.batch.is_none() {
+            self.home.tab = if self.home.tab == HomeTab::Recent { HomeTab::Starred } else { HomeTab::Recent };
+            self.home.sort_menu = false;
+            self.home_cursor = None;
+            cx.notify();
+            return true;
+        }
+        match ch {
+            Some('v') => {
+                self.home.grid = !self.home.grid;
+                self.save_home();
+                self.home.sort_menu = false;
+                cx.notify();
+                true
+            }
+            Some('b') => {
+                self.batch = Some(vec![]);
+                self.row_menu = None;
+                self.home.sort_menu = false;
+                cx.notify();
+                true
+            }
+            Some('r') => {
+                if let Some(id) = cur_id { self.start_rename(&id, window, cx); }
+                true
+            }
+            Some('d') => {
+                self.non_doc_pending = Some('d');
+                cx.notify();
+                true
+            }
+            Some('x') => {
+                if let Some(id) = cur_id { self.ask_delete(&id, cx); }
+                true
+            }
+            Some('n' | 'a') => {
+                self.new_doc(window, cx);
+                true
+            }
+            Some('N' | 'A') => {
+                self.new_folder(self.creation_parent(), window, cx);
+                true
+            }
+            Some('p') => {
+                if let Some(id) = cur_id { self.toggle_pin(&id, cx); }
+                true
+            }
+            Some('s') => {
+                if let Some(id) = cur_id { self.toggle_star(&id, cx); }
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// In 批量管理 a click checks or unchecks; otherwise it opens.
     fn home_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.batch.is_none() { return self.open(id, window, cx) }
@@ -801,19 +1080,23 @@ impl Workspace {
         if entries.is_empty() {
             rows = rows.child(div().pt(px(72.)).child(empty_state("illus/empty-list.svg", crate::settings::text("当前列表暂无内容"))));
         }
+        let vim_cur_id = self.active_home_cursor_id(entries);
         for (i, e) in entries.iter().enumerate() {
             let (id, id2) = (e.id.clone(), e.id.clone());
             let menu_on = self.row_menu.as_ref().is_some_and(|m| m.id == e.id);
+            let vim_cur = vim_cur_id.as_deref() == Some(e.id.as_str());
             let check = self.home_check(e);
             let mut row = div()
                 .id(SharedString::from(format!("home-row-{}", e.id)))
+                .relative()
                 .h(px(56.))
                 .flex()
                 .items_center()
                 .when(i > 0, |d| d.border_t_1().border_color(list_line()))
                 .cursor_pointer()
                 .hover(row_hover)
-                .when(menu_on, |d| d.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS)))
+                .when(menu_on || vim_cur, |d| d.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS)))
+                .when(vim_cur, |d| d.child(div().absolute().inset_0().rounded(px(ROW_RADIUS)).border_1().border_color(Theme::primary())))
                 .on_click(cx.listener(move |w, _, window, cx| w.home_click(&id, window, cx)))
                 .when(check.is_none(), |d| d.on_mouse_down(
                     MouseButton::Right,
@@ -852,8 +1135,7 @@ impl Workspace {
         // Folders spill past their cell (shadow, tab, the front flaring open), so
         // a level holding them gets more air between cells.
         let gap = if mixed { 24. } else { 16. };
-        let wide_cols = (((avail + gap) / (200. + gap)).floor() as usize).max(1);
-        let n = if wide_cols >= 4 { (((avail + gap) / (240. + gap)).floor() as usize).max(4) } else { (((avail + gap) / (160. + gap)).floor() as usize).clamp(1, 3) };
+        let n = self.home_grid_cols(&entries, window);
         // A document card is always 5:6 at its column's width; folders stand
         // taller by their tab so the pages line up beside them.
         let col_w = (avail - gap * (n - 1) as f32) / n as f32;
@@ -861,16 +1143,18 @@ impl Workspace {
         let card_h = if mixed { doc_h / (1. - crate::home_folder::TAB) } else { doc_h };
         let rows = entries.len().div_ceil(n);
         let grid = uniform_list("home-grid-area", rows, cx.processor(move |workspace, range: std::ops::Range<usize>, window, cx| {
+            let vim_cur_id = workspace.active_home_cursor_id(&entries);
             range.map(|row| {
                 let start = row * n;
                 let end = (start + n).min(entries.len());
                 div().w_full().h(px(card_h + gap)).px(px(24.)).pb(px(gap))
                     .grid().grid_cols(n as u16).gap(px(gap))
                     .children(entries[start..end].iter().map(|e| {
-                        if e.meta.folder.is_some() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
+                        let vim_cur = vim_cur_id.as_deref() == Some(e.id.as_str());
+                        if e.meta.folder.is_some() { workspace.render_folder_card(e, col_w, card_h, vim_cur, window, cx) }
                         else if mixed { div().w_full().min_w_0().h(px(card_h)).flex().flex_col().justify_end()
-                            .child(workspace.render_home_card(e, doc_h, cx)).into_any_element() }
-                        else { workspace.render_home_card(e, card_h, cx) }
+                            .child(workspace.render_home_card(e, doc_h, vim_cur, cx)).into_any_element() }
+                        else { workspace.render_home_card(e, card_h, vim_cur, cx) }
                     }))
             }).collect()
         }))
@@ -921,7 +1205,7 @@ impl Workspace {
             }
     }
 
-    fn render_home_card(&self, e: &Entry, card_h: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn render_home_card(&self, e: &Entry, card_h: f32, vim_cur: bool, cx: &mut Context<Self>) -> AnyElement {
             const RING: f32 = 3.;
             let id = e.id.clone();
             let id2 = e.id.clone();
@@ -960,10 +1244,10 @@ impl Workspace {
                     ))
                     .child(crate::ui::squircle_surface(radius, Theme::bg_body()).size_full().overflow_hidden().child(page.relative()))
                     .child(crate::ui::squircle_outline(radius, 0.5, Theme::line_sheet()))
-                    // Hovered, or its menu open: a soft grey ring around the card.
+                    // Hovered, or its menu open: a soft grey ring around the card; Vim cursor uses primary ring.
                     .child(div().absolute().left(px(-RING)).right(px(-RING)).top(px(-RING)).bottom(px(-RING))
-                        .when(!menu_on, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))
-                        .child(crate::ui::squircle_outline(radius + RING, RING, Theme::ring_sheet())))
+                        .when(!menu_on && !vim_cur, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))
+                        .child(crate::ui::squircle_outline(radius + RING, RING, if vim_cur { Theme::primary() } else { Theme::ring_sheet() })))
                     .when_some(check, |d, c| d.child(div().absolute().top(px(12.)).left(px(12.)).child(c)))
                     .when(self.batch.is_none(), |d| d.child(
                         div().absolute().top(px(8.)).right(px(8.))

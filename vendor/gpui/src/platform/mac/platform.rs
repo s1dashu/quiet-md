@@ -1553,6 +1553,10 @@ unsafe fn ns_url_to_path(url: id) -> Result<PathBuf> {
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
     pub(super) fn TISCopyCurrentKeyboardLayoutInputSource() -> *mut Object;
+    // quiet.md: Carbon TIS APIs to save/switch between CJK IME and ASCII input sources.
+    pub(super) fn TISCopyCurrentKeyboardInputSource() -> *mut Object;
+    pub(super) fn TISCopyCurrentASCIICapableKeyboardInputSource() -> *mut Object;
+    pub(super) fn TISSelectInputSource(inputSource: *mut Object) -> i32;
     pub(super) fn TISGetInputSourceProperty(
         inputSource: *mut Object,
         propertyKey: *const c_void,
@@ -1574,6 +1578,7 @@ unsafe extern "C" {
     pub(super) static kTISPropertyUnicodeKeyLayoutData: CFStringRef;
     pub(super) static kTISPropertyInputSourceID: CFStringRef;
     pub(super) static kTISPropertyLocalizedName: CFStringRef;
+    pub(super) static kTISPropertyInputSourceIsASCIICapable: CFStringRef;
 }
 
 mod security {

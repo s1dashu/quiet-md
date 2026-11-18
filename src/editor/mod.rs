@@ -30,3 +30,4 @@ pub mod table;
 pub use fdl_core::editor::table_ops;
 pub mod text;
 pub mod view;
+pub mod vim;

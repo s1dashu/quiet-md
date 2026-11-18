@@ -45,7 +45,6 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 24 | `assets.rs`、`window.rs` | `RenderImage::with_scale_factor`；`RenderImage::hollow` 生成同 id、同尺寸、不带像素的空壳；`paint_image` 遇到 atlas 里没有的空壳时跳过、记下并请求下一帧，由 `Window::take_missing_images` 取走 | 文档图片按显示尺寸解码后，布局仍按原图尺寸；已上传到 atlas 的图片不再在内存里留一份像素（docs/MEMORY.md） |
 | 25 | `platform/windows/directx_renderer.rs`、`directx_atlas.rs`、`platform.rs`、`events.rs`、`window.rs` | GPU 设备丢失时：resize 失败后 render target 为 `None`，绘制前先重做（原来 `pre_draw` 直接 unwrap 崩溃，旧 back buffer 还会被二次释放）；渲染器恢复失败可重试，已释放的设备和资源只释放一次，期间不绘制、不 resize，恢复时按窗口当前大小建交换链，下一帧再试；atlas 查不到纹理时跳过这批 sprite；重建 DirectX 设备失败时不再把丢失的设备当新设备发给窗口，下一次 vsync 重试；恢复后重新设置窗口的亚克力模糊（驱动重启后会丢，侧栏后面的窗口不再被模糊） | 显卡驱动重启、睡眠唤醒、驱动更新后应用不崩溃，恢复后正常显示 |
 | 26 | `window.rs` | `Window::replace_root` 同时更新窗口句柄记录的根视图类型（`handle.state_type` 和 `App::window_handles` 里那一份） | 首次启动的引导页走完后，在同一个窗口里换成主界面；原来换了根视图后 `downcast::<新类型>()` 仍然失败，按主界面找窗口的地方找不到它 |
-
 | 27 | `platform.rs`、`platform/mac/window.rs`、`platform/windows/window.rs`、`window.rs` | `Window::set_window_min_size`：创建后改窗口最小内容尺寸（macOS `setContentMinSize`，Windows 改 `WM_GETMINMAXINFO` 用的 `min_size`；其他平台不变） | 最小宽度 = 文档区最小宽度 + 侧栏宽度，随侧栏开合和拖宽变化 |
 | 28 | `platform.rs`、`platform/mac/window.rs`、`window.rs` | `Window::present_next_frame_in_transaction`：下一帧走 `PlatformWindow::draw_in_transaction`，macOS 上这一帧 `presentsWithTransaction`，和渲染期间改的原生视图在同一个 Core Animation 事务里上屏；其他平台照常 `draw` | 侧栏玻璃（`NSGlassEffectView`）大小或显隐变化的那一帧和 GPUI 画面同时出现；原来画面异步上屏、晚一个刷新，开关侧栏时玻璃先没（先出来），看着像顿了一下 |
 | 29 | `scene.rs` | `insert_primitive` 判断阴影是否落在裁剪区外时，按着色器实际画到的范围（四周各多 3 倍模糊半径）算，原来只看阴影本身的矩形 | 阴影的模糊部分落进裁剪区、矩形本身在区外时不再被丢掉（主页拖入文件时，按连续圆角逐行裁剪的内侧光晕） |
@@ -63,6 +62,8 @@ diff -ru $R/taffy-0.9.0/src vendor/taffy/src
 | 41 | `elements/div.rs` | 有 `active` 样式的元素总是监听松开（capture 阶段，按下过才清掉并刷新）；原来只有「画的时候已是按下状态」的那一帧才注册松开监听 | 按下和松开在同一帧之前到达（触控板轻点、脚本点击）时，按钮的按下样式一直留着，直到下一次松开 |
 | 42 | `platform/mac/window.rs` | 视图类注册 `rightMouseDragged:`、`otherMouseDragged:`（同 `mouseDragged:` 交给 `handle_view_event`，`events.rs` 原本就会转换这两种事件） | 原来只注册了左键拖动，按住滚轮键或右键移动时 AppKit 不把事件交给视图，画板按住滚轮键平移画布不动 |
 | 43 | `platform.rs`、`platform/linux.rs`、`platform/linux/text_system.rs` | `add_fonts` 加入的字形替换系统里同字族、同样式（style、weight、stretch）的已有字形，并清空按字族缓存的 FontId；`test_text_system()` 增加 Linux 版（cosmic-text，不建窗口） | Linux 版内置 CBDT 格式的 Noto Color Emoji：Fedora 等系统自带的同名字体是 COLRv1，swash 画不出来，emoji 一片空白（#265）；测试在 `src/editor/emoji.rs` |
+| 44 | `platform.rs`、`window.rs`、`platform/linux/{wayland,x11}/{window,client}.rs`、`platform/windows/window.rs`、`platform/mac/{platform,window}.rs` | 新增 `PlatformWindow::set_ime_active` / `Window::set_ime_active`：Wayland（`zwp_text_input_v3` disable/enable）、X11（跳过 XIM 按键过滤并 `reset_ic`）、Windows（`ImmNotifyIME` 取消组合 + `ImmAssociateContextEx` 暂停/恢复 IMM）、macOS（Carbon `TISSelectInputSource` 切到 ASCII 并记忆/恢复原非 ASCII 输入法） | Vim 非 Insert 模式自动暂停或切回英文输入法，避免所有平台用户在 Normal/Visual/Flash 模式下误触发中文输入法组合 |
+| 45 | `platform/linux/text_system.rs`、`platform/linux.rs`、`platform.rs` | `CosmicTextSystem` 启动时读取 fontconfig 解析 `.SystemUIFont`（优先保留静态字重的字体）、`.SystemUIFontMonospaced`、`.SystemSerifFont`、`.SystemCJKFont`、`.SystemCJKMonoFont` 与无显式 fallback 时的默认 CJK/Emoji 回退列表，并在 `layout_line` 中按字符支持 `FontFallbacks`；`load_family` 豁免 emoji 与 `KaTeX_` 字体缺少 `m` 字形时的剔除；补充 `linux_shaped_run_families` 供 Linux 单测使用 | Linux 下界面、正文、代码块与中英混排遵循用户 fontconfig 与字重匹配，中文、标点、等宽中文及表情符号不再回退到错配或不存在的字体 |
 
 ## taffy 0.9.0
 

@@ -58,6 +58,8 @@ pub struct WindowsWindowState {
     fullscreen: Option<StyleAndBounds>,
     initial_placement: Option<WindowOpenStatus>,
     hwnd: HWND,
+    // quiet.md: tracks whether Win32 IMM composition is active for this window.
+    ime_allowed: bool,
     // quiet.md: applied again after device lost, which drops the blur behind.
     pub(crate) background_appearance: Option<WindowBackgroundAppearance>,
 }
@@ -145,6 +147,7 @@ impl WindowsWindowState {
             fullscreen,
             initial_placement,
             hwnd,
+            ime_allowed: true,
             background_appearance: None,
         })
     }
@@ -604,6 +607,34 @@ impl PlatformWindow for WindowsWindow {
 
     fn take_input_handler(&mut self) -> Option<PlatformInputHandler> {
         self.0.state.borrow_mut().input_handler.take()
+    }
+
+    fn set_ime_active(&self, active: bool) {
+        use windows::Win32::UI::Input::Ime::{
+            CPS_CANCEL, HIMC, IACE_CHILDREN, IACE_DEFAULT, ImmAssociateContextEx, ImmGetContext,
+            ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR,
+        };
+        let mut state = self.0.state.borrow_mut();
+        if state.ime_allowed == active {
+            return;
+        }
+        state.ime_allowed = active;
+        let hwnd = state.hwnd;
+        drop(state);
+
+        // quiet.md: disassociate Win32 IME context in modal non-insert modes so VK_PROCESSKEY is bypassed.
+        unsafe {
+            if active {
+                let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
+            } else {
+                let ctx = ImmGetContext(hwnd);
+                if !ctx.is_invalid() {
+                    let _ = ImmNotifyIME(ctx, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+                    let _ = ImmReleaseContext(hwnd, ctx);
+                }
+                let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_CHILDREN);
+            }
+        }
     }
 
     fn prompt(

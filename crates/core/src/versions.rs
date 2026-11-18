@@ -115,7 +115,7 @@ pub fn remove(root: &Path, id: &str, name: &str, trashed: bool) -> Result<()> {
 
 /// Save `previous` as one version. The caller treats every error as a
 /// warning: a history failure must never fail the document's own save.
-pub fn snapshot(root: &Path, id: &str, ext: &str, previous: &str, ms: u64, limit: u32, force: bool) -> Result<()> {
+pub fn snapshot(root: &Path, id: &str, ext: &str, previous: &str, mut ms: u64, limit: u32, force: bool) -> Result<()> {
     if previous.is_empty() || (ext != "xml" && ext != "md") { return Ok(()) }
     let mut versions = list(root, id, false);
     if let Some(last) = versions.first() {
@@ -125,6 +125,7 @@ pub fn snapshot(root: &Path, id: &str, ext: &str, previous: &str, ms: u64, limit
         // Autosave fires on a 500ms debounce; the interval keeps a long
         // editing session from filling the list.
         if !force && ms.saturating_sub(last.ms) < MIN_INTERVAL * 1000 { return Ok(()) }
+        ms = ms.max(last.ms.saturating_add(1));
     }
     let dir = history_root(root).join(id);
     std::fs::create_dir_all(&dir)?;
