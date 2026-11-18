@@ -2,12 +2,13 @@
 
 Quiet.md 是一个单进程 GPUI 应用（Rust，约 9 万行，其中画板约 2.6 万行）。一篇文档在内存里是一棵 block 树（`model.rs`），在磁盘上是一份 DocxXML 文件（`docxml.rs`）。编辑器把这棵树画成一个虚拟化列表。
 
-仓库是一个 Cargo workspace，分两个 crate：
+仓库是一个 Cargo workspace，分三个 crate：
 
-- **`crates/core`（`fdl_core`，约 3.6 万行，其中画板 2 万行）**：文档引擎。包括模型、DocxXML、编辑内核和撤销、磁盘上的文档库、Markdown / HTML 导入和 Markdown 导出，以及画板的模型和算法。它不依赖 GPUI，可以单独编译和测试（`cargo test -p fdl_core`），fuzzer 也在这里。
-- **根 crate（`quiet_md`）**：GPUI 应用，即窗口、视图、渲染、菜单和浮层。`main.rs` 把 `fdl_core` 的模块重新导出到 crate 根，`editor/mod.rs` 重新导出 `editor::core` 和 `editor::table_ops`，所以应用里仍然写 `crate::model`、`super::core`。
+- **`crates/core`（`fdl_core`，其中含画板引擎）**：文档引擎。包括模型、DocxXML、编辑内核和撤销、磁盘上的文档库、Markdown / HTML 导入、主题 CSS 解析与代码高亮、HTML / Markdown 导出，以及画板的模型和算法。它不依赖 GPUI，可以单独编译和测试（`cargo test -p fdl_core`），fuzzer 也在这里。
+- **`crates/cli`（`quiet_cli` / `qmd`）**：不依赖 GPUI 的 headless CLI，面向 AI agent 与脚本。提供 `schema` 自描述、声明式 `doc create/apply --spec`、通过 `editor::Core` 与 `validate_core` 校验进行的细粒度 `block`/`table`/`meta` 操作、`DiagramSpec` 语义画板构建与 `resvg` SVG/PNG 渲染、结构/美学 linter (`validate --strict`)、主题 CSS 定制，以及 HTML/Markdown/DocxXML/preview 导出；可单独编译测试（`cargo test -p quiet_cli`）。
+- **根 crate（`quiet_md`）**：GPUI 应用，即窗口、视图、渲染、菜单和浮层。`src/main.rs` 在启动 GPUI 之前检查命令行参数，若匹配 `quiet_cli::should_intercept_args()`（如 `quiet_md doc ...`、`quiet_md --lib ...`），直接走 CLI 并退出；否则正常打开图形界面或本地 `.md` 文件。`main.rs` 把 `fdl_core` 的模块重新导出到 crate 根，`editor/mod.rs` 重新导出 `editor::core` 和 `editor::table_ops`，所以应用里仍然写 `crate::model`、`super::core`。
 
-依赖只能从应用指向 core。core 里的模块只引用 core 里的模块。
+依赖只能从应用或 `crates/cli` 指向 `crates/core`。core 里的模块只引用 core 里的模块。
 
 ```
 main.rs ─ 窗口
@@ -105,6 +106,9 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `store.rs` | 文档库读写、索引恢复、回收站、设置；`image_path` |
 | `paste.rs` | HTML / Markdown → block（粘贴和导入共用） |
 | `markdown.rs` | 导出 Markdown |
+| `html.rs` | 导出自包含 HTML（内联样式与资源） |
+| `highlight.rs` | 代码语法词法高亮 |
+| `theme_css.rs` | 文档主题 CSS 解析与校验 |
 | `lang.rs` | 代码语言表 |
 | `palette.rs` | 文字色、背景色、高亮块色板（RGBA，不依赖 GPUI；`theme.rs` 转成 GPUI 颜色） |
 | `time.rs` | 日期换算、本地时区、当前时间 |
@@ -117,6 +121,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 | `board/` 输出 | `display`（显示列表，各后端共用）、`export_svg` |
 | `editor/core.rs` | 编辑内核 |
 | `editor/table_ops.rs` | 表格操作和单元格选区（`CellSel`） |
+| `editor/vim.rs` | Vim 模式状态机（Normal / Insert / Visual / Flash） |
 | `editor/fuzz_tests.rs` | 随机编辑 fuzzer |
 | `versions.rs` | 正文版本快照：目录即索引、节流、配额、回收站联动 |
 | `diff.rs` | 版本间的按行 LCS 差异（无第三方依赖） |
@@ -152,6 +157,7 @@ Core 的不变量由 `crates/core/src/editor/fuzz_tests.rs` 在每一步随机�
 |---|---|
 | `view.rs` | `Editor` 实体：状态、键鼠处理、`changed()` |
 | `keymap.rs` / `menus.rs` | 快捷键绑定、斜杠菜单和转换菜单的数据 |
+| `vim.rs` | Vim 模式 GPUI 适配（按键分发、Flash 浮层、模式角标） |
 | `render.rs` / `text.rs` | 页面渲染、富文本元素 |
 | `overlays.rs` | 手柄、斜杠 / + 菜单、块菜单、浮动工具栏 |
 | `drag.rs` / `gap.rs` | 拖动 block、点击 block 间隙 |

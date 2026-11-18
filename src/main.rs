@@ -162,6 +162,9 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
 }
 
 fn main() {
+    if let Some(code) = quiet_cli::maybe_run_from_args() {
+        std::process::exit(code);
+    }
     logging::init();
     let scripted = devtools::scripted();
     // No single-instance guard: copies may share a library (builds tested

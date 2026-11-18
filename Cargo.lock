@@ -1725,6 +1725,7 @@ dependencies = [
  "base64",
  "dirs 7.0.0",
  "html5ever",
+ "katex-rs",
  "markup5ever_rcdom",
  "miniz_oxide 0.9.1",
  "quick-xml 0.37.5",
@@ -4416,6 +4417,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "quiet_cli"
+version = "0.1.13"
+dependencies = [
+ "anyhow",
+ "base64",
+ "fdl_core",
+ "quick-xml 0.37.5",
+ "resvg",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "quiet_md"
 version = "0.1.13"
 dependencies = [
@@ -4440,6 +4455,7 @@ dependencies = [
  "objc",
  "png 0.18.1",
  "quick-xml 0.37.5",
+ "quiet_cli",
  "raw-window-handle",
  "regex",
  "resvg",

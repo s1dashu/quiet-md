@@ -21,22 +21,7 @@ const SIZES: [f32; 11] = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.2, 1.44, 1.728, 2.074,
 /// The test for rendering as a block (display) equation: multi-line `$$`
 /// imports, or `/\\begin\n*\{(equation|split|align|gather|alignat|CD)\}|\\tag/`.
 pub fn is_block(src: &str) -> bool {
-    if src.contains('\n') || src.contains("\\tag") {
-        return true;
-    }
-    let mut rest = src;
-    while let Some(i) = rest.find("\\begin") {
-        let after = rest[i + 6..].trim_start_matches('\n');
-        if let Some(body) = after.strip_prefix('{') {
-            for env in ["equation", "split", "align", "gather", "alignat", "CD"] {
-                if body.strip_prefix(env).is_some_and(|r| r.starts_with('}')) {
-                    return true;
-                }
-            }
-        }
-        rest = &rest[i + 6..];
-    }
-    false
+    fdl_core::html::is_block_math(src)
 }
 
 /// Register the KaTeX fonts (MIT, bundled under assets/fonts/katex).
@@ -182,17 +167,9 @@ fn render_html(src: &str, display: bool) -> Option<String> {
 }
 
 /// The equation as MathML (`<math>…</math>`), for HTML export.
+#[allow(dead_code)]
 pub fn mathml(src: &str) -> Option<String> {
-    let mut settings = katex::types::Settings::default();
-    settings.display_mode = is_block(src);
-    settings.output = katex::types::OutputFormat::Mathml;
-    settings.throw_on_error = true;
-    let expr = format!("\\displaystyle {}", src.trim());
-    CTX.with(|ctx| {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| katex::core::render_to_string(ctx, &expr, &settings)))
-            .ok()?
-            .ok()
-    })
+    fdl_core::html::mathml(src)
 }
 
 // ------------------------------------------------------------------ DOM

@@ -1,0 +1,28 @@
+[package]
+name = "quiet_cli"
+version = "0.1.13"
+edition = "2024"
+description = "Headless fine-grained CLI for Quiet.md document authoring, boards, themes and validation"
+license = "MIT"
+authors = ["s1dashu"]
+
+[lib]
+name = "quiet_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "qmd"
+path = "src/main.rs"
+
+[dependencies]
+fdl_core = { path = "../core" }
+anyhow = "1.0.104"
+base64 = "0.22"
+quick-xml = "0.37"
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+uuid = { version = "1.28.0", features = ["v4"] }
+
+[lints]
+workspace = true

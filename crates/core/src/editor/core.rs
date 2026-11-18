@@ -3221,6 +3221,234 @@ impl Core {
         }
         out
     }
+
+    /// Replace document title (undoable).
+    pub fn set_title(&mut self, title: RichText) {
+        self.checkpoint(EditKind::Other);
+        self.doc.title = title;
+        self.fix_selection();
+    }
+
+    /// Replace all body blocks as one undoable edit, normalizing empty containers.
+    pub fn replace_blocks(&mut self, blocks: Vec<Block>) {
+        self.checkpoint(EditKind::Other);
+        self.doc.blocks = blocks;
+        self.block_sel = None;
+        self.cell_sel = None;
+        self.normalize();
+        self.fix_selection();
+    }
+
+    /// Replace the text of a text-bearing block (stripping marks/inlines in code blocks).
+    pub fn set_block_text(&mut self, id: BlockId, text: RichText) -> bool {
+        let Some(kind) = self.kind_of(id).cloned() else { return false };
+        if !kind.has_text() { return false }
+        self.checkpoint(EditKind::Other);
+        let clean = if matches!(kind, BlockKind::Code { .. }) { RichText::plain(text.plain_text()) } else { text };
+        if let Some(b) = self.block_mut(id) { b.text = clean; }
+        self.fix_selection();
+        true
+    }
+
+    pub fn set_callout(&mut self, id: BlockId, emoji: String, bg: Option<ColorName>, border: Option<ColorName>, text_color: Option<ColorName>) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Callout { .. })) { return false }
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Callout { emoji, bg, border, text_color };
+        }
+        true
+    }
+
+    pub fn set_code_props(&mut self, id: BlockId, lang: String, caption: Option<String>, wrap: bool) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Code { .. })) { return false }
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Code { lang, caption, wrap };
+        }
+        true
+    }
+
+    pub fn set_image_props(&mut self, id: BlockId, width: Option<f32>, height: Option<f32>, caption: Option<String>, crop: Option<[f32; 4]>) -> bool {
+        let Some(BlockKind::Image { src_kind, src, .. }) = self.kind_of(id).cloned() else { return false };
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Image { src_kind, src, width, height, caption, crop };
+        }
+        true
+    }
+
+    pub fn set_countdown(&mut self, id: BlockId, countdown: Countdown) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Countdown(_))) { return false }
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Countdown(countdown);
+        }
+        true
+    }
+
+    pub fn set_heading_seq_auto(&mut self, id: BlockId, seq_auto: bool) -> bool {
+        let Some(BlockKind::Heading { level, .. }) = self.kind_of(id).cloned() else { return false };
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Heading { level, seq_auto };
+        }
+        true
+    }
+
+    pub fn set_ordered_seq(&mut self, id: BlockId, seq: Option<u32>) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Ordered { .. })) { return false }
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Ordered { seq };
+        }
+        true
+    }
+
+    pub fn set_todo_done(&mut self, id: BlockId, done: bool) -> bool {
+        if !matches!(self.kind_of(id), Some(BlockKind::Todo { .. })) { return false }
+        self.checkpoint(EditKind::Other);
+        if let Some(b) = self.block_mut(id) {
+            b.kind = BlockKind::Todo { done };
+        }
+        true
+    }
+
+    /// Insert a normalized multi-column grid relative to `target`.
+    pub fn insert_grid(&mut self, target: BlockId, place: DropPlace, ratios: &[f32], cols: Vec<Vec<Block>>) -> Option<BlockId> {
+        let n = cols.len();
+        if !(2..=MAX_COLUMNS).contains(&n) || self.path(target).is_none() { return None }
+        let mut norm: Vec<f32> = if ratios.len() == n { ratios.to_vec() } else { vec![1. / n as f32; n] };
+        let sum: f32 = norm.iter().copied().filter(|r| r.is_finite() && *r > 0.).sum();
+        if sum <= 0. || norm.iter().any(|r| !r.is_finite() || *r <= 0.) { return None }
+        for r in &mut norm { *r /= sum; }
+        if norm.iter().any(|r| *r < MIN_COLUMN_RATIO - 1e-4) { return None }
+        let children: Vec<Block> = cols.into_iter().zip(norm).map(|(mut kids, ratio)| {
+            if kids.is_empty() { kids.push(Block::text("")); }
+            Block::new(BlockKind::Column { ratio }, RichText::default()).with_children(kids)
+        }).collect();
+        let grid = Block::new(BlockKind::Grid, RichText::default()).with_children(children);
+        let gid = grid.id;
+        self.insert_blocks_at(vec![grid], target, place);
+        Some(gid)
+    }
+}
+
+pub fn validate_text(t: &RichText, at: &str) -> Result<(), String> {
+    let mut o = 0;
+    for (i, r) in t.runs.iter().enumerate() {
+        if r.len == 0 { return Err(format!("{at}: zero-length run {i} in {t:?}")); }
+        o += r.len;
+        if o > t.text.len() || !t.text.is_char_boundary(o) { return Err(format!("{at}: run {i} ends off a char boundary in {t:?}")); }
+        if r.marks.inline.is_some() && t.text[o - r.len..o].chars().any(|ch| ch != '\u{FFFC}') {
+            return Err(format!("{at}: object run {i} holds text in {t:?}"));
+        }
+        if i > 0 && t.runs[i - 1].marks == r.marks { return Err(format!("{at}: runs {} and {i} have the same marks in {t:?}", i - 1)); }
+    }
+    if o != t.text.len() { return Err(format!("{at}: runs cover {o} of {} bytes in {t:?}", t.text.len())); }
+    Ok(())
+}
+
+pub fn validate_table(t: &Table, at: &str) -> Result<(), String> {
+    let (nr, nc) = (t.rows.len(), t.ncols());
+    if nr == 0 || nc == 0 { return Err(format!("{at}: empty table {nr}×{nc}")); }
+    let mut count = vec![vec![0; nc]; nr];
+    for (r, row) in t.rows.iter().enumerate() {
+        if row.len() != nc { return Err(format!("{at}: row {r} has {} of {nc} cells", row.len())); }
+        for (c, cell) in row.iter().enumerate() {
+            if cell.is_covered() {
+                if cell.rowspan != 0 || !cell.blocks.is_empty() { return Err(format!("{at}: covered slot ({r},{c}) has content or a span")); }
+                continue;
+            }
+            let (rs, cs) = (cell.rowspan as usize, cell.colspan as usize);
+            if rs == 0 || r + rs > nr || c + cs > nc { return Err(format!("{at}: cell ({r},{c}) spans {rs}×{cs} outside {nr}×{nc}")); }
+            if cell.blocks.is_empty() { return Err(format!("{at}: cell ({r},{c}) has no blocks")); }
+            for row in count.iter_mut().skip(r).take(rs) {
+                for n in row.iter_mut().skip(c).take(cs) { *n += 1; }
+            }
+        }
+    }
+    for (r, row) in count.iter().enumerate() {
+        for (c, n) in row.iter().enumerate() {
+            if *n != 1 { return Err(format!("{at}: slot ({r},{c}) covered by {n} cells")); }
+        }
+    }
+    Ok(())
+}
+
+fn validate_blocks(blocks: &[Block], parent: Option<&BlockKind>, ids: &mut HashSet<BlockId>) -> Result<(), String> {
+    for b in blocks {
+        let at = format!("block {:?} ({:?})", b.id, std::mem::discriminant(&b.kind));
+        if !ids.insert(b.id) { return Err(format!("{at}: duplicate id")); }
+        validate_text(&b.text, &at)?;
+        let in_grid = matches!(parent, Some(BlockKind::Grid));
+        if matches!(b.kind, BlockKind::Column { .. }) != in_grid {
+            return Err(format!("{at}: column outside a grid, or a grid holding a non-column"));
+        }
+        if matches!(b.kind, BlockKind::Grid | BlockKind::Column { .. }) && b.children.is_empty() {
+            return Err(format!("{at}: empty grid or column"));
+        }
+        if matches!(b.kind, BlockKind::Code { .. }) && b.text.runs.iter().any(|r| r.marks != Marks::default()) {
+            return Err(format!("{at}: marks or inline objects in code"));
+        }
+        if !b.children.is_empty() && !b.kind.nests() && !b.kind.is_container() {
+            return Err(format!("{at}: children under a block that can't hold (or save) them"));
+        }
+        if let BlockKind::Table(t) = &b.kind {
+            validate_table(t, &at)?;
+            for (_, _, cell) in t.cells() { validate_blocks(&cell.blocks, None, ids)?; }
+        }
+        validate_blocks(&b.children, Some(&b.kind), ids)?;
+    }
+    Ok(())
+}
+
+/// Structural invariants for a standalone [`Document`].
+pub fn validate_document(doc: &Document) -> Result<(), String> {
+    if doc.blocks.is_empty() { return Err("document has no blocks".into()); }
+    validate_text(&doc.title, "title")?;
+    validate_blocks(&doc.blocks, None, &mut HashSet::default())
+}
+
+/// Full structural + selection invariants for [`Core`].
+pub fn validate_core(c: &Core) -> Result<(), String> {
+    validate_document(&c.doc)?;
+    let us = c.units();
+    if let Some(bs) = c.block_sel {
+        for id in [bs.anchor, bs.head] {
+            if c.block(id).is_none() || c.is_hidden(id) {
+                return Err(format!("block selection end {id:?} is gone or hidden"));
+            }
+        }
+        return Ok(());
+    }
+    let (a, h) = (c.sel.anchor, c.sel.head);
+    for p in [a, h] {
+        let Some(u) = us.iter().find(|u| u.id == p.block) else {
+            return Err(format!("selection end {p:?} is not a unit (selection {:?})", c.sel));
+        };
+        match c.text_of(p.block) {
+            Some(t) if p.offset > t.len() || !t.text.is_char_boundary(p.offset) => {
+                return Err(format!("selection end {p:?} is off the text {:?}", t.text));
+            }
+            None if u.text => return Err(format!("text unit {p:?} has no text")),
+            _ => {}
+        }
+    }
+    let vis: HashSet<BlockId> = c.block_order(true).into_iter().collect();
+    let mut hidden_mismatch = None;
+    c.doc.for_each_block(|b| {
+        if !matches!(b.kind, BlockKind::Column { .. }) && c.is_hidden(b.id) == vis.contains(&b.id) {
+            hidden_mismatch.get_or_insert(b.id);
+        }
+    });
+    if let Some(id) = hidden_mismatch {
+        return Err(format!("is_hidden({id:?}) disagrees with block_order"));
+    }
+    let scope = |id| us.iter().find(|u| u.id == id).map(|u| u.scope);
+    if c.cell_sel.is_none() && scope(a.block) != scope(h.block) {
+        return Err(format!("selection {a:?}..{h:?} crosses a table boundary"));
+    }
+    Ok(())
 }
 
 /// A column goes once its last block does, and the

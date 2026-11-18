@@ -2133,6 +2133,37 @@ impl Store {
         }
         self.save_index()
     }
+
+    pub fn root(&self) -> &Path { &self.root }
+    pub fn abs_path(&self, rel: &str) -> PathBuf { self.abs(rel) }
+    pub fn preferences_path(&self) -> PathBuf { self.internal().join("preferences.json") }
+
+    pub fn doc_mtime_secs(&self, id: &str) -> Option<u64> {
+        std::fs::metadata(self.path(id)).ok()?.modified().ok()?.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
+    }
+
+    /// Write an asset under `.assets/` (or `assets/` for flat libraries) and
+    /// return its library-relative path (e.g. `.assets/abc12345-hero.jpg`).
+    pub fn write_asset_bytes(&self, subdir: Option<&str>, file_name: &str, bytes: &[u8]) -> Result<String> {
+        let base_name = if self.flat { "assets" } else { ASSETS };
+        let mut rel = base_name.to_string();
+        let mut dir = self.root.join(base_name);
+        if let Some(sub) = subdir.filter(|s| !s.is_empty()) {
+            for seg in sub.split('/').filter(|s| !s.is_empty() && *s != "." && *s != "..") {
+                rel.push('/');
+                rel.push_str(seg);
+                dir.push(seg);
+            }
+        }
+        std::fs::create_dir_all(&dir)?;
+        let clean: String = file_name.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { '_' } else { c }).collect();
+        let clean = clean.trim().trim_start_matches('.').to_string();
+        anyhow::ensure!(!clean.is_empty(), "无效的素材文件名");
+        rel.push('/');
+        rel.push_str(&clean);
+        write_atomic(&dir.join(&clean), bytes)?;
+        Ok(rel)
+    }
 }
 
 #[cfg(test)]

@@ -347,6 +347,26 @@ impl Core {
         self.edit_table(table, |t| t.header_col = !t.header_col);
     }
 
+    pub fn table_set_header(&mut self, table: BlockId, header_rows: Option<usize>, header_col: Option<bool>) -> bool {
+        self.edit_table(table, |t| {
+            if let Some(hr) = header_rows { t.header_rows = hr.min(t.rows.len()); }
+            if let Some(hc) = header_col { t.header_col = hc; }
+        })
+    }
+
+    /// Replace a visible cell's blocks cleanly (auto-normalizing empty blocks).
+    pub fn table_set_cell_blocks(&mut self, table: BlockId, r: usize, c: usize, mut blocks: Vec<Block>) -> bool {
+        if blocks.is_empty() { blocks.push(Block::text("")); }
+        let ok = self.edit_table(table, |t| {
+            let (or, oc) = t.origin(r.min(t.rows.len().saturating_sub(1)), c.min(t.ncols().saturating_sub(1)));
+            if let Some(cell) = t.rows.get_mut(or).and_then(|row| row.get_mut(oc)) && !cell.is_covered() {
+                cell.blocks = blocks.into_iter().map(|b| b.fresh_ids()).collect();
+            }
+        });
+        if ok { self.caret_in_cell(table, r, c); }
+        ok
+    }
+
     /// Moves the selected rows / columns before boundary `to`; they stay
     /// selected. False when that leaves them where they are.
     pub fn table_move_selected(&mut self, to: usize) -> bool {

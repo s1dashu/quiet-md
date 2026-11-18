@@ -120,7 +120,7 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
     }
     let us = c.units();
     let any = |rng: &mut Rng| rng.pick(&us).id;
-    match rng.below(24) {
+    match rng.below(25) {
         0..=2 => {
             let s = *rng.pick(TEXTS);
             c.insert_text(s);
@@ -223,9 +223,43 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
             }
             "paste_image".into()
         }
-        _ => {
+        23 => {
             c.trailing_line();
             "trailing_line".into()
+        }
+        _ => prop_step(c, rng),
+    }
+}
+
+fn prop_step(c: &mut Core, rng: &mut Rng) -> String {
+    let mut all = vec![];
+    c.doc.for_each_block(|b| all.push((b.id, b.kind.clone())));
+    if all.is_empty() { return "prop: empty".into(); }
+    let (id, kind) = all.swap_remove(rng.below(all.len()));
+    match kind {
+        BlockKind::Callout { .. } => {
+            c.set_callout(id, "🚀".into(), Some(ColorName("light-blue".into())), Some(ColorName("blue".into())), None);
+            format!("set_callout({id:?})")
+        }
+        BlockKind::Code { .. } => {
+            c.set_code_props(id, "Rust".into(), Some("sample".into()), rng.chance(50));
+            format!("set_code_props({id:?})")
+        }
+        BlockKind::Image { .. } => {
+            c.set_image_props(id, Some(320.), None, Some("cap".into()), None);
+            format!("set_image_props({id:?})")
+        }
+        BlockKind::Heading { .. } => {
+            c.set_heading_seq_auto(id, rng.chance(50));
+            format!("set_heading_seq_auto({id:?})")
+        }
+        _ => {
+            if !matches!(kind, BlockKind::Column { .. }) && c.parent_of(id).is_none() {
+                c.insert_grid(id, DropPlace::After, &[0.4, 0.6], vec![vec![Block::text("L")], vec![Block::text("R")]]);
+                format!("insert_grid({id:?})")
+            } else {
+                "prop: noop".into()
+            }
         }
     }
 }
@@ -322,7 +356,7 @@ fn table_step(c: &mut Core, rng: &mut Rng) -> String {
     let kind = *rng.pick(&[CellSelKind::Range, CellSelKind::Rows, CellSelKind::Cols]);
     let s = CellSel { table, anchor: slot(rng), head: slot(rng), kind };
     c.select_cells(s);
-    let what = match rng.below(7) {
+    let what = match rng.below(8) {
         0 => {
             c.table_merge();
             "merge"
@@ -347,6 +381,10 @@ fn table_step(c: &mut Core, rng: &mut Rng) -> String {
         5 => {
             c.table_align_columns(*rng.pick(&[Align::Left, Align::Center, Align::Right]));
             "align_columns"
+        }
+        6 => {
+            c.table_set_cell_blocks(table, rng.below(nr), rng.below(nc), vec![Block::text(rng.pick(TEXTS))]);
+            "set_cell_blocks"
         }
         _ => {
             c.table_clear_cells();
@@ -385,145 +423,8 @@ fn object_step(c: &mut Core, rng: &mut Rng) -> String {
 
 // ------------------------------------------------------------------ invariants
 
-fn check_text(t: &RichText, at: &str) -> Result<(), String> {
-    let mut o = 0;
-    for (i, r) in t.runs.iter().enumerate() {
-        if r.len == 0 {
-            return Err(format!("{at}: zero-length run {i} in {t:?}"));
-        }
-        o += r.len;
-        if o > t.text.len() || !t.text.is_char_boundary(o) {
-            return Err(format!("{at}: run {i} ends off a char boundary in {t:?}"));
-        }
-        if r.marks.inline.is_some() && t.text[o - r.len..o].chars().any(|ch| ch != '\u{FFFC}') {
-            return Err(format!("{at}: object run {i} holds text in {t:?}"));
-        }
-        if i > 0 && t.runs[i - 1].marks == r.marks {
-            return Err(format!("{at}: runs {} and {i} have the same marks in {t:?}", i - 1));
-        }
-    }
-    if o != t.text.len() {
-        return Err(format!("{at}: runs cover {o} of {} bytes in {t:?}", t.text.len()));
-    }
-    Ok(())
-}
-
-fn check_table(t: &Table, at: &str) -> Result<(), String> {
-    let (nr, nc) = (t.rows.len(), t.ncols());
-    if nr == 0 || nc == 0 {
-        return Err(format!("{at}: empty table {nr}×{nc}"));
-    }
-    let mut count = vec![vec![0; nc]; nr];
-    for (r, row) in t.rows.iter().enumerate() {
-        if row.len() != nc {
-            return Err(format!("{at}: row {r} has {} of {nc} cells", row.len()));
-        }
-        for (c, cell) in row.iter().enumerate() {
-            if cell.is_covered() {
-                if cell.rowspan != 0 || !cell.blocks.is_empty() {
-                    return Err(format!("{at}: covered slot ({r},{c}) has content or a span"));
-                }
-                continue;
-            }
-            let (rs, cs) = (cell.rowspan as usize, cell.colspan as usize);
-            if rs == 0 || r + rs > nr || c + cs > nc {
-                return Err(format!("{at}: cell ({r},{c}) spans {rs}×{cs} outside {nr}×{nc}"));
-            }
-            if cell.blocks.is_empty() {
-                return Err(format!("{at}: cell ({r},{c}) has no blocks"));
-            }
-            for row in count.iter_mut().skip(r).take(rs) {
-                for n in row.iter_mut().skip(c).take(cs) {
-                    *n += 1;
-                }
-            }
-        }
-    }
-    for (r, row) in count.iter().enumerate() {
-        for (c, n) in row.iter().enumerate() {
-            if *n != 1 {
-                return Err(format!("{at}: slot ({r},{c}) covered by {n} cells"));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn check_blocks(blocks: &[Block], parent: Option<&BlockKind>, ids: &mut HashSet<BlockId>) -> Result<(), String> {
-    for b in blocks {
-        let at = format!("block {:?} ({:?})", b.id, std::mem::discriminant(&b.kind));
-        if !ids.insert(b.id) {
-            return Err(format!("{at}: duplicate id"));
-        }
-        check_text(&b.text, &at)?;
-        let in_grid = matches!(parent, Some(BlockKind::Grid));
-        if matches!(b.kind, BlockKind::Column { .. }) != in_grid {
-            return Err(format!("{at}: column outside a grid, or a grid holding a non-column"));
-        }
-        if matches!(b.kind, BlockKind::Grid | BlockKind::Column { .. }) && b.children.is_empty() {
-            return Err(format!("{at}: empty grid or column"));
-        }
-        if matches!(b.kind, BlockKind::Code { .. }) && b.text.runs.iter().any(|r| r.marks != Marks::default()) {
-            return Err(format!("{at}: marks or inline objects in code"));
-        }
-        if !b.children.is_empty() && !b.kind.nests() && !b.kind.is_container() {
-            return Err(format!("{at}: children under a block that can't hold (or save) them"));
-        }
-        if let BlockKind::Table(t) = &b.kind {
-            check_table(t, &at)?;
-            for (_, _, cell) in t.cells() {
-                check_blocks(&cell.blocks, None, ids)?;
-            }
-        }
-        check_blocks(&b.children, Some(&b.kind), ids)?;
-    }
-    Ok(())
-}
-
 fn check(c: &Core) -> Result<(), String> {
-    if c.doc.blocks.is_empty() {
-        return Err("document has no blocks".into());
-    }
-    check_text(&c.doc.title, "title")?;
-    check_blocks(&c.doc.blocks, None, &mut HashSet::new())?;
-    let us = c.units();
-    if let Some(bs) = c.block_sel {
-        // Block mode: the text selection is not shown; its ends are.
-        for id in [bs.anchor, bs.head] {
-            if c.block(id).is_none() || c.is_hidden(id) {
-                return Err(format!("block selection end {id:?} is gone or hidden"));
-            }
-        }
-        return Ok(());
-    }
-    let (a, h) = (c.sel.anchor, c.sel.head);
-    for p in [a, h] {
-        let Some(u) = us.iter().find(|u| u.id == p.block) else {
-            return Err(format!("selection end {p:?} is not a unit (selection {:?})", c.sel));
-        };
-        match c.text_of(p.block) {
-            Some(t) if p.offset > t.len() || !t.text.is_char_boundary(p.offset) => {
-                return Err(format!("selection end {p:?} is off the text {:?}", t.text));
-            }
-            None if u.text => return Err(format!("text unit {p:?} has no text")),
-            _ => {}
-        }
-    }
-    let vis: HashSet<BlockId> = c.block_order(true).into_iter().collect();
-    let mut hidden_mismatch = None;
-    c.doc.for_each_block(|b| {
-        if !matches!(b.kind, BlockKind::Column { .. }) && c.is_hidden(b.id) == vis.contains(&b.id) {
-            hidden_mismatch.get_or_insert(b.id);
-        }
-    });
-    if let Some(id) = hidden_mismatch {
-        return Err(format!("is_hidden({id:?}) disagrees with block_order"));
-    }
-    let scope = |id| us.iter().find(|u| u.id == id).map(|u| u.scope);
-    if c.cell_sel.is_none() && scope(a.block) != scope(h.block) {
-        return Err(format!("selection {a:?}..{h:?} crosses a table boundary"));
-    }
-    Ok(())
+    validate_core(c)
 }
 
 fn round_trip(c: &Core) -> Result<(), String> {

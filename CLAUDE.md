@@ -14,7 +14,7 @@
 ## 代码
 
 - **不跑 rustfmt。** 代码是刻意的紧凑风格，新代码照周围代码的风格写，注释密度也一样。
-- **文档引擎在 `crates/core`（`fdl_core`），不依赖 GPUI。** 模型、格式、编辑内核、文档库、导入和 Markdown 导出放这里，只能引用 core 里的模块；界面代码放根 crate。见 docs/ARCHITECTURE.md。
+- **文档引擎在 `crates/core`（`fdl_core`），不依赖 GPUI。** 模型、格式、编辑内核、文档库、导入、语法词法、主题 CSS 解析以及自包含 HTML / Markdown 导出放这里，只能引用 core 里的模块；headless CLI 在 `crates/cli`（`quiet_cli` / `qmd` 二进制，同样不依赖 GPUI，`src/main.rs` 会在初始化 GPUI 前把 CLI 子命令转发给它）；界面代码放根 crate。见 docs/ARCHITECTURE.md。
 - **改文档结构只经过 `editor::Core`。** 顺序是：`checkpoint` → Core 方法 → `Editor::changed()`。新增结构性操作时，同时在 `fuzz_tests.rs` 的 `step` 里加一种随机操作。
 - 能有子级的只有 `BlockKind::nests()` 的 block 和容器（引用、高亮块、分栏、列）。代码块里没有样式和行内对象。
 - **DocxXML 写出的格式要稳定。** 改了读写逻辑，`crates/core/tests/fixtures/all-blocks.xml` 必须仍能原样往返。新增 block 类型时，把它的规范写法加进这个 fixture。

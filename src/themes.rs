@@ -167,31 +167,10 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
 
 static BY_KEY: LazyLock<HashMap<&'static str, usize>> = LazyLock::new(|| PROPS.iter().enumerate().map(|(i, p)| (p.key.as_str(), i)).collect());
 
-/// Tokens a rule sets (the rest are listed as `--token-*` in full files).
 #[cfg(test)]
 static RULE_TOKENS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     PROPS.iter().flat_map(|p| [p.craft, p.feishu]).filter_map(|d| if let Def::Tok(t) = d { Some(t) } else { None }).collect()
 });
-
-/// Selector spellings that mean the same element.
-fn canon_sel(s: &str) -> String {
-    let s = s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
-    match s.as_str() {
-        "body" | ".markdown" | ".editor" => ".page".into(),
-        "b" => "strong".into(),
-        ".inline-code" | "p code" | ":not(pre) > code" => "code".into(),
-        ".code-block" | "pre code" => "pre".into(),
-        ".quote" => "blockquote".into(),
-        ".divider" => "hr".into(),
-        "ul ::marker" | "ul li::marker" => "ul li::marker".into(),
-        "ol ::marker" | "ol li::marker" => "ol li::marker".into(),
-        "input[type=checkbox]" | "input[type=\"checkbox\"]" | ".todo" => ".task".into(),
-        "input[type=checkbox]:checked" | "input[type=\"checkbox\"]:checked" | ".todo:checked" | ".task.checked" => ".task:checked".into(),
-        ".todo-done" | ".task.done" => ".task-done".into(),
-        "td" | "th, td" => "table".into(),
-        _ => s,
-    }
-}
 
 // ---- a parsed theme
 
@@ -291,12 +270,7 @@ impl Theme {
     pub fn customized(&self) -> bool { self.edited }
 }
 
-pub const BUNDLED: [(&str, &str); 4] = [
-    ("craft", include_str!("../assets/themes/craft.css")),
-    ("feishu", include_str!("../assets/themes/feishu.css")),
-    ("notion", include_str!("../assets/themes/notion.css")),
-    ("obsidian", include_str!("../assets/themes/obsidian.css")),
-];
+use fdl_core::theme_css::{self, BUNDLED, border, palette_names, parse_len, parse_weight, rules, subst, unquote};
 
 static THEMES: RwLock<Vec<Theme>> = RwLock::new(Vec::new());
 static ERRORS: RwLock<Vec<String>> = RwLock::new(Vec::new());
@@ -321,128 +295,9 @@ pub fn dir() -> PathBuf { crate::store::Store::internal_dir().join("themes") }
 
 // ---- CSS
 
-struct Rule { sels: Vec<String>, decls: Vec<(String, String)> }
-
-/// `selectors { name: value; … }`, comments removed; at-rules skipped whole.
-fn rules(css: &str) -> Vec<Rule> {
-    let mut s = String::with_capacity(css.len());
-    let mut rest = css;
-    while let Some(i) = rest.find("/*") {
-        s.push_str(&rest[..i]);
-        rest = rest[i + 2..].find("*/").map_or("", |j| &rest[i + 2 + j + 2..]);
-    }
-    s.push_str(rest);
-    let chars: Vec<char> = s.chars().collect();
-    let mut out = vec![];
-    let (mut i, mut start) = (0, 0);
-    while i < chars.len() {
-        if chars[i] != '{' { i += 1; continue }
-        let sel: String = chars[start..i].iter().collect();
-        let (mut depth, mut j) = (0, i);
-        while j < chars.len() {
-            match chars[j] { '{' => depth += 1, '}' => { depth -= 1; if depth == 0 { break } } _ => {} }
-            j += 1;
-        }
-        let body: String = chars[i + 1..j.min(chars.len())].iter().collect();
-        i = j + 1;
-        start = i;
-        let sel = sel.trim();
-        if sel.starts_with('@') || body.contains('{') { continue }
-        let mut decls = vec![];
-        let (mut paren, mut quote, mut from) = (0, None::<char>, 0);
-        for (k, ch) in body.char_indices() {
-            match ch {
-                '"' | '\'' if quote == Some(ch) => quote = None,
-                '"' | '\'' if quote.is_none() => quote = Some(ch),
-                '(' if quote.is_none() => paren += 1,
-                ')' if quote.is_none() => paren -= 1,
-                ';' if quote.is_none() && paren == 0 => { decls.push(&body[from..k]); from = k + 1; }
-                _ => {}
-            }
-        }
-        decls.push(&body[from..]);
-        let decls = decls.into_iter().filter_map(|d| {
-            let (n, v) = d.split_once(':')?;
-            let v = v.trim().trim_end_matches("!important").trim();
-            (!n.trim().is_empty() && !v.is_empty()).then(|| (n.trim().to_lowercase(), v.to_string()))
-        }).collect();
-        out.push(Rule { sels: sel.split(',').map(canon_sel).filter(|s| !s.is_empty()).collect(), decls });
-    }
-    out
-}
-
-/// `var(--x)` / `var(--x, fallback)`, recursively.
-fn subst(v: &str, vars: &HashMap<String, String>, depth: u8) -> String {
-    let Some(i) = v.find("var(") else { return v.to_string() };
-    if depth > 8 { return v.to_string() }
-    let open = i + 4;
-    let (mut d, mut end) = (1, v.len());
-    for (k, ch) in v[open..].char_indices() {
-        match ch { '(' => d += 1, ')' => { d -= 1; if d == 0 { end = open + k; break } } _ => {} }
-    }
-    let inner = &v[open..end];
-    let (name, fallback) = match inner.split_once(',') { Some((n, f)) => (n.trim(), Some(f.trim())), None => (inner.trim(), None) };
-    let rep = vars.get(name).cloned().or(fallback.map(str::to_string)).unwrap_or_default();
-    let rep = subst(&rep, vars, depth + 1);
-    subst(&format!("{}{}{}", &v[..i], rep, &v[(end + 1).min(v.len())..]), vars, depth + 1)
-}
-
-fn unquote(s: &str) -> String { s.trim().trim_matches(|c| c == '"' || c == '\'').to_string() }
-
 pub fn parse_color(v: &str) -> Option<Hsla> {
-    let v = v.trim().to_lowercase();
-    let rgba = |r: f32, g: f32, b: f32, a: f32| -> Hsla { gpui::Rgba { r: r / 255., g: g / 255., b: b / 255., a }.into() };
-    match v.as_str() {
-        "transparent" => return Some(rgba(0., 0., 0., 0.)),
-        "white" => return Some(rgba(255., 255., 255., 1.)),
-        "black" => return Some(rgba(0., 0., 0., 1.)),
-        _ => {}
-    }
-    if let Some(h) = v.strip_prefix('#') {
-        let x = |s: &str| u8::from_str_radix(s, 16).ok().map(f32::from);
-        let c: Vec<char> = h.chars().collect();
-        let d = |c: char| x(&c.to_string()).map(|n| n * 17.);
-        return match c.len() {
-            3 | 4 => Some(rgba(d(c[0])?, d(c[1])?, d(c[2])?, if c.len() == 4 { d(c[3])? / 255. } else { 1. })),
-            6 | 8 => Some(rgba(x(&h[0..2])?, x(&h[2..4])?, x(&h[4..6])?, if c.len() == 8 { x(&h[6..8])? / 255. } else { 1. })),
-            _ => None,
-        };
-    }
-    let (f, inner) = v.split_once('(')?;
-    let inner = inner.strip_suffix(')')?;
-    let parts: Vec<&str> = inner.split([',', ' ', '/']).filter(|p| !p.is_empty()).collect();
-    if parts.len() < 3 { return None }
-    let alpha = |s: Option<&&str>| -> Option<f32> { match s { None => Some(1.), Some(s) => s.strip_suffix('%').map_or_else(|| s.parse().ok(), |p| p.parse::<f32>().ok().map(|n| n / 100.)) } };
-    match f.trim() {
-        "rgb" | "rgba" => {
-            let ch = |s: &str| -> Option<f32> { s.strip_suffix('%').map_or_else(|| s.parse().ok(), |p| p.parse::<f32>().ok().map(|n| n * 2.55)) };
-            Some(rgba(ch(parts[0])?, ch(parts[1])?, ch(parts[2])?, alpha(parts.get(3))?))
-        }
-        "hsl" | "hsla" => {
-            let h: f32 = parts[0].trim_end_matches("deg").parse().ok()?;
-            let s: f32 = parts[1].trim_end_matches('%').parse::<f32>().ok()? / 100.;
-            let l: f32 = parts[2].trim_end_matches('%').parse::<f32>().ok()? / 100.;
-            Some(gpui::hsla(h.rem_euclid(360.) / 360., s, l, alpha(parts.get(3))?))
-        }
-        _ => None,
-    }
-}
-
-/// A length in pt: px / pt as written, `em` of `em`, `rem` of 16, `%` and
-/// unitless numbers of `unitless` (line heights) when given.
-fn parse_len(v: &str, em: f32, unitless: Option<f32>) -> Option<f32> {
-    let v = v.trim().to_lowercase();
-    let num = |s: &str| s.trim().parse::<f32>().ok();
-    if let Some(n) = v.strip_suffix("px").or_else(|| v.strip_suffix("pt")) { return num(n) }
-    if let Some(n) = v.strip_suffix("rem") { return num(n).map(|n| n * 16.) }
-    if let Some(n) = v.strip_suffix("em") { return num(n).map(|n| n * em) }
-    if let Some(n) = v.strip_suffix('%') { return num(n).map(|n| n / 100. * unitless.unwrap_or(em)) }
-    if v == "0" { return Some(0.) }
-    num(&v).and_then(|n| unitless.map(|u| n * u))
-}
-
-fn parse_weight(v: &str) -> Option<f32> {
-    match v.trim() { "normal" => Some(400.), "bold" => Some(700.), n => n.parse().ok().filter(|n| (1. ..=1000.).contains(n)) }
+    let c = theme_css::parse_color_rgba(v)?;
+    Some(gpui::Rgba { r: c.r as f32 / 255., g: c.g as f32 / 255., b: c.b as f32 / 255., a: c.a }.into())
 }
 
 /// The first usable family of a `font-family` list.
@@ -464,42 +319,7 @@ fn parse_font<'a>(v: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> Option<&'
     None
 }
 
-/// A border shorthand → (width, style, colour).
-fn border(v: &str) -> (Option<String>, Option<&'static str>, Option<String>) {
-    let (mut w, mut s, mut c) = (None, None, None);
-    let mut parts = vec![];
-    let (mut depth, mut cur) = (0, String::new());
-    for ch in v.chars() {
-        match ch {
-            '(' => { depth += 1; cur.push(ch) }
-            ')' => { depth -= 1; cur.push(ch) }
-            ' ' if depth == 0 => { if !cur.is_empty() { parts.push(std::mem::take(&mut cur)) } }
-            _ => cur.push(ch),
-        }
-    }
-    if !cur.is_empty() { parts.push(cur) }
-    for p in parts {
-        match p.as_str() {
-            "solid" => s = Some("solid"),
-            "dotted" => s = Some("dotted"),
-            "dashed" => s = Some("dashed"),
-            "none" => w = Some("0".into()),
-            p if p.chars().next().is_some_and(|c| c.is_ascii_digit() || c == '.') => w = Some(p.to_string()),
-            p => c = Some(p.to_string()),
-        }
-    }
-    (w, s, c)
-}
-
 pub struct Meta { pub name: Option<String>, pub name_en: Option<String>, pub author: Option<String>, pub description: Option<String> }
-
-fn palette_names(kind: &str) -> Vec<&'static str> {
-    match kind {
-        "color" | "border" => crate::palette::HUES.to_vec(),
-        "highlight" => crate::palette::BG_COLORS.iter().flatten().copied().collect(),
-        _ => crate::palette::CALLOUT_BG_COLORS.iter().flatten().copied().collect(),
-    }
-}
 
 /// Parse a stylesheet. Rules the app doesn't know become warnings; only an
 /// unknown base fails.
