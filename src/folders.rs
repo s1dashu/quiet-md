@@ -30,6 +30,9 @@ impl Workspace {
                 self.home.sort_menu = false;
                 self.entries = self.store.list();
                 self.sort();
+                // 手动排序: give the new page its number now (it is already at
+                // the top), so a later edit cannot float it somewhere else.
+                self.settle_manual_home(cx);
                 match &parent { Some(p) => { self.expanded.insert(p.clone()); } None => self.folded[1] = false }
                 self.search.update(cx, |s, cx| s.set_text("", cx));
                 self.open(&id, window, cx);

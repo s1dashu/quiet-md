@@ -211,7 +211,7 @@ fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
 
 impl Workspace {
     fn drag_rows(&self) -> Vec<Row> {
-        crate::tree::Tree::new(&self.entries).rows(|id| self.expanded.contains(id)).into_iter()
+        crate::tree::Tree::with_order(&self.entries, Some(self.home.order())).rows(|id| self.expanded.contains(id)).into_iter()
             .filter(|(e, _)| self.folder_drag.active.as_ref().is_none_or(|d| !d.started || !d.excluded.contains(&e.id)))
             .map(|(e, depth)| Row { entry: e.clone(), depth }).collect()
     }

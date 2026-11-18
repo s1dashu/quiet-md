@@ -110,7 +110,9 @@ impl Workspace {
     }
 
     pub(crate) fn render_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let entries: Vec<Entry> = self.entries.clone();
+        let mut entries: Vec<Entry> = self.entries.clone();
+        // 置顶 follows the same order as the lists below it.
+        crate::home::sort_entries(&mut entries, self.home.order());
         self.more_bounds.borrow_mut().clear();
         self.settle_sidebar_drop(cx);
 

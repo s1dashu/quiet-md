@@ -23,6 +23,12 @@ pub(crate) struct Tree<'a> {
 
 impl<'a> Tree<'a> {
     pub fn new(entries: &'a [Entry]) -> Self {
+        Self::with_order(entries, None)
+    }
+
+    /// 我的文档 ordered by the page list's setting (`order`), or — when it is
+    /// not given — by the arrangement the user dragged into place.
+    pub fn with_order(entries: &'a [Entry], order: Option<crate::home::Order>) -> Self {
         let ids: HashSet<&str> = entries.iter().filter(|e| e.meta.folder.is_some()).map(|e| e.id.as_str()).collect();
         let parent = |e: &'a Entry| e.meta.parent.as_deref().filter(|p| ids.contains(p) && *p != e.id);
         let mut roots: Vec<&Entry> = vec![];
@@ -53,9 +59,15 @@ impl<'a> Tree<'a> {
         }
         // `Meta::place`, then the id: the list is re-read often (each time the
         // window comes back) and must come out the same every time.
-        roots.sort_by(|a, b| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)));
+        let place = |a: &Entry, b: &Entry| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id));
+        // `sort_by` hands out `&&Entry`; the comparisons take `&Entry`.
+        let cmp = |a: &&Entry, b: &&Entry| match order {
+            Some(o) => o.cmp(a, b),
+            None => place(a, b),
+        };
+        roots.sort_by(cmp);
         for v in kids.values_mut() {
-            v.sort_by(|a, b| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)));
+            v.sort_by(cmp);
         }
         Tree { roots, kids }
     }

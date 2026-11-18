@@ -217,6 +217,9 @@ pub struct Settings {
     pub home_list: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_sort: Option<String>,
+    /// 升序 / 降序 for `home_sort`; absent in libraries from before it existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_sort_dir: Option<String>,
     #[serde(default)]
     pub home_folders_first: bool,
     #[serde(default)]
@@ -1598,7 +1601,12 @@ impl Store {
     /// A document just made in folder `parent` becomes its last child, as
     /// 移动到 would put it (the old layout records the folder only here).
     fn place_new(&mut self, id: &str, parent: Option<&str>) -> Result<()> {
-        if parent.is_some() { self.move_in_tree(id, parent, None)?; }
+        if parent.is_some() {
+            // 自动排序 must not rewrite the hand order: the page stays unplaced,
+            // and 手动排序 puts it at the top the next time it freezes.
+            let automatic = self.settings().home_sort.as_deref().is_some_and(|s| s != "manual");
+            self.move_in_tree_with(id, parent, None, !automatic)?;
+        }
         Ok(())
     }
 
@@ -2175,6 +2183,33 @@ mod tests {
         let mut d = doc(title);
         d.blocks.push(crate::model::Block::text(body));
         d
+    }
+
+    /// 自动排序's new pages leave the hand order alone: switching back to
+    /// 手动排序 shows what the user arranged, not what sorting touched.
+    #[test]
+    fn automatic_sort_new_page_keeps_the_hand_order() {
+        let lib = Lib::new("sort-hand-order");
+        let mut s = lib.open();
+        let folder = s.create_folder("项目", None).unwrap();
+        // 手动排序 is the default: pages made in a folder arrive numbered.
+        s.create_from_in(&doc("a"), Some(&folder)).unwrap();
+        s.create_from_in(&doc("b"), Some(&folder)).unwrap();
+        let hand = |s: &mut Store| s.list().into_iter()
+            .filter(|e| e.meta.parent.as_deref() == Some(folder.as_str()))
+            .map(|e| (e.id, e.meta.order)).collect::<Vec<_>>();
+        let before = hand(&mut s);
+        assert_eq!(before.len(), 2);
+        assert!(before.iter().all(|(_, order)| *order > 0));
+        // 自动排序: the new page stays unplaced and its siblings keep their numbers.
+        let mut settings = s.settings();
+        settings.home_sort = Some("modified".into());
+        s.save_settings(&settings).unwrap();
+        let new = s.create_from_in(&doc("c"), Some(&folder)).unwrap();
+        let after = hand(&mut s);
+        let untouched = after.iter().filter(|(id, _)| *id != new).cloned().collect::<Vec<_>>();
+        assert_eq!(untouched, before);
+        assert_eq!(after.iter().find(|(id, _)| *id == new).unwrap().1, 0);
     }
 
     #[test]
