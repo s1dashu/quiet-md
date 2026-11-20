@@ -82,6 +82,60 @@ pub fn set_menus(cx: &mut App) {
             },
             disabled: false,
         },
+        // 插入 and 格式: the menu-bar home of everything the page's
+        // right-click menu offers, so no action is reachable only by shortcut.
+        Menu {
+            name: tr("插入", "Insert").into(),
+            items: {
+                use crate::editor::keymap as k;
+                vec![
+                    MenuItem::action(tr("链接", "Link"), k::Link),
+                    MenuItem::action(tr("表格", "Table"), k::InsertTable),
+                    MenuItem::action(tr("分隔线", "Divider"), k::InsertDivider),
+                    MenuItem::action(tr("提醒", "Reminder"), k::InsertReminder),
+                ]
+            },
+            disabled: false,
+        },
+        Menu {
+            name: tr("格式", "Format").into(),
+            items: {
+                use crate::editor::keymap as k;
+                vec![
+                    MenuItem::action(tr("粗体", "Bold"), k::Bold),
+                    MenuItem::action(tr("斜体", "Italic"), k::Italic),
+                    MenuItem::action(tr("下划线", "Underline"), k::Underline),
+                    MenuItem::action(tr("删除线", "Strikethrough"), k::Strike),
+                    MenuItem::action(tr("行内代码", "Inline code"), k::InlineCode),
+                    MenuItem::separator(),
+                    MenuItem::submenu(Menu {
+                        name: tr("转换为", "Turn into").into(),
+                        items: vec![
+                            MenuItem::action(tr("正文", "Text"), k::TurnText),
+                            MenuItem::action(tr("一级标题", "Heading 1"), k::TurnH1),
+                            MenuItem::action(tr("二级标题", "Heading 2"), k::TurnH2),
+                            MenuItem::action(tr("三级标题", "Heading 3"), k::TurnH3),
+                            MenuItem::action(tr("无序列表", "Bulleted list"), k::TurnBullet),
+                            MenuItem::action(tr("有序列表", "Numbered list"), k::TurnOrdered),
+                            MenuItem::action(tr("任务", "Task"), k::TurnTodo),
+                            MenuItem::action(tr("引用", "Quote"), k::TurnQuote),
+                            MenuItem::action(tr("代码块", "Code block"), k::TurnCode),
+                        ],
+                        disabled: false,
+                    }),
+                    MenuItem::submenu(Menu {
+                        name: tr("对齐", "Align").into(),
+                        items: vec![
+                            MenuItem::action(tr("左对齐", "Align left"), k::AlignLeft),
+                            MenuItem::action(tr("居中对齐", "Align center"), k::AlignCenter),
+                            MenuItem::action(tr("右对齐", "Align right"), k::AlignRight),
+                        ],
+                        disabled: false,
+                    }),
+                ]
+            },
+            disabled: false,
+        },
         Menu {
             name: tr("窗口", "Window").into(),
             items: vec![

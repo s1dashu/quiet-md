@@ -587,6 +587,22 @@ impl Core {
         si != ei && i >= si && i <= ei
     }
 
+    /// Whether a click at `pos` lands inside what is already selected.
+    ///
+    /// A right-click inside the selection keeps it; anywhere else it has to
+    /// replace it (browsers get this wrong and Copy then acts on something
+    /// the user can no longer see selected).
+    pub fn selection_holds(&self, pos: Pos) -> bool {
+        if self.block_sel.is_some() {
+            return self.block_sel_ids().contains(&pos.block);
+        }
+        if self.sel.is_collapsed() {
+            return false;
+        }
+        let us = self.units();
+        self.range_in(pos.block, &us).is_some_and(|r| pos.offset >= r.start && pos.offset <= r.end)
+    }
+
     pub fn selected_text(&self) -> String {
         let us = self.units();
         let (s, e) = self.ordered_in(&us);
@@ -3392,6 +3408,29 @@ mod tests {
 
     fn id(c: &Core, n: usize) -> BlockId {
         c.units()[n].id
+    }
+
+    /// 右键: a click inside the selection keeps it, one outside replaces it.
+    #[test]
+    fn right_click_keeps_the_selection_it_lands_in() {
+        let mut c = doc("<title>t</title><p>one two</p><p>three four</p>");
+        let (a, b) = (id(&c, 1), id(&c, 2));
+        // A caret has nothing to keep.
+        c.sel = Selection::caret(Pos::new(a, 2));
+        assert!(!c.selection_holds(Pos::new(a, 2)));
+        // A selection across blocks: kept anywhere from its start to its end,
+        // in the middle block's whole length included.
+        c.sel = Selection { anchor: Pos::new(a, 4), head: Pos::new(b, 5) };
+        assert!(c.selection_holds(Pos::new(a, 4)));
+        assert!(c.selection_holds(Pos::new(a, 6)));
+        assert!(c.selection_holds(Pos::new(b, 3)));
+        assert!(!c.selection_holds(Pos::new(a, 1)));
+        assert!(!c.selection_holds(Pos::new(b, 7)));
+        // Whole blocks selected (handle click, Esc): kept on those blocks.
+        c.clear_block_sel();
+        c.select_block(a);
+        assert!(c.selection_holds(Pos::new(a, 0)));
+        assert!(!c.selection_holds(Pos::new(b, 0)));
     }
 
     /// #220: a pasted web image relinked to its download, in tables too and

@@ -5,6 +5,7 @@ mod caption;
 mod catalogue;
 mod countdown;
 mod cover;
+mod ctxmenu;
 pub use fdl_core::editor::core;
 mod drag;
 pub mod emoji;

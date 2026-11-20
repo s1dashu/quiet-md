@@ -73,10 +73,33 @@ pub enum BlockSub {
     Add(usize),
 }
 
+/// Where a right-click landed: which menu it opens. A right-click inside the
+/// selection keeps it, anywhere else moves the caret first (see
+/// `Editor::on_right_click`), so the menu always describes what it will act on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CtxKind {
+    /// Text with a selection (or blocks selected as a whole).
+    Selection,
+    /// A caret in text: paste, insert and turn into.
+    Caret,
+    /// A table cell, by slot. Right-clicking does not select the cell.
+    Cell { block: BlockId, row: usize, col: usize },
+}
+
+/// An open submenu of the right-click menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtxSub {
+    Insert,
+    Turn,
+    Align,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Menu {
     /// "+" on an empty line: slash items without a trigger.
     Add { block: BlockId, selected: usize },
+    /// Right-click; `pos` is the page-local point the menu hangs from.
+    Ctx { pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub> },
     /// Handle click.
     Block { block: BlockId, sub: Option<BlockSub> },
     /// Toolbar dropdowns.
@@ -2453,6 +2476,53 @@ impl Editor {
         }
         self.dragging = ev.click_count == 1;
         self.restart_blink(window, cx);
+        cx.notify();
+    }
+
+    /// Right-click on the page: the menu for what was hit.
+    ///
+    /// The selection rule is the one browsers keep getting wrong: a click
+    /// *inside* the selection keeps it, anywhere else moves the caret and
+    /// clears it. The menu then matches what its items will act on, and
+    /// copy / cut never act on something the user can't see selected.
+    pub fn on_right_click(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // The page's own click handling must not also run.
+        cx.stop_propagation();
+        window.focus(&self.focus, cx);
+        // A context menu replaces whatever was open, like any other click.
+        self.menu = None;
+        self.menu_hovered = false;
+        self.slash = None;
+        self.marked = None;
+        self.hide_link_card(cx);
+        if self.read_only {
+            return;
+        }
+        self.dragging = false;
+        self.gap_press = None;
+        self.tables.danger = false;
+        let Some((pos, at_row_end)) = self.pos_at(ev.position) else { return cx.notify() };
+        // A table cell: 行 / 列 operations act on the slot under the pointer,
+        // so the cell selection is left as it is (a multi-cell selection the
+        // click sits inside stays, for 合并单元格).
+        if let Some((block, row, col)) = self.core.cell_of(pos.block) {
+            self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind: CtxKind::Cell { block, row, col }, sub: None });
+            return cx.notify();
+        }
+        // Nothing to put a caret in (image, file, divider, ...): the block menu
+        // already has 剪切 / 复制 / 删除 and 在下方添加 for those.
+        if !self.core.block(pos.block).is_some_and(|b| b.kind.has_text()) {
+            return self.open_block_menu(pos.block, false, window, cx);
+        }
+        let in_sel = self.core.selection_holds(pos);
+        if !in_sel {
+            self.core.clear_block_sel();
+            self.set_caret(pos, false);
+            self.caret_row_end = at_row_end.then_some((pos.block, pos.offset));
+            self.restart_blink(window, cx);
+        }
+        let kind = if in_sel { CtxKind::Selection } else { CtxKind::Caret };
+        self.menu = Some(Menu::Ctx { pos: self.rel(ev.position), kind, sub: None });
         cx.notify();
     }
 
