@@ -1,0 +1,21 @@
+<title icon="📝" cover="preset:gradient-1">会议纪要</title>
+<p>用一句话写清这次会议要解决什么。</p>
+<h2>会议信息</h2>
+<table><colgroup><col width="110"/><col width="430"/></colgroup><tbody>
+<tr><td background-color="light-gray"><p><b>时间</b></p></td><td><p>　年　月　日　时:分 – 时:分</p></td></tr>
+<tr><td background-color="light-gray"><p><b>地点</b></p></td><td><p>会议室 / 会议链接</p></td></tr>
+<tr><td background-color="light-gray"><p><b>主持</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>记录</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>参会</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>请假</b></p></td><td><p></p></td></tr>
+</tbody></table>
+<h2>议题</h2>
+<p><b>讨论</b>　记录事实与分歧，不写结论之外的评价。</p>
+<p><b>决议</b>　一句话写清决定了什么，以及是否全体同意。</p>
+<h2>待办</h2>
+<table><colgroup><col width="260"/><col width="100"/><col width="100"/><col width="90"/></colgroup><thead><tr><th background-color="light-gray"><p>事项</p></th><th background-color="light-gray"><p>负责人</p></th><th background-color="light-gray"><p>截止</p></th><th background-color="light-gray"><p>状态</p></th></tr></thead><tbody>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td><td><p>进行中</p></td></tr>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td><td><p></p></td></tr>
+</tbody></table>
+<h2>下次会议</h2>
+<p>时间：　议题：</p>

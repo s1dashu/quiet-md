@@ -1,0 +1,19 @@
+<title icon="🗓" cover="preset:landscape-2">周报</title>
+<p>周期：　月　日 — 　月　日　·　撰写人：</p>
+<h2>目标达成</h2>
+<table><colgroup><col width="240"/><col width="90"/><col width="210"/></colgroup><thead><tr><th background-color="light-gray"><p>目标</p></th><th background-color="light-gray"><p>状态</p></th><th background-color="light-gray"><p>说明</p></th></tr></thead><tbody>
+<tr><td><p></p></td><td><p>已完成</p></td><td><p></p></td></tr>
+<tr><td><p></p></td><td><p>进行中</p></td><td><p></p></td></tr>
+<tr><td><p></p></td><td><p>未完成</p></td><td><p>原因：</p></td></tr>
+</tbody></table>
+<h2>核心成果</h2>
+<p>1. 　背景 / 动作 / 结果（带数据）</p>
+<p>2. </p>
+<h2>各项目进展</h2>
+<p><b>项目 A</b>　进展：　当前里程碑：　风险：</p>
+<p><b>项目 B</b>　进展：　当前里程碑：　风险：</p>
+<h2>风险与阻塞</h2>
+<p>风险：　影响范围：　应对：　需要谁决策：</p>
+<h2>下周计划</h2>
+<checkbox done="false"></checkbox>
+<checkbox done="false"></checkbox>

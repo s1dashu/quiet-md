@@ -15,6 +15,7 @@ mod quick_note;
 mod assets;
 mod changelog;
 mod guides;
+mod templates;
 mod clipboard;
 #[cfg(feature = "devtools")]
 mod devtools;

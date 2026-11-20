@@ -302,6 +302,14 @@ pub struct Workspace {
     min_w: f32,
     pub folder_current: Option<String>,
     pub create_menu: Option<(Option<String>, Point<Pixels>)>,
+    /// 选择模板 under the page: the document the bands would fill in.
+    pub template_picker: Option<String>,
+    /// 模板库: the dialog is open, on this card of `template_cards`.
+    pub template_lib: Option<usize>,
+    /// 模板库's right pane: a read-only page showing the chosen template.
+    pub template_preview: Option<Entity<Editor>>,
+    /// The bands' cards, read from `.quiet/templates/` once per change.
+    pub template_cards: Vec<crate::templates::TemplateCard>,
     /// The header's 导入 menu: the folder it imports into, and where it hangs.
     pub import_menu: Option<(Option<String>, Point<Pixels>)>,
     /// The header's … menu on Home (None) or a folder page: where it hangs.
@@ -564,6 +572,10 @@ impl Workspace {
             sidebar_drag: false,
             folder_current: None,
             create_menu: None,
+            template_picker: None,
+            template_lib: None,
+            template_preview: None,
+            template_cards: Vec::new(),
             import_menu: None,
             place_menu: None,
             folder_drag: Default::default(),
@@ -614,6 +626,9 @@ impl Workspace {
             _subs: subs,
         };
         ws.sort();
+        // 模板 live beside the index: write the built-ins a fresh library (or a
+        // library that lost one) is missing. Existing files are never touched.
+        ws.seed_templates();
         ws.load_home();
         // An empty library opens on 主页's empty state; only a quick note
         // window starts a document of its own. The main window returns to the
@@ -677,6 +692,10 @@ impl Workspace {
         if self.current.as_deref() == Some(id) {
             return true;
         }
+        // 选择模板 is about the page it opened on; another page puts it away.
+        self.template_picker = None;
+        self.template_lib = None;
+        self.template_preview = None;
         let target = id.to_string();
         if !self.save_before(cx, move |w, window, cx| {
             w.open(&target, window, cx);
@@ -1736,6 +1755,7 @@ impl Render for Workspace {
         let doc_info = self.render_doc_info(cx);
         let history = self.render_history(cx);
         let confirm = self.render_confirm(cx);
+        let template_lib = self.render_template_lib(window, cx);
         let trash_menu = self.render_trash_menu(cx);
         let home_menus = self.render_home_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
@@ -1759,11 +1779,22 @@ impl Render for Workspace {
                         .flex()
                         .child(
                             div()
-                                .relative()
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
-                                .children(self.editor.clone()),
+                                .flex()
+                                .flex_col()
+                                // The page, then 选择模板 under it: the cards sit
+                                // below the text instead of over it.
+                                .child(
+                                    div()
+                                        .relative()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .w_full()
+                                        .children(self.editor.clone()),
+                                )
+                                .children(self.render_template_picker(cx)),
                         )
                         .children(self.render_shortcuts(cx)),
                 )
@@ -1923,6 +1954,7 @@ impl Render for Workspace {
             .children(lang_menu)
             .children(pref_menu)
             .children(confirm)
+            .children(template_lib)
             .children(move_dlg)
             .children(export_md)
             .children(search)

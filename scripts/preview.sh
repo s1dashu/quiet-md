@@ -62,6 +62,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
   </dict></array>
 </dict></plist>
 PLIST
+# The build output carries com.apple.provenance / macl: a signature made
+# over those fails with "resource fork, Finder information, or similar
+# detritus not allowed", and macOS then kills the app (code signature invalid).
+xattr -cr "$app"
+# Inside out: the nested binary first, then the bundle over it — signing the
+# bundle first would only be invalidated by signing the binary afterwards.
+codesign --force --sign - "$bin.bin" >/dev/null 2>&1 || true
 codesign --force --sign - "$app" >/dev/null 2>&1 || true
 # The Dock and Finder cache a bundle's icon by path: tell them it changed.
 touch "$app"

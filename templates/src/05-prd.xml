@@ -1,0 +1,16 @@
+<title icon="📋" cover="preset:gradient-5">需求文档</title>
+<h2>背景</h2>
+<p>为什么现在要做：用户遇到的具体问题、现有做法为什么不够。</p>
+<h2>目标与非目标</h2>
+<p><b>目标</b>　可衡量的结果，例如“把新建文档的步骤从 3 步降到 1 步”。</p>
+<p><b>非目标</b>　这次明确不做什么，避免范围蔓延。</p>
+<h2>用户故事</h2>
+<table><colgroup><col width="90"/><col width="270"/><col width="180"/></colgroup><thead><tr><th background-color="light-gray"><p>角色</p></th><th background-color="light-gray"><p>想要</p></th><th background-color="light-gray"><p>以便</p></th></tr></thead><tbody>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td></tr>
+</tbody></table>
+<h2>方案</h2>
+<p>关键流程、界面变化、数据与接口。附线框图或链接。</p>
+<h2>验收标准</h2>
+<checkbox done="false">每条都能被测试：给定条件、执行动作、期望结果</checkbox>
+<h2>风险与依赖</h2>
+<p>依赖：　风险：　上线后如何回滚：</p>

@@ -1,0 +1,16 @@
+<title icon="📚" cover="preset:landscape-4">读书笔记</title>
+<table><colgroup><col width="110"/><col width="430"/></colgroup><tbody>
+<tr><td background-color="light-gray"><p><b>书名</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>作者</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>读完</b></p></td><td><p>　年　月　日</p></td></tr>
+<tr><td background-color="light-gray"><p><b>一句话</b></p></td><td><p>这本书讲什么</p></td></tr>
+</tbody></table>
+<h2>核心观点</h2>
+<p>1. </p>
+<p>2. </p>
+<h2>摘录</h2>
+<blockquote><p>原文，标注页码。</p></blockquote>
+<h2>我的思考</h2>
+<p>同意什么、不同意什么、和我已知的什么冲突。</p>
+<h2>行动</h2>
+<checkbox done="false">读完要改变的一个具体做法</checkbox>

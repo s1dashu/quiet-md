@@ -1,0 +1,24 @@
+<title icon="📊" cover="preset:aurora-3">项目进度</title>
+<p>一句话说明项目现在处在什么阶段、是否健康。</p>
+<h2>项目概况</h2>
+<table><colgroup><col width="110"/><col width="430"/></colgroup><tbody>
+<tr><td background-color="light-gray"><p><b>负责人</b></p></td><td><p></p></td></tr>
+<tr><td background-color="light-gray"><p><b>当前阶段</b></p></td><td><p>设计 / 开发 / 测试 / 上线</p></td></tr>
+<tr><td background-color="light-gray"><p><b>周期</b></p></td><td><p>　年　月　日 — 　年　月　日</p></td></tr>
+<tr><td background-color="light-gray"><p><b>整体进度</b></p></td><td><p>　%</p></td></tr>
+<tr><td background-color="light-gray"><p><b>状态</b></p></td><td><p>正常 / 有风险 / 已阻塞</p></td></tr>
+</tbody></table>
+<h2>里程碑</h2>
+<table><colgroup><col width="220"/><col width="110"/><col width="110"/><col width="110"/></colgroup><thead><tr><th background-color="light-gray"><p>里程碑</p></th><th background-color="light-gray"><p>计划</p></th><th background-color="light-gray"><p>实际</p></th><th background-color="light-gray"><p>状态</p></th></tr></thead><tbody>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td><td><p>未开始</p></td></tr>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td><td><p>进行中</p></td></tr>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td><td><p>已完成</p></td></tr>
+</tbody></table>
+<h2>本期进展</h2>
+<checkbox done="false">完成的交付物（写可验证的结果，不写“推进中”）</checkbox>
+<h2>问题与风险</h2>
+<table><colgroup><col width="250"/><col width="110"/><col width="180"/></colgroup><thead><tr><th background-color="light-gray"><p>问题</p></th><th background-color="light-gray"><p>影响</p></th><th background-color="light-gray"><p>应对</p></th></tr></thead><tbody>
+<tr><td><p></p></td><td><p></p></td><td><p></p></td></tr>
+</tbody></table>
+<h2>下一步</h2>
+<p>目标：　负责人：　预计完成：</p>

@@ -2339,6 +2339,63 @@ thread_local! {
     pub(crate) static DISK_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+/// A 模板: a DocxXML file in `.quiet/templates/`, never a page in the library.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TemplateFile {
+    /// File name inside `.quiet/templates/`, `.xml` included.
+    pub name: String,
+    pub title: String,
+}
+
+impl Store {
+    /// Where 模板 live (`<library>/.quiet/templates/`), created on first use.
+    pub fn templates_dir(&self) -> PathBuf { self.root.join(INTERNAL).join("templates") }
+
+    /// The templates on disk, in file-name order (built-ins are `01-` …).
+    pub fn templates(&self) -> Vec<TemplateFile> {
+        let Ok(entries) = std::fs::read_dir(self.templates_dir()) else { return vec![] };
+        let mut out: Vec<TemplateFile> = entries.flatten().filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !is_template_name(&name) { return None; }
+            let xml = std::fs::read_to_string(e.path()).ok()?;
+            let title = crate::docxml::parse(&xml).ok().map(|d| crate::model::display_title(&d.title.text)).unwrap_or_default();
+            Some(TemplateFile { name, title })
+        }).collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        out
+    }
+
+    /// One template's XML.
+    pub fn template_xml(&self, name: &str) -> Result<String> {
+        anyhow::ensure!(is_template_name(name), "模板名不合法");
+        Ok(std::fs::read_to_string(self.templates_dir().join(name))?)
+    }
+
+    /// Write (or replace) one template: a same-folder temporary, then a rename.
+    pub fn save_template(&self, name: &str, xml: &str) -> Result<()> {
+        anyhow::ensure!(is_template_name(name), "模板名不合法");
+        let dir = self.templates_dir();
+        std::fs::create_dir_all(&dir)?;
+        let tmp = dir.join(format!(".{name}.tmp"));
+        std::fs::write(&tmp, xml)?;
+        std::fs::rename(&tmp, dir.join(name))?;
+        Ok(())
+    }
+
+    pub fn delete_template(&self, name: &str) -> Result<()> {
+        anyhow::ensure!(is_template_name(name), "模板名不合法");
+        let path = self.templates_dir().join(name);
+        if path.exists() { std::fs::remove_file(path)?; }
+        Ok(())
+    }
+}
+
+/// A plain file name ending in `.xml`: no separators, no leading dot. Titles
+/// are used as they are, so 中文 names are fine.
+fn is_template_name(name: &str) -> bool {
+    name.ends_with(".xml") && name.len() > 4 && !name.starts_with('.') && !name.chars().any(|c| matches!(c, '/' | '\\' | ':' | '\0'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2393,6 +2450,26 @@ mod tests {
         let mut d = doc(title);
         d.blocks.push(crate::model::Block::text(body));
         d
+    }
+
+    #[test]
+    fn templates_live_beside_the_index_not_in_it() {
+        let lib = Lib::new("templates");
+        let mut s = lib.open();
+        assert!(s.templates().is_empty());
+        s.save_template("01-meeting.xml", "<title>会议纪要</title><p>x</p>").unwrap();
+        s.save_template("02-daily.xml", "<title>日报</title>").unwrap();
+        let list = s.templates();
+        assert_eq!(list.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["01-meeting.xml", "02-daily.xml"]);
+        assert_eq!(list[0].title, "会议纪要");
+        assert_eq!(s.template_xml("01-meeting.xml").unwrap(), "<title>会议纪要</title><p>x</p>");
+        // Never a page: the listing only sees documents.
+        assert!(s.list().is_empty());
+        // Names that could leave the folder are refused, not resolved.
+        assert!(s.template_xml("../index.json").is_err());
+        assert!(s.save_template("a/b.xml", "<title>x</title>").is_err());
+        s.delete_template("02-daily.xml").unwrap();
+        assert_eq!(s.templates().len(), 1);
     }
 
     #[test]

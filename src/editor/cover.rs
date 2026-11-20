@@ -314,7 +314,7 @@ impl Editor {
         )
     }
 
-    /// The 40×40 icon before the title, on the title's first baseline.
+    /// The 40×40 icon before the title, on the title's first line.
     pub(super) fn doc_icon_el(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ic = self.core.doc.icon.clone()?;
         let record = self.cover_ui.icon_bounds.clone();
@@ -326,15 +326,15 @@ impl Editor {
                 .relative()
                 .flex_none()
                 .size(px(40.))
-                // (55.25 line − 40) / 2: the glyphs share a baseline.
-                .mt(px(7.625))
                 .mr(px(6.))
                 .flex()
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
                 .text_size(px(theme::title().size))
-                .line_height(px(40.))
+                // The title's own line height: the emoji and the title are then
+                // laid out on one baseline, whatever the theme's metrics are.
+                .line_height(px(theme::title().line_height))
                 .child(ic)
                 .child(canvas(move |b, _, _| record.set(Some(b)), |_, _, _, _| {}).absolute().inset_0())
                 .when(!ro, |d| {

@@ -1204,9 +1204,13 @@ impl Editor {
                     .pb(px(if crate::settings::feishu() { 22. } else { 24. }))
                     .children(self.header_entries(cx))
                     .child(
+                        // 图标 and title share the title's line: centring on the
+                        // row keeps them level whatever the theme's metrics are
+                        // (a fixed offset per theme drifts as soon as one
+                        // changes).
                         div()
                             .flex()
-                            .items_start()
+                            .items_center()
                             .children(self.doc_icon_el(cx))
                             .child(div().flex_1().min_w_0().child(r.text_el(TITLE, &self.core.doc.title, spec, Align::Left, Some(crate::settings::text("请输入标题").into())))),
                     )

@@ -39,6 +39,12 @@ impl Workspace {
                 self.search.update(cx, |s, cx| s.set_text("", cx));
                 self.open(&id, window, cx);
                 if let Some(ed) = &self.editor { { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); } }
+                // A new page starts blank and offers the templates over it:
+                // picking one fills this same document in. Markdown files and
+                // a library with no templates get no sheet.
+                if !markdown && !self.template_cards.is_empty() {
+                    self.template_picker = Some(id);
+                }
             }
             Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("新建失败：{}", "Could not create document: {}", crate::settings::diagnostic(&e.to_string()))),
         }

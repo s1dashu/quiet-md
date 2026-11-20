@@ -322,6 +322,20 @@ impl Workspace {
                             w.show_toast(crate::settings::text("已复制为 Markdown"), cx);
                         }
                     })))
+                    .child(sub_item("dm-pick-template", crate::settings::text("选择模板")).on_click(cx.listener({
+                        let tpl = id.clone();
+                        move |w, _, _, cx| {
+                            w.close_doc_menu(cx);
+                            w.pick_template(&tpl, cx);
+                        }
+                    })))
+                    .child(sub_item("dm-template", crate::settings::text("另存为模板")).on_click(cx.listener({
+                        let tpl = id.clone();
+                        move |w, _, _, cx| {
+                            w.close_doc_menu(cx);
+                            w.save_as_template(&tpl, cx);
+                        }
+                    })))
                     .child(
                         sub_item("dm-refs", crate::settings::text("显示引用列表"))
                             .justify_between()
