@@ -25,7 +25,7 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
 actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, GoHome, CloseWindow, Quit,
-    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen]);
+    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen, ToggleTerminal, TerminalButton]);
 
 /// The menu bar, in the interface language.
 pub fn set_menus(cx: &mut App) {
@@ -89,6 +89,8 @@ pub fn set_menus(cx: &mut App) {
                 MenuItem::action(tr("缩放", "Zoom"), Zoom),
                 MenuItem::separator(),
                 MenuItem::action(tr("进入 / 退出全屏幕", "Enter / Exit Full Screen"), ToggleFullScreen),
+                MenuItem::separator(),
+                MenuItem::action(tr("显示 / 隐藏终端", "Show / Hide Terminal"), ToggleTerminal),
             ],
             disabled: false,
         },
@@ -117,6 +119,10 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-h", ReplaceInDoc, None),
         KeyBinding::new("cmd-q", Quit, None),
     ]);
+    // The terminal panel (terminal.rs), as in Zed and VS Code: the key left
+    // of 1, which types " on a Turkish Q keyboard. The web build has none.
+    #[cfg(not(target_family = "wasm"))]
+    cx.bind_keys([KeyBinding::new("cmd-`", ToggleTerminal, None), KeyBinding::new("cmd-\"", ToggleTerminal, None)]);
     // macOS app and window keys. ⌥⌘H (隐藏其他) stays with the editor's
     // 应用上次的颜色, the Feishu shortcut; 隐藏其他 is in the menu. On Windows
     // the system handles these (Win+↓, Alt+F4), and F11 is full screen.
@@ -368,6 +374,8 @@ pub struct Workspace {
     pub more_btn_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// The 快捷键 drawer, and the help button's menu (open while hovered).
     pub shortcuts: bool,
+    /// The terminal panel under the note (terminal.rs).
+    pub(crate) terminal: crate::terminal::Dock,
     pub(crate) focus: FocusHandle,
     pub(crate) save_task: Option<Task<()>>,
     /// When the oldest edit not yet on disk was made: a save waits for a
@@ -600,6 +608,7 @@ impl Workspace {
             more_btn_bounds: Rc::new(Cell::new(None)),
             native_sidebar: Default::default(),
             shortcuts: false,
+            terminal: Default::default(),
             folded: [false; 3],
             expanded: HashSet::new(),
             sidebar_drop: None,
@@ -1771,7 +1780,12 @@ impl Render for Workspace {
         // the two (no gutter, radius or border).
         // A document sits on its theme's page colour.
         let page = if self.view == View::Doc { crate::editor_theme::Theme::bg_body() } else { Theme::bg_body() };
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().bg(page).shadow(theme::shadow_note()).child(main)
+        // The terminal docks under or beside whichever page is shown.
+        let terminal = self.render_terminal(window, cx);
+        let (beside, below) = if crate::terminal::on_right() { (terminal, None) } else { (None, terminal) };
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().flex().flex_col().bg(page).shadow(theme::shadow_note())
+            .child(div().flex_1().min_h_0().w_full().flex().child(main).children(beside))
+            .children(below)
             // Files from the Finder dropped on 主页 or a folder's page are imported there.
             .when(matches!(self.view, View::Home | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))
@@ -1833,6 +1847,8 @@ impl Render for Workspace {
                 w.shortcuts = !w.shortcuts;
                 cx.notify();
             }))
+            .on_action(cx.listener(|w, _: &ToggleTerminal, window, cx| w.toggle_terminal(window, cx)))
+            .on_action(cx.listener(|w, _: &TerminalButton, window, cx| w.terminal_button(window, cx)))
             .on_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {
                 // The theme dropdown: ↑ ↓ preview, ↩ applies, Esc closes it (not 设置).
                 if (w.theme_menu.is_some() && w.theme_menu_key(&ev.keystroke.key, cx)) || (w.lang_menu.is_some() && w.lang_menu_key(&ev.keystroke.key, cx))
@@ -1902,7 +1918,7 @@ impl Render for Workspace {
             .children(sidebar)
             .child(note)
             .children(resize)
-            .children(crate::ui::window_controls(window))
+            .children(crate::ui::window_controls(window, self.terminal_open(), cx))
             .children(row_menu)
             .children(doc_menu)
             .children(mode_menu)

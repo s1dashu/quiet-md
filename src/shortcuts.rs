@@ -213,6 +213,7 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "ToggleSidebar" => (0, "展开 / 收起侧栏", "Show / hide sidebar"),
         "FocusSearch" => (0, "搜索文档", "Search documents"),
         "ToggleShortcuts" => (0, "查看快捷键", "Show shortcuts"),
+        "ToggleTerminal" => (0, "显示 / 隐藏终端", "Show / hide terminal"),
         "OpenFile" => (1, "打开 Markdown 文件", "Open Markdown file"),
         "OpenFolder" => (1, "打开文件夹", "Open folder"),
         "ImportDoc" => (1, "导入文档", "Import documents"),

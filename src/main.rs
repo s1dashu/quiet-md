@@ -56,6 +56,24 @@ mod folders;
 mod file_history;
 mod settings;
 mod table;
+#[cfg(not(target_family = "wasm"))]
+mod terminal;
+/// The web build has no shell: the panel never opens.
+#[cfg(target_family = "wasm")]
+mod terminal {
+    #[derive(Default)]
+    pub struct Dock;
+    pub fn on_right() -> bool { false }
+    pub fn shells() -> Vec<(&'static str, &'static str)> { vec![] }
+    impl crate::app::Workspace {
+        pub(crate) fn terminal_open(&self) -> bool { false }
+        pub(crate) fn toggle_terminal(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) {}
+        pub(crate) fn terminal_button(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) {}
+        pub(crate) fn shell_changed(&mut self) {}
+        pub(crate) fn close_terminal(&mut self) {}
+        pub(crate) fn render_terminal(&mut self, _: &mut gpui::Window, _: &mut gpui::Context<Self>) -> Option<gpui::AnyElement> { None }
+    }
+}
 mod l10n;
 mod themes;
 mod shortcuts;

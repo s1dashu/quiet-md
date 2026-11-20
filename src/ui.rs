@@ -420,11 +420,15 @@ pub trait TitleBarExt: InteractiveElement + Sized {
 impl<E: InteractiveElement> TitleBarExt for E {}
 
 pub(crate) const WINDOW_CONTROLS_W: f32 = if cfg!(any(target_os = "windows", target_os = "linux")) { 163. } else { 0. };
+/// The terminal button left of the window buttons (terminal.rs), while 设置 › 终端 is on.
+const TERMINAL_BUTTON_W: f32 = crate::app::HEADER_ACTIONS_H + 14.;
+fn terminal_button() -> bool { !cfg!(target_family = "wasm") && crate::settings::prefs().terminal }
 pub(crate) fn header_right_inset() -> f32 {
-    if cfg!(any(target_os = "windows", target_os = "linux")) { WINDOW_CONTROLS_W } else { (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2. }
+    if cfg!(any(target_os = "windows", target_os = "linux")) { WINDOW_CONTROLS_W + if terminal_button() { TERMINAL_BUTTON_W } else { 0. } }
+    else { (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2. }
 }
 
-pub(crate) fn window_controls(window: &Window) -> Option<Div> {
+pub(crate) fn window_controls(window: &Window, terminal_open: bool, cx: &App) -> Option<Div> {
     if !cfg!(any(target_os = "windows", target_os = "linux")) { return None; }
     // Windows must receive mouse-down to arm its native caption buttons.
     let button = |id: &'static str, area: WindowControlArea, label: &'static str| {
@@ -440,8 +444,17 @@ pub(crate) fn window_controls(window: &Window) -> Option<Div> {
             })).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed())).tip(label, None)
     };
     let maximized = window.is_maximized();
+    let terminal = terminal_button().then(|| {
+        let key = crate::shortcuts::pretty(&crate::shortcuts::key_of(cx, "workspace::ToggleTerminal"));
+        div().id("window-terminal").size(px(crate::app::HEADER_ACTIONS_H)).mx(px(7.)).rounded(px(8.)).flex_none().flex().items_center().justify_center().cursor_pointer()
+            .no_drag().when(terminal_open, |d| d.bg(Theme::fill_hover())).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed()))
+            .tip(crate::settings::tr("显示 / 隐藏终端", "Show / hide terminal"), Some(&key))
+            .child(icon("terminal", 18., Theme::icon()))
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::TerminalButton), cx))
+    });
     // Native hit-test areas preserve Snap Layouts and the normal WM_CLOSE save guard.
     Some(div().absolute().top_0().right_0().h(px(crate::app::HEADER_H)).flex().items_center().title_bar()
+        .children(terminal)
         .child(div().mx(px(12.)).w(px(1.)).h(px(18.)).bg(Theme::line_divider()))
         .child(button("window-minimize", WindowControlArea::Min, crate::settings::tr("最小化", "Minimize"))
             .child(icon("minus", 18., Theme::icon())))

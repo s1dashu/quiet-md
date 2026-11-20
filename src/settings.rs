@@ -125,6 +125,12 @@ pub struct Preferences {
     pub ui_font: String,
     /// When 稍后 put off moving the library to real folders (Unix seconds; 0 never).
     pub migrate_later: u64,
+    /// 终端: the terminal panel (terminal.rs) can be opened; off closes it.
+    pub terminal: bool,
+    /// The terminal docks right of the note instead of under it.
+    pub terminal_right: bool,
+    /// The terminal's shell command; empty picks the system's (terminal.rs).
+    pub terminal_shell: String,
 }
 
 /// A week between asks to move the library to real folders.
@@ -152,7 +158,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0 }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), migrate_later: 0, terminal: true, terminal_right: false, terminal_shell: String::new() }
     }
 }
 
@@ -704,6 +710,8 @@ impl Workspace {
             if p.quick_hotkey { crate::quick_note::register(cx); } else { crate::quick_note::suspend_hotkey(); }
         }
         if p.appearance != old.appearance { apply_appearance(&p.appearance); }
+        if !p.terminal && old.terminal { self.close_terminal(); }
+        if p.terminal_shell != old.terminal_shell { self.shell_changed(); }
         if p.theme_id() != old.theme_id() || p.lang() != old.lang() || sync_dark(cx) {
             refresh_all(self, cx);
         }
@@ -855,6 +863,26 @@ impl Workspace {
                 }, cx)
             }).into_any_element()]
         };
+        // The web build runs no shell.
+        let terminal = if cfg!(target_family = "wasm") { vec![] } else {
+            let key = crate::shortcuts::pretty(&crate::shortcuts::key_of(cx, "workspace::ToggleTerminal"));
+            let mut rows = vec![row(tr("终端", "Terminal"), Some(crate::localized_format!("在笔记旁打开系统终端，按 {} 显示或隐藏。", "A system terminal beside the note; {} shows or hides it.", key).into()),
+                switch("pref-terminal", p.terminal).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.terminal = !p.terminal, cx)))).into_any_element()];
+            if p.terminal {
+                rows.push(row(tr("终端位置", "Terminal position"), None,
+                    segmented("pref-terminal-side", &[tr("下方", "Bottom"), tr("右侧", "Right")], p.terminal_right as usize,
+                        |w, i, cx| w.set_pref(|p| p.terminal_right = i == 1, cx), cx)).into_any_element());
+                let shells = crate::terminal::shells();
+                if shells.len() > 1 {
+                    let sel = shells.iter().position(|(v, _)| *v == p.terminal_shell).unwrap_or(0);
+                    let values: Vec<&'static str> = shells.iter().map(|(v, _)| *v).collect();
+                    rows.push(row(tr("外壳", "Shell"), desc(tr("终端里运行的程序；更改后立即生效。", "The program the terminal runs; a change takes effect at once.")),
+                        self.select("terminal-shell", shells.iter().map(|(_, l)| *l).collect(), sel,
+                            move |w, i, cx| { let v = values[i].to_string(); w.set_pref(|p| p.terminal_shell = v, cx) }, cx)).into_any_element());
+                }
+            }
+            rows
+        };
         div().w_full().flex().flex_col().gap(px(28.))
             .child(group(None, vec![
                 row(tr("界面语言", "Interface language"), None, {
@@ -884,7 +912,7 @@ impl Workspace {
                     self.select("search-engine", vec!["Google", tr("百度", "Baidu"), "Bing", "DuckDuckGo"], sel,
                         |w, i, cx| w.set_pref(|p| p.search_engine = ["", "baidu", "bing", "duckduckgo"][i].into(), cx), cx)
                 }).into_any_element(),
-            ].into_iter().chain(links).collect()))
+            ].into_iter().chain(links).chain(terminal).collect()))
             .into_any_element()
     }
 
