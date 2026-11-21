@@ -241,7 +241,7 @@ impl Workspace {
         )
     }
 
-    fn restore_doc(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn restore_doc(&mut self, id: &str, cx: &mut Context<Self>) {
         let file_before = self.store.track_file_changes();
         match self.store.restore(id) {
             Ok(moved) => {

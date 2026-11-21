@@ -18,11 +18,12 @@ mod guides;
 mod clipboard;
 #[cfg(feature = "devtools")]
 mod devtools;
-/// Without the `devtools` feature (release builds) nothing reads FDL_SCRIPT.
+/// Without the `devtools` feature (release builds) nothing reads FDL_SCRIPT;
+/// only the built-in release self-test (`selftest.rs`) runs unattended.
 #[cfg(not(feature = "devtools"))]
 mod devtools {
     pub static RENDER_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    pub fn scripted() -> bool { false }
+    pub fn scripted() -> bool { crate::selftest::active() }
     pub fn start(_: &mut gpui::Window, _: &mut gpui::App) {}
     pub fn take_pick() -> Option<Vec<std::path::PathBuf>> { None }
     pub fn file_drag() -> bool { false }
@@ -45,6 +46,13 @@ mod native_header;
 mod native_header;
 mod printing;
 mod search;
+#[cfg(not(target_family = "wasm"))]
+mod selftest;
+#[cfg(target_family = "wasm")]
+mod selftest {
+    pub fn active() -> bool { false }
+    pub fn start(_: &mut gpui::Window, _: &mut gpui::App) {}
+}
 mod sidebar;
 mod local_files;
 mod local_folders;
@@ -143,6 +151,7 @@ pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &
     let options = main_window_options(scripted, at, cx);
     cx.open_window(options, |window, cx| {
         devtools::start(window, cx);
+        selftest::start(window, cx);
         cx.new(|cx| app::Workspace::new(window, cx))
     })
     .expect("open window");
@@ -206,6 +215,8 @@ fn main() { web::main() }
 
 #[cfg(not(target_family = "wasm"))]
 fn main() {
+    // `--self-test`: runs the built-in release checks in launches of its own.
+    if let Some(code) = selftest::command() { std::process::exit(code) }
     logging::init();
     let scripted = devtools::scripted();
     // No single-instance guard: copies may share a library (builds tested
@@ -220,7 +231,8 @@ fn main() {
     let existed = guides::seeded(&root).unwrap_or(false);
     // A new library is set up after first launch's pages pick where it goes.
     let onboard = onboarding::wanted(existed, scripted);
-    if !scripted && !onboard && let Err(err) = guides::initialize(&root) {
+    // The self-test checks first launch's seeding, without its pages.
+    if (!scripted || selftest::active()) && !onboard && let Err(err) = guides::initialize(&root) {
         logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
     }
     let app = gpui_platform::application().with_assets(assets::Assets);

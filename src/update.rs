@@ -165,7 +165,7 @@ pub fn install(cx: &mut App) {
 
 enum Error { Unsupported, Failed(String) }
 
-fn platform() -> Option<&'static str> {
+pub(crate) fn platform() -> Option<&'static str> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) { Some("macos-arm64") }
     else if cfg!(all(target_os = "macos", target_arch = "x86_64")) { Some("macos-x86_64") }
     else if cfg!(all(target_os = "windows", target_arch = "x86_64")) { Some("windows-x64") }
@@ -173,13 +173,17 @@ fn platform() -> Option<&'static str> {
     else { None }
 }
 
-fn package_name(version: &str, platform: &str) -> String {
+pub(crate) fn package_name(version: &str, platform: &str) -> String {
     if platform.starts_with("windows") { format!("quiet-md-{version}-{platform}-setup.exe") }
     else if platform == "linux-x86_64" { format!("quiet-md-{version}-x86_64.AppImage") }
     else { format!("quiet-md-{version}-{platform}.zip") }
 }
 
-fn override_url() -> Option<String> { std::env::var("QUIET_MD_UPDATE_URL").ok().filter(|u| !u.is_empty()) }
+/// The release self-test's local server and download folder (`selftest.rs`).
+static REDIRECT: std::sync::OnceLock<(String, PathBuf)> = std::sync::OnceLock::new();
+pub(crate) fn redirect(url: String, dir: PathBuf) { let _ = REDIRECT.set((url, dir)); }
+
+fn override_url() -> Option<String> { REDIRECT.get().map(|r| r.0.clone()).or_else(|| std::env::var("QUIET_MD_UPDATE_URL").ok().filter(|u| !u.is_empty())) }
 
 fn public_key() -> Option<minisign_verify::PublicKey> {
     minisign_verify::PublicKey::decode(KEY.trim()).ok().or_else(|| minisign_verify::PublicKey::from_base64(KEY.trim()).ok())
@@ -233,11 +237,12 @@ fn validate(m: &Manifest, platform: &str, testing: bool) -> Result<(), String> {
 }
 
 /// `bytes` carry a signature by `key` whose trusted comment is the package name.
-fn signed(bytes: &[u8], signature: &str, name: &str, key: &minisign_verify::PublicKey) -> bool {
+pub(crate) fn signed(bytes: &[u8], signature: &str, name: &str, key: &minisign_verify::PublicKey) -> bool {
     minisign_verify::Signature::decode(signature).is_ok_and(|sig| sig.trusted_comment() == name && key.verify(bytes, &sig, false).is_ok())
 }
 
 fn updates_dir() -> PathBuf {
+    if let Some((_, dir)) = REDIRECT.get() { return dir.clone() }
     let base = dirs::cache_dir().unwrap_or_else(fdl_core::vfs::temp_dir);
     if cfg!(target_os = "macos") { base.join("com.s1dashu.quietmd").join("updates") }
     else if cfg!(target_os = "linux") { base.join("quiet.md").join("updates").join(fdl_core::vfs::process_id().to_string()) }

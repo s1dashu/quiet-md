@@ -32,7 +32,7 @@ fn fps() -> f64 {
 }
 
 /// A script drives this run: other apps, dialogs and the updater stay out of it.
-pub fn scripted() -> bool { std::env::var_os("FDL_SCRIPT").is_some() }
+pub fn scripted() -> bool { std::env::var_os("FDL_SCRIPT").is_some() || crate::selftest::active() }
 
 /// Time spent in the editor's `render` during the last benched frame.
 pub static RENDER_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

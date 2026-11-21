@@ -126,7 +126,7 @@ Whiteboard and history modules in core:
 
 | Module | Contents |
 |---|---|
-| `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only) and core module re-exports |
+| `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only), `--self-test` and core module re-exports |
 | `guides.rs` | Seeds an empty library with the bundled Getting Started guides once |
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
@@ -140,6 +140,7 @@ Whiteboard and history modules in core:
 | `highlight.rs` | Code highlighting |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
+| `selftest.rs` | Release self-test: fixed end-to-end scenarios that shipped builds run with `--self-test`. See tools/harness/README.md. |
 | `history.rs` | Version drawer grouped by day, in-place read-only preview, change highlighting, naming, restore, save a copy and delete |
 | `board/` view | `BoardView` replaces the document in the note area. `mod.rs` owns the scene, store and commit loop, `canvas.rs` dispatches pointers, `keys.rs` handles shortcuts, `run.rs` / `action.rs` implement actions and clipboard, `text_editor.rs` edits text and `frame_name.rs` renames frames. `editor/board.rs` handles thumbnails and entering/leaving the board. |
 | `board/tools/` | Tool state machines: `selection` (drag, handles and marquee), `shape`, `linear`, `freedraw`, `text`, `eraser`, `lasso`, `image`, `crop`, `flowchart` |

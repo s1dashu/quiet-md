@@ -85,6 +85,7 @@ Snapshot: Zed `e2f00a41ac67` (2026-11-15). Legacy numbers refer to the GPUI 0.2.
 | 0034 image-into-frames | New | `gpui/assets.rs` | `RenderImage::into_frames` retrieves image frames. Vello creates an image on each board change. After drop_image, reuse the previous buffer to draw the next frame directly (src/board/render_vello.rs), avoiding a 12 MB allocation and copy per frame. |
 | 0035 macos-file-image-clipboard | New | `gpui_macos/pasteboard.rs` | When a single file is copied, keep the bitmap the pasteboard carries with it, so the editor can paste pictures from apps such as WeChat. |
 | 0036 web-focus-reentry | New | `gpui_web/events.rs`, `gpui_web/window.rs` | A browser focus or blur can fire synchronously while GPUI is handling another event (focusing the input-method mirror on a press, or the site moving focus into the iframe). Refreshing the window's active state then re-entered the window update and panicked with "attempted to read a window that is already on the stack", after which the app stopped drawing and taking input (the site's live notebook froze on the first click). Refresh the active state on the next turn instead. |
+| 0037 windows-render-to-image | New | `gpui_windows/window.rs`, `gpui_windows/directx_renderer.rs` | Offscreen `render_to_image` is no longer limited to `test-support` builds, as on macOS. The release self-test (`src/selftest.rs`) checks that the window draws and saves a PNG of a failing scenario. |
 
 ## Retired patches
 
