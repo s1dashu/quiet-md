@@ -123,7 +123,7 @@ fn save_path(name: &str, cx: &mut App) -> impl std::future::Future<Output = Opti
 /// scripted answer.
 fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>> + use<> {
     let picked = crate::devtools::take_pick();
-    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml", "csv", "tsv"]).map(|e| SharedString::from(*e)).collect());
+    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml", "csv", "tsv"]).filter(|e| crate::DATATABLE || !matches!(**e, "csv" | "tsv")).map(|e| SharedString::from(*e)).collect());
     let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(crate::settings::text("导入").into()), extensions }));
     async move {
         match prompt {
@@ -132,6 +132,9 @@ fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<Path
         }
     }
 }
+
+/// A CSV or TSV file, imported as a 数据表 (only while they are offered).
+pub(crate) fn is_csv_path(p: &Path) -> bool { crate::DATATABLE && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")) }
 
 /// A CSV or TSV file as a new 数据表 file named after it: the first row
 /// names the columns, each column's type is guessed from its cells.
@@ -416,7 +419,7 @@ impl Workspace {
                     _ if crate::local_files::is_markdown_path(p) => import_markdown(&mut writer, p, None, parent.as_deref()),
                     e if MARKDOWN_EXTS.contains(&e) => markdown_document(p).map_err(anyhow::Error::from).and_then(|doc| writer.create_from_in(&doc, parent.as_deref())),
                     "xml" => writer.import_into(p, parent.as_deref()),
-                    "csv" | "tsv" => import_csv(&mut writer, p, parent.as_deref()),
+                    "csv" | "tsv" if crate::DATATABLE => import_csv(&mut writer, p, parent.as_deref()),
                     _ => Err(anyhow::anyhow!("文件格式不支持")),
                 };
                 match made { Ok(id) => last = Some(id), Err(_) => failed = true }
@@ -488,7 +491,7 @@ impl Workspace {
                 .child(item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown))
                 .child(item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder))
                 .child(item("import-xml", "doc", crate::settings::tr("导入 DocxXML…", "Import DocxXML…"), ImportKind::DocxXml))
-                .child(item("import-csv", "datatable", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv)),
+                .when(crate::DATATABLE, |d| d.child(item("import-csv", "datatable", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv))),
         )).with_priority(3).into_any_element())
     }
 

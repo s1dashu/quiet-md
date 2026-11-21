@@ -568,6 +568,7 @@ mod key_text_tests {
         assert_eq!(w("⌘C / ⌘X / ⌘V"), "Ctrl+C / Ctrl+X / Ctrl+V");
         assert_eq!(w("⌘⇧← / ⌘⇧↓"), "Shift+Home / Ctrl+Shift+End");
         assert_eq!(w("按 ⌘ N 新建，⌘ ,"), "按 Ctrl+N 新建，Ctrl+,");
+        assert_eq!(w("Quick new (⌘N)"), "Quick new (Ctrl+N)");
         assert_eq!(w("On macOS, <code>⌘ ⌃ ⇧ 4</code>"), "On macOS, <code>⌘ ⌃ ⇧ 4</code>");
         assert_eq!(w("Shift + Tab and Control"), "Shift + Tab and Control");
     }

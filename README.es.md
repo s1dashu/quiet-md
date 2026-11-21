@@ -69,7 +69,7 @@ Las pizarras son un tablero portado de Excalidraw: formas, flechas que siguen un
 
 ### Organiza en carpetas de verdad
 
-El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas y márcalas como favoritas, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
+El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas y márcalas como favoritas, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
 
 ### Trae tus notas
 
@@ -77,7 +77,7 @@ El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota s
   <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece importar una bóveda de Obsidian que ha encontrado.">
 </p>
 
-En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Más adelante, arrastra archivos y carpetas Markdown al Inicio o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
+En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown al Inicio o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
 
 ### Y además
 
@@ -85,7 +85,7 @@ En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writ
 - **Notas rápidas**: en macOS, un atajo global (`⌥ Espacio` por defecto) abre una pequeña ventana de nota sobre cualquier app.
 - **Tu aspecto**: cuatro estilos integrados —Craft, Feishu, Notion y Obsidian—, cada uno con variante oscura, o tu propio CSS ([docs/THEMES.md](docs/THEMES.md)). Elige la fuente de la interfaz y la de los documentos.
 - **Tus teclas**: pulsa `⌘ /` para ver todos los atajos y reasignar cualquiera. En Windows y Linux, Ctrl sustituye a ⌘ y Alt a ⌥.
-- **Tu idioma**: inglés, chino simplificado, chino tradicional, japonés, coreano, español, francés, árabe y turco.
+- **Tu idioma**: inglés, chino simplificado, chino tradicional, japonés, coreano, español, francés, árabe y turco. El árabe une sus letras y se escribe de derecha a izquierda.
 - **Limpieza**: Ajustes › Biblioteca encuentra las imágenes y archivos que ya no usa ninguna nota y los retira cuando lo confirmas.
 - **Actualizaciones**: las versiones nuevas se instalan desde la propia app tras verificar su firma. Las comprobaciones automáticas se pueden desactivar.
 
@@ -142,6 +142,7 @@ Gracias a todas las personas que han ayudado a construir Quiet.md. Los issues y 
 
 ## Novedades recientes
 
+- **0.1.14** (21 nov): buscar y reemplazar con expresiones regulares. Los `[[enlaces wiki]]` de Obsidian abren la nota a la que apuntan. Interfaz en turco, y el árabe se muestra de derecha a izquierda. Elige la fuente de la interfaz y la de los documentos, y retira las imágenes y archivos que ninguna nota usa. La búsqueda sigue el ritmo en bibliotecas grandes y borrar muchas notas es más rápido. Un ajuste para que Retroceso vuelva al título; en Windows y Linux, Copiar como Markdown pasa a ser Ctrl+Shift+M.
 - **0.1.13** (17 nov): pizarras, portadas de Excalidraw, como bloque en una nota o como archivo `.excalidraw`, fluidas incluso con 10.000 formas. Historial de versiones en cada nota (… › Historial de versiones). Interfaz en francés y árabe. Copiar como Markdown, copiar la ruta de un archivo y cambiar la carpeta de la biblioteca en Ajustes. Las imágenes pegadas desde la web se guardan en la biblioteca. Menos memoria en páginas con muchas imágenes y desplazamiento más fluido en la barra lateral.
 - **0.1.12** (14 nov): arrastra archivos desde el Finder, o desde Archivos de este ordenador, directamente a una carpeta de la barra lateral o entre filas; toda la página se ilumina como zona para soltar. Tarjetas de Inicio con esquinas continuas, el menú Abrir en el Finder, rutas que empiezan en Mis documentos, un ancho mínimo de ventana que deja sitio a la nota y una barra lateral opaca en pantalla completa. Corrige un bloqueo al crear un documento dentro de una carpeta.
 - **0.1.11** (13 nov): la biblioteca pasa a ser carpetas reales, con archivos nombrados por su título; las bibliotecas anteriores se trasladan solas, con copia de seguridad. Un nuevo primer arranque para elegir idioma, ubicación de la biblioteca y atajo de notas rápidas, e importar notas de Obsidian y otras apps de Markdown. Interfaz en japonés, español y coreano; fórmulas en bloque en Markdown; los documentos se abren donde los dejaste; arranque más rápido y menos memoria.

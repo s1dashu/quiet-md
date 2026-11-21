@@ -437,6 +437,9 @@ pub struct Core {
     path_misses: Cell<(u32, u32)>,
     /// A message for the view to toast (e.g. 当前位置不支持粘贴表格).
     pub notice: Option<&'static str>,
+    /// Backspace at the start of the body merges the first paragraph into the
+    /// title and moves the caret there (设置 › 退格键回到标题).
+    pub backspace_to_title: bool,
 }
 
 impl Core {
@@ -460,6 +463,7 @@ impl Core {
             path_hits: Cell::new(u32::MAX),
             path_misses: Cell::new((0, 1)),
             notice: None,
+            backspace_to_title: false,
         }
     }
 
@@ -1382,6 +1386,30 @@ impl Core {
             self.delete_atomic(p.block);
             return;
         }
+        // Unless 退格键回到标题 is on, a plain paragraph opening the body never
+        // merges into the title and the caret stays in the body (an empty one
+        // goes when text follows).
+        if !self.backspace_to_title && matches!(block.kind, BlockKind::Text) && !self.parent_is_text_block(p.block) && !self.first_in_quote(p.block) {
+            let us = self.units();
+            if let Some(i) = self.unit_index(&us, p.block)
+                && i > 0
+                && us[i - 1].id == TITLE
+                && us[i].scope.is_none()
+            {
+                if block.text.is_empty()
+                    && block.children.is_empty()
+                    && let Some(next) = us.get(i + 1).filter(|u| u.text && u.scope == us[i].scope && u.id != TITLE)
+                {
+                    let next = next.id;
+                    self.checkpoint(EditKind::Other);
+                    self.break_coalescing();
+                    self.remove_subtree(p.block);
+                    self.normalize();
+                    self.sel = Selection::caret(Pos::new(next, 0));
+                }
+                return;
+            }
+        }
         self.checkpoint(EditKind::Other);
         self.break_coalescing();
         match block.kind {
@@ -1405,16 +1433,18 @@ impl Core {
             return;
         }
         // First paragraph in a quote/callout: lift it out.
-        if let Some(parent) = self.parent_of(p.block).cloned()
-            && matches!(parent.kind, BlockKind::Quote | BlockKind::Callout { .. })
-            && parent.children.first().map(|c| c.id) == Some(p.block)
-        {
+        if self.first_in_quote(p.block) {
+            let parent = self.parent_of(p.block).unwrap().id;
             let b = self.remove_subtree(p.block).unwrap();
-            self.insert_before(parent.id, b);
+            self.insert_before(parent, b);
             self.normalize();
             return;
         }
         self.merge_into_previous(p.block);
+    }
+
+    fn first_in_quote(&self, id: BlockId) -> bool {
+        self.parent_of(id).is_some_and(|q| matches!(q.kind, BlockKind::Quote | BlockKind::Callout { .. }) && q.children.first().map(|c| c.id) == Some(id))
     }
 
     fn merge_into_previous(&mut self, id: BlockId) {
@@ -3652,6 +3682,51 @@ mod tests {
         assert_eq!(c.units().len(), 3);
         c.enter();
         assert_eq!(xml(&c), "<title>T</title>\n<h1 folded=\"true\">A</h1>\n<p>a1</p>\n<h2>B</h2>\n<p>b1</p>\n<h1></h1>\n<h1>C</h1>\n");
+    }
+
+    #[test]
+    fn backspace_at_body_start_stays_in_body() {
+        // Text, empty or not, never goes into the title, and no undo step is spent.
+        for body in ["abc", ""] {
+            let mut c = doc(&format!("<title>T</title><p>{body}</p>"));
+            let b = id(&c, 1);
+            c.sel = Selection::caret(Pos::new(b, 0));
+            let steps = c.undo.len();
+            c.backspace();
+            c.delete_to_start();
+            assert_eq!(xml(&c), format!("<title>T</title>\n<p>{body}</p>\n"));
+            assert_eq!(c.sel.head, Pos::new(b, 0));
+            assert_eq!(c.undo.len(), steps);
+        }
+        // An empty first line goes when text follows, caret moves down.
+        let mut c = doc("<title>T</title><p></p><h2>x</h2>");
+        c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
+        c.backspace();
+        assert_eq!(xml(&c), "<title>T</title>\n<h2>x</h2>\n");
+        assert_eq!(c.sel.head, Pos::new(id(&c, 1), 0));
+        // Formatted blocks first turn into a paragraph, then stay put.
+        for src in ["<ul><li>a</li></ul>", "<h1>a</h1>", "<blockquote><p>a</p></blockquote>", "<checkbox done=\"false\">a</checkbox>"] {
+            let mut c = doc(&format!("<title>T</title>{src}"));
+            let first = c.units()[1].id;
+            c.sel = Selection::caret(Pos::new(first, 0));
+            c.backspace();
+            assert_eq!(xml(&c), "<title>T</title>\n<p>a</p>\n", "{src}");
+            c.backspace();
+            assert_eq!(xml(&c), "<title>T</title>\n<p>a</p>\n", "{src}");
+            assert_ne!(c.sel.head.block, TITLE);
+        }
+        // 退格键回到标题 brings the old merge back.
+        let mut c = doc("<title>T</title><p>a</p>");
+        c.backspace_to_title = true;
+        c.sel = Selection::caret(Pos::new(id(&c, 1), 0));
+        c.backspace();
+        assert_eq!(c.doc.title.text, "Ta");
+        assert_eq!(c.sel.head, Pos::new(TITLE, 1));
+        // Delete at the end of the title still pulls the body up.
+        let mut c = doc("<title>T</title><p>a</p><p>b</p>");
+        c.sel = Selection::caret(Pos::new(TITLE, 1));
+        c.delete_forward();
+        assert_eq!(xml(&c), "<title>Ta</title>\n<p>b</p>\n");
     }
 
     #[test]

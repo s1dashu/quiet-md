@@ -2,9 +2,10 @@ use super::*;
 
 impl Store {
     /// Independent handle for background tree writes; begin_write reloads under the library lock.
+    /// It takes the parsed documents along, so its `list` reads only files that changed.
     pub fn tree_writer(&self) -> Self {
         Self { file_changes: vec![], root: self.root.clone(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), flat: self.flat,
-            loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default() }
+            loaded: Default::default(), copied: Default::default(), parsed: self.parsed.clone(), warnings: vec![], migrated: None, batch: Default::default(), view: Default::default() }
     }
 
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }

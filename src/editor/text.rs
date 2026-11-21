@@ -2,6 +2,7 @@
 //! selection, caret and IME marked range. Layout results are written into a
 //! shared cache that the editor uses for hit-testing and caret navigation.
 
+use crate::editor::bidi;
 use crate::editor::core::Pos;
 use crate::editor::math;
 use crate::model::{Align, BlockId, Marks, RichText};
@@ -27,6 +28,8 @@ pub struct Row {
     pub base_dy: Pixels,
     /// x of the row start inside the unwrapped hard-line layout.
     pub x0: Pixels,
+    /// x of the row end there.
+    pub x1: Pixels,
     /// Horizontal offset from alignment.
     pub align_dx: Pixels,
 }
@@ -79,9 +82,20 @@ impl TextLayout {
 
     fn position_in_row(&self, ri: usize, index: usize) -> Point<Pixels> {
         let Some(r) = self.rows.get(ri) else { return self.bounds.origin };
-        let (start, line) = &self.lines[r.hard];
-        let x = line.unwrapped_layout.x_for_index(index.saturating_sub(*start)) - r.x0 + r.align_dx;
+        let x = self.x_in_row(r, index) - r.x0 + r.align_dx;
         point(self.bounds.left() + x, self.bounds.top() + r.y + r.base_dy)
+    }
+
+    /// x of the caret before block offset `index` in the hard-line layout of
+    /// row `r`. Right-to-left glyphs come in visual order (see `bidi`).
+    fn x_in_row(&self, r: &Row, index: usize) -> Pixels {
+        let (start, line) = &self.lines[r.hard];
+        let i = index.saturating_sub(*start);
+        let l = &line.unwrapped_layout;
+        if bidi::has_rtl(&line.text) && let Some(x) = bidi::x_for_index(l, &line.text, r.x0..r.x1, i) {
+            return x;
+        }
+        l.x_for_index(i)
     }
 
     /// Row `ri` is followed by another row of the same hard line.
@@ -161,7 +175,9 @@ impl TextLayout {
         let r = &self.rows[ri];
         let (start, line) = &self.lines[r.hard];
         let x = window_x - self.bounds.left() - r.align_dx + r.x0;
-        let ix = (start + line.unwrapped_layout.closest_index_for_x(x.max(px(0.)))).clamp(r.range.start, r.range.end);
+        let l = &line.unwrapped_layout;
+        let rtl = if bidi::has_rtl(&line.text) { bidi::index_for_x(l, &line.text, r.x0..r.x1, x) } else { None };
+        let ix = (start + rtl.unwrap_or_else(|| l.closest_index_for_x(x.max(px(0.))))).clamp(r.range.start, r.range.end);
         (ix, self.row_wraps(ri) && ix == r.range.end)
     }
 
@@ -177,18 +193,69 @@ impl TextLayout {
                 continue;
             }
             let (start, line) = &self.lines[r.hard];
-            let xa = line.unwrapped_layout.x_for_index(a - start) - r.x0 + r.align_dx;
-            let mut xb = line.unwrapped_layout.x_for_index(b - start) - r.x0 + r.align_dx;
+            let top = self.bounds.top() + r.y + r.base_dy;
+            let rect = |xa: Pixels, xb: Pixels| {
+                let (xa, xb) = (xa - r.x0 + r.align_dx, xb - r.x0 + r.align_dx);
+                Bounds::from_corners(point(self.bounds.left() + xa, top), point(self.bounds.left() + xb, top + self.line_height))
+            };
+            // Right-to-left text: the range may cover several pieces of the
+            // row, and the line ends on its left.
+            if bidi::has_rtl(&line.text) {
+                let l = &line.unwrapped_layout;
+                let mut parts = bidi::ranges_for(l, &line.text, r.x0..r.x1, a - start..b - start);
+                if parts.is_empty() {
+                    let x = self.x_in_row(r, a);
+                    parts.push((x, x));
+                }
+                if range.end > r.range.end && last_of_hard {
+                    if bidi::rtl_line(&line.text) {
+                        let first = parts.iter_mut().min_by(|p, q| f32::from(p.0).total_cmp(&f32::from(q.0))).unwrap();
+                        first.0 -= px(5.);
+                    } else {
+                        let last = parts.iter_mut().max_by(|p, q| f32::from(p.1).total_cmp(&f32::from(q.1))).unwrap();
+                        last.1 += px(5.);
+                    }
+                }
+                out.extend(parts.into_iter().map(|(xa, xb)| rect(xa, xb)));
+                continue;
+            }
+            let xa = line.unwrapped_layout.x_for_index(a - start);
+            let mut xb = line.unwrapped_layout.x_for_index(b - start);
             if range.end > r.range.end && last_of_hard {
                 xb += px(5.);
             }
-            out.push(Bounds::from_corners(
-                point(self.bounds.left() + xa, self.bounds.top() + r.y + r.base_dy),
-                point(self.bounds.left() + xb, self.bounds.top() + r.y + r.base_dy + self.line_height),
-            ));
+            out.push(rect(xa, xb));
         }
         out
     }
+}
+
+/// Each wrapped row's first byte and left x in the hard line's layout. The
+/// leftmost glyph of a right-to-left row is its last character, so there the
+/// row starts at the smallest byte offset drawn in it.
+fn row_starts(line: &WrappedLine) -> Vec<(usize, Pixels)> {
+    let layout = &line.unwrapped_layout;
+    let mut out = vec![(0, px(0.))];
+    for b in line.wrap_boundaries() {
+        let g = &layout.runs[b.run_ix].glyphs[b.glyph_ix];
+        out.push((g.index, g.position.x));
+    }
+    if out.len() > 1 && bidi::has_rtl(&line.text) {
+        let mut wraps = line.wrap_boundaries().iter().peekable();
+        let mut row = 0;
+        for (run_ix, run) in layout.runs.iter().enumerate() {
+            for (glyph_ix, g) in run.glyphs.iter().enumerate() {
+                if wraps.peek().is_some_and(|b| b.run_ix == run_ix && b.glyph_ix == glyph_ix) {
+                    wraps.next();
+                    row += 1;
+                }
+                if row > 0 {
+                    out[row].0 = out[row].0.min(g.index);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// A single-line field's horizontal scroll: the caret stays 8pt inside the
@@ -921,10 +988,7 @@ impl Element for RichTextElement {
                 // Row heights: the line box grows to contain equation boxes.
                 let layout = &l.unwrapped_layout;
                 let base = (line_height - layout.ascent - layout.descent) / 2. + layout.ascent;
-                let mut cuts: Vec<usize> = vec![0];
-                for b in l.wrap_boundaries() {
-                    cuts.push(layout.runs[b.run_ix].glyphs[b.glyph_ix].index);
-                }
+                let mut cuts: Vec<usize> = row_starts(&l).into_iter().map(|r| r.0).collect();
                 cuts.push(len + 1);
                 for c in cuts.windows(2) {
                     let (mut top, mut bottom) = (px(0.), line_height);
@@ -968,7 +1032,10 @@ impl Element for RichTextElement {
         let sx = match &self.scroll {
             Some(cell) if !self.spec.wrap && p.lines.len() == 1 => {
                 let (start, line) = &p.lines[0];
-                let caret_x = line.unwrapped_layout.x_for_index(self.caret.unwrap_or(0).saturating_sub(*start));
+                let i = self.caret.unwrap_or(0).saturating_sub(*start);
+                let l = &line.unwrapped_layout;
+                let rtl = if bidi::has_rtl(&line.text) { bidi::x_for_index(l, &line.text, px(0.)..l.width, i) } else { None };
+                let caret_x = rtl.unwrap_or_else(|| l.x_for_index(i));
                 let s = hscroll(line.unwrapped_layout.width, caret_x, bounds.size.width, cell.get());
                 cell.set(s);
                 s
@@ -989,24 +1056,23 @@ impl Element for RichTextElement {
         let mut heights = p.rows.iter();
         for (hi, (start, line)) in p.lines.iter().enumerate() {
             let layout = &line.unwrapped_layout;
-            let mut bounds_ix: Vec<(usize, Pixels)> = vec![(0, px(0.))];
-            for b in line.wrap_boundaries() {
-                let g = &layout.runs[b.run_ix].glyphs[b.glyph_ix];
-                bounds_ix.push((g.index, g.position.x));
-            }
+            let mut bounds_ix = row_starts(line);
             bounds_ix.push((line.len(), layout.width));
+            // A line that reads right to left keeps the default (left)
+            // alignment against the right edge, as the platform text views do.
+            let align = if self.align == Align::Left && bidi::rtl_line(&line.text) { Align::Right } else { self.align };
             for w in bounds_ix.windows(2) {
                 let (a, xa) = w[0];
                 let (b, xb) = w[1];
                 let width = xb - xa;
-                let align_dx = match self.align {
+                let align_dx = match align {
                     Align::Left => px(0.),
                     Align::Center => ((bounds.size.width - width) / 2.).max(px(0.)),
                     Align::Right => (bounds.size.width - width).max(px(0.)),
                 };
                 let (ra, rb) = if showing_placeholder { (0, 0) } else { (start + a, start + b) };
                 let (h, base_dy) = heights.next().copied().unwrap_or((lh, px(0.)));
-                rows.push(Row { range: ra..rb, hard: hi, y, h, base_dy, x0: xa, align_dx });
+                rows.push(Row { range: ra..rb, hard: hi, y, h, base_dy, x0: xa, x1: xb, align_dx });
                 y += h;
             }
         }
@@ -1015,9 +1081,8 @@ impl Element for RichTextElement {
         for e in p.eqs {
             let ri = layout.row_for(e.ix);
             let Some(r) = layout.rows.get(ri) else { continue };
-            let (start, line) = &layout.lines[r.hard];
-            let l = &line.unwrapped_layout;
-            let x = l.x_for_index(e.ix - start) - r.x0 + r.align_dx;
+            let l = &layout.lines[r.hard].1.unwrapped_layout;
+            let x = layout.x_in_row(r, e.ix) - r.x0 + r.align_dx;
             let base = (lh - l.ascent - l.descent) / 2. + l.ascent;
             let line_top = bounds.top() + r.y + r.base_dy;
             let origin = point(text_origin.x + x, if e.ext.is_some() { line_top } else { line_top + base - px(EQ_MIDDLE * self.spec.size) });
@@ -1048,7 +1113,10 @@ impl Element for RichTextElement {
         let cache = self.cache.borrow();
         let Some(layout) = cache.get(&self.id) else { return };
         let lh = layout.line_height;
-        let gpui_align = match self.align {
+        // Per hard line: one that reads right to left sits against the right
+        // edge (see `prepaint`).
+        let gpui_align = |line: &WrappedLine| match self.align {
+            Align::Left if bidi::rtl_line(&line.text) => TextAlign::Right,
             Align::Left => TextAlign::Left,
             Align::Center => TextAlign::Center,
             Align::Right => TextAlign::Right,
@@ -1076,7 +1144,7 @@ impl Element for RichTextElement {
         let o = point(bounds.left() + dx - sx, bounds.top());
         for (hi, (_, line)) in layout.lines.iter().enumerate() {
             let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
-            let _ = line.paint_background_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
+            let _ = line.paint_background_rows(o, lh, &tops, gpui_align(line), Some(bounds), window, cx);
         }
         if let Some(sel) = &self.selection {
             let rects = if self.text.is_empty() {
@@ -1126,7 +1194,7 @@ impl Element for RichTextElement {
         }
         for (hi, (_, line)) in layout.lines.iter().enumerate() {
             let tops: Vec<Pixels> = layout.rows.iter().filter(|r| r.hard == hi).map(|r| r.y + r.base_dy).collect();
-            let _ = line.paint_rows(o, lh, &tops, gpui_align, Some(bounds), window, cx);
+            let _ = line.paint_rows(o, lh, &tops, gpui_align(line), Some(bounds), window, cx);
         }
         for eq in prepaint.placed.iter() {
             let o = eq.origin;

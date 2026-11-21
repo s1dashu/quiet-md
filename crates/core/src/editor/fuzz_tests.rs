@@ -131,8 +131,9 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
             "enter".into()
         }
         4 | 5 => {
+            c.backspace_to_title = rng.below(2) == 0;
             c.backspace();
-            "backspace".into()
+            format!("backspace(to_title: {})", c.backspace_to_title)
         }
         6 => {
             c.delete_forward();

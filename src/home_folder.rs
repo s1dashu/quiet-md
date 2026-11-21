@@ -570,7 +570,7 @@ impl FileDrop {
             if p.fs_is_dir() { dirs += 1; }
             else if crate::local_files::is_markdown_path(p) { md += 1; }
             else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) { xml += 1; }
-            else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")) { csv += 1; }
+            else if crate::transfer::is_csv_path(p) { csv += 1; }
             else { other += 1; }
         }
         Self {
@@ -739,7 +739,7 @@ impl Workspace {
         let pose = Pose { w, h, lift, open: o, yl: 0.49 * h + lean, yr: 0.54 * h + lean, inset: -(3. * o + 7. * m), papers };
         let tag = d.tag();
         // The front paper's name: the first file of the kind it shows.
-        let first = d.paths.iter().find(|p| match tag { Some("MD") => crate::local_files::is_markdown_path(p), Some("CSV") => p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")), Some(_) => p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")), None => p.fs_is_dir() })
+        let first = d.paths.iter().find(|p| match tag { Some("MD") => crate::local_files::is_markdown_path(p), Some("CSV") => crate::transfer::is_csv_path(p), Some(_) => p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")), None => p.fs_is_dir() })
             .or(d.paths.first()).and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let summary = d.summary();
         let record = d.zone.clone();

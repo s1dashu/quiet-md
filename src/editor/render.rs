@@ -673,6 +673,9 @@ impl R<'_> {
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -685,7 +688,7 @@ impl R<'_> {
                     1 => dot.rounded_full().border_1().border_color(c),
                     _ => dot.size(px(4.5)).rounded(px(1.)).bg(c),
                 };
-                div().w(px(18.)).pl(px(5.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(5.)).mr(px(6.))).when(rtl, |d| d.pr(px(5.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -698,7 +701,8 @@ impl R<'_> {
                 }))
                 .min_w(px(18.))
                 .px(px(1.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
                 .font_family(theme::DOC_UI_FONT)
                 .text_size(px(spec.size))
@@ -715,7 +719,8 @@ impl R<'_> {
                 div()
                     .id(("todo", id.0))
                     .size(px(box_size))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(st.num("task.radius")))
                     .border_1()
                     .when(!done, |d| d.border_color(Theme::todo_box()).bg(crate::theme::raised(Theme::bg_body())).hover(|s| s.border_color(Theme::primary())))
@@ -747,6 +752,7 @@ impl R<'_> {
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-3.))
                             .px(px(3.))
@@ -1976,6 +1982,9 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
         let spec = self.spec_for(b, env);
         let lh = spec.line_height;
         let id = b.id;
+        // An item that reads right to left (see `text::row_starts`) keeps its
+        // marker on the right, beside the text.
+        let rtl = b.align == crate::model::Align::Left && super::bidi::rtl_line(b.text.text.split('\n').next().unwrap_or(""));
         let marker: AnyElement = match b.kind {
             // Drawn rather than typeset so the dot size (5.5) and its centring
             // on the line don't depend on how the font's bullet glyph renders.
@@ -1986,7 +1995,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                     1 => dot.rounded_full().border_1().border_color(Theme::primary()),
                     _ => dot.size(px(5.)).bg(Theme::primary()),
                 };
-                div().w(px(18.)).pl(px(4.)).mr(px(6.)).flex().child(dot).into_any_element()
+                div().w(px(18.)).when(!rtl, |d| d.pl(px(4.)).mr(px(6.))).when(rtl, |d| d.pr(px(4.)).ml(px(6.)).justify_end()).flex().child(dot).into_any_element()
             }
             BlockKind::Ordered { .. } => div()
                 .id(("ordered-number", id.0))
@@ -1999,7 +2008,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 }))
                 .min_w(px(18.))
                 .px(px(2.))
-                .mr(px(6.))
+                .when(!rtl, |d| d.mr(px(6.)))
+                .when(rtl, |d| d.ml(px(6.)))
                 .whitespace_nowrap()
                 .font_family(crate::theme::NUMERAL_FONT)
                 .text_size(px(spec.size))
@@ -2011,7 +2021,8 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("todo", id.0))
                     .size(px(16.))
-                    .mr(px(8.))
+                    .when(!rtl, |d| d.mr(px(8.)))
+                    .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(4.))
                     .border_1()
                     .border_color(Theme::text())
@@ -2044,6 +2055,7 @@ fn list_item_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env: Env, 
                 div()
                     .id(("row", id.0))
                     .flex()
+                    .when(rtl, |d| d.flex_row_reverse())
                     .when(todo, |d| {
                         d.mx(px(-2.))
                             .px(px(2.))

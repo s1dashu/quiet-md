@@ -309,6 +309,9 @@ pub struct Workspace {
     sidebar_was_open: bool,
     /// The window width before that widening, until the window takes the new size.
     widen_from: Option<f32>,
+    /// Narrowing the window hid the sidebar (not the user): widening it until
+    /// the sidebar fits shows it again.
+    sidebar_auto_hidden: bool,
     pub folder_current: Option<String>,
     pub create_menu: Option<(Option<String>, Point<Pixels>)>,
     /// The header's 导入 menu: the folder it imports into, and where it hangs.
@@ -343,6 +346,8 @@ pub struct Workspace {
     pub version_rename: Option<crate::history::VersionRename>,
     pub list_scroll: ScrollHandle,
     pub search_scroll: ScrollHandle,
+    /// Lowercased titles and bodies and the last query's hits, see [`crate::search::SearchCache`].
+    pub search_cache: std::cell::RefCell<crate::search::SearchCache>,
     /// Last-frame bounds of the row menu's 下载 submenu.
     pub row_sub_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// 批量操作 mode: the checked docs of 我的文档, in check order.
@@ -577,6 +582,7 @@ impl Workspace {
             sidebar_width,
             sidebar_was_open: false,
             widen_from: None,
+            sidebar_auto_hidden: false,
             sidebar_drag: false,
             folder_current: None,
             create_menu: None,
@@ -600,6 +606,7 @@ impl Workspace {
             version_rename: None,
             list_scroll: ScrollHandle::new(),
             search_scroll: ScrollHandle::new(),
+            search_cache: Default::default(),
             row_sub_bounds: Rc::new(Cell::new(None)),
             batch: None,
             confirm: None,
@@ -728,6 +735,8 @@ impl Workspace {
                 e.created = m.created;
                 e.info = m.info;
                 if !e.board_file && !e.table_file { e.set_read_only(m.reading, cx); }
+                // a build without 数据表 shows a table file's page as a placeholder, not to be edited
+                if e.table_file && !crate::DATATABLE { e.set_read_only(true, cx); }
             }
             e
         });
@@ -876,23 +885,17 @@ impl Workspace {
         let mut writer = self.store.tree_writer();
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
-            let mut deleted = vec![];
-            let mut errors = vec![];
-            let batch = writer.begin_batch().is_ok();
-            for (id, root) in &groups {
-                if root.as_ref().is_some_and(|r| !deleted.contains(r)) { continue; }
-                match writer.delete(id, root.as_deref()) {
-                    Ok(()) => deleted.push(id.clone()),
-                    Err(e) => errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))),
-                }
-            }
-            if batch && let Err(e) = writer.end_batch() {
-                errors.push(crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string())));
-            }
+            // One write for all of them: each index write waits for the disk.
+            let (deleted, result) = writer.delete_many(&groups);
+            let errors = result.err().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(&e.to_string()))).into_iter().collect();
             let warnings = writer.take_warnings();
             let listed = ListedDocs { entries: writer.list(), trash: writer.list_trash(), warnings };
             (DeletedDocs { deleted, errors, changes: journal.take() }, listed)
         });
+        // The rows go now; the list read back when the files have moved
+        // replaces this, bringing back anything that could not go.
+        let all: std::collections::HashSet<String> = all.into_iter().collect();
+        self.entries.retain(|e| !all.contains(&e.id));
         self.batch = None;
         self.row_menu = None;
         cx.notify();
@@ -1753,11 +1756,16 @@ impl Render for Workspace {
         let vw = f32::from(vs.width);
         if self.widen_from.is_some_and(|w| (w - vw).abs() > 0.5) { self.widen_from = None; }
         // The web build's window is the page: never resized from here.
-        if self.sidebar_open && !window.is_fullscreen() && !cfg!(target_family = "wasm") {
+        // Opened by hand: no longer waiting to come back by itself.
+        if self.sidebar_open { self.sidebar_auto_hidden = false; }
+        if !window.is_fullscreen() && !cfg!(target_family = "wasm") {
             let need = DOC_MIN_W + self.sidebar_w(window);
-            if vw < need - 0.5 {
+            if self.sidebar_open && vw < need - 0.5 {
                 if !self.sidebar_was_open { window.resize(size(px(need), vs.height)); self.widen_from = Some(vw); }
-                else if self.widen_from.is_none() { self.sidebar_open = false; }
+                else if self.widen_from.is_none() { self.sidebar_open = false; self.sidebar_auto_hidden = true; }
+            } else if self.sidebar_auto_hidden && vw >= need - 0.5 {
+                self.sidebar_open = true;
+                self.sidebar_auto_hidden = false;
             }
         }
         self.sidebar_was_open = self.sidebar_open;
@@ -1783,6 +1791,7 @@ impl Render for Workspace {
         let pref_menu = self.render_pref_menu(cx);
         let font_menu = self.render_font_menu(cx);
         let toast = self.render_toast(window);
+        let forced_update = crate::update::prompt(window, cx);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
             View::Doc => div()
@@ -1909,6 +1918,12 @@ impl Render for Workspace {
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, _, cx| {
+                // A required update waits for 立即重启更新 (↩): no key reaches the window beneath.
+                if crate::update::blocking(cx) {
+                    if ev.keystroke.key == "enter" { crate::update::install(cx); }
+                    cx.stop_propagation();
+                    return;
+                }
                 let undo = ev.keystroke.modifiers.secondary(cx) && matches!(ev.keystroke.key.as_str(), "z" | "y");
                 if w.store.file_task_busy() || (w.file_history.busy && !undo) { cx.stop_propagation(); return; }
                 // 版本历史: the editor keeps the caret, so Esc has to be taken
@@ -1977,6 +1992,7 @@ impl Render for Workspace {
             .children(create_menu)
             .children(import_menu)
             .children(place_menu)
+            .children(forced_update)
             .children(toast)
             // Over everything, toasts included, until its last page is done.
             .when_some(self.onboarding.clone(), |d, o| d.child(deferred(div().id("onboarding-cover").absolute().inset_0().occlude().child(o)).with_priority(30)))

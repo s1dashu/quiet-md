@@ -491,6 +491,8 @@ fn write_atomic_then(path: &std::path::Path, bytes: &[u8], sync_dir: bool) -> Re
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
     let tmp = PathBuf::from(tmp);
+    #[cfg(test)]
+    SYNCED_WRITES.with(|n| n.set(n.get() + 1));
     let result = (|| -> Result<()> {
         let mut file = crate::vfs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         file.write_all(bytes)?;
@@ -528,6 +530,18 @@ fn decoded(text: &str) -> String {
         }
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Replace a cache file through a temporary file, without syncing it to
+/// the disk (a sync costs up to a good part of a second on a busy disk): a
+/// crash can leave an old, empty or torn copy, which its reader discards.
+fn write_cache(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let tmp = PathBuf::from(tmp);
+    let r = crate::vfs::write(&tmp, bytes).and_then(|_| crate::vfs::rename(&tmp, path));
+    if r.is_err() { let _ = crate::vfs::remove_file(&tmp); }
+    Ok(r?)
 }
 
 fn with_suffix(path: &std::path::Path, suffix: &str) -> PathBuf {
@@ -1441,6 +1455,8 @@ impl Store {
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
                 None => {
+                    #[cfg(test)]
+                    DOC_READS.with(|n| n.set(n.get() + 1));
                     // a 数据表 is not text: its words come from the file's cells
                     let table = table_file(&p);
                     let Ok(text) = (if table { Ok(String::new()) } else { crate::vfs::read_to_string(&p) }) else { continue };
@@ -1660,9 +1676,9 @@ impl Store {
             out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![] });
         }
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
-        let cached = self.parsed.len();
         self.parsed.retain(|id, _| seen.contains(id.as_str()));
-        if reparsed || self.parsed.len() != cached { let _ = self.save_parsed(); }
+        // Files that went only leave stale paths behind, which the next launch skips.
+        if reparsed { let _ = self.save_parsed(); }
         if dirty && _lock.is_some() {
             let _ = self.save_index();
         }
@@ -1691,7 +1707,7 @@ impl Store {
         })).collect();
         let path = parsed_cache_path(&self.root);
         if let Some(dir) = path.parent() { crate::vfs::create_dir_all(dir)?; }
-        write_atomic(&path, &serde_json::to_vec(&ParsedCache { version: parsed_cache_version(), docs })?)
+        write_cache(&path, &serde_json::to_vec(&ParsedCache { version: parsed_cache_version(), docs })?)
     }
 
     fn read_doc_text(&self, id: &str) -> Result<String> {
@@ -2038,28 +2054,61 @@ impl Store {
     /// deletion takes it along (`None`: deleted itself). A folder takes what
     /// is in it along (deleting those afterwards does nothing more).
     pub fn delete(&mut self, id: &str, root: Option<&str>) -> Result<()> {
-        let _lock = self.begin_write()?;
-        // 本机文件: only taken off the list; the file is the user's.
-        if self.index.get(id).is_some_and(Meta::local) {
-            if self.index[id].parent.is_some() { self.forget_mounted(id); } else { self.index.remove(id); }
-            self.loaded.borrow_mut().remove(id);
-            self.carry_mounts(&HashMap::new());
-            return self.save_index();
+        let before = self.warnings.len();
+        let (_, r) = self.delete_many(&[(id.to_string(), root.map(str::to_string))]);
+        // One page: what went wrong is the error, not a warning.
+        if r.is_ok() && self.warnings.len() > before { return Err(anyhow::anyhow!(self.warnings.remove(before))); }
+        r
+    }
+
+    /// `delete` for several pages, each with the page whose deletion takes
+    /// it along, in order (one whose page is listed and did not go stays). One lock, the
+    /// 回收站's index written once before anything moves and the library's
+    /// once after, however many there are: each write is synced to the disk,
+    /// which can take a good part of a second when the disk is busy.
+    /// A page that cannot go is a warning and the others still go. Returns
+    /// the pages now gone, and the error that stopped the moves midway.
+    pub fn delete_many(&mut self, list: &[(String, Option<String>)]) -> (Vec<String>, Result<()>) {
+        let _lock = match self.begin_write() { Ok(l) => l, Err(e) => return (vec![], Err(e)) };
+        let mut items: Vec<(String, Option<String>)> = vec![];
+        let mut gone: Vec<String> = vec![];
+        let mut forgot = false;
+        for (id, root) in list {
+            if root.as_ref().is_some_and(|r| list.iter().any(|(k, _)| k == r) && !gone.contains(r)) { continue; }
+            // Already taken along by a folder, or deleted before.
+            if items.iter().any(|(k, _)| k == id) || (!self.index.contains_key(id) && self.trash.contains_key(id)) { gone.push(id.clone()); continue; }
+            // 本机文件: only taken off the list; the file is the user's.
+            if self.index.get(id).is_some_and(Meta::local) {
+                if self.index[id].parent.is_some() { self.forget_mounted(id); } else { self.index.remove(id); }
+                self.loaded.borrow_mut().remove(id);
+                forgot = true;
+                gone.push(id.clone());
+                continue;
+            }
+            if !self.index.contains_key(id) { self.warnings.push("文档或文件夹不存在".into()); continue; }
+            let ride = root.clone().unwrap_or_else(|| id.clone());
+            let mut group = vec![];
+            if self.index[id].folder.is_some() && !self.flat {
+                let prefix = format!("{}/", self.index[id].rel);
+                let mut inside: Vec<(String, usize, bool)> = self.index.iter().filter(|(_, m)| !m.local() && m.rel.starts_with(&prefix))
+                    .map(|(k, m)| (k.clone(), m.rel.matches('/').count(), m.folder.is_some())).collect();
+                // Deepest first, documents before the folder holding them.
+                inside.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.cmp(&b.2)).then(a.0.cmp(&b.0)));
+                group.extend(inside.into_iter().map(|(k, _, _)| (k, Some(ride.clone()))).filter(|(k, _)| !items.iter().any(|(x, _)| x == k)));
+            }
+            group.push((id.clone(), root.clone()));
+            // A name already taken in the 回收站 keeps this page (and only it) out.
+            match group.iter().find(|(k, _)| self.trash_path(k).fs_try_exists().unwrap_or(true)) {
+                Some((k, _)) => self.warnings.push(format!("回收站已存在同名文档，未覆盖：{k}")),
+                None => { items.extend(group); gone.push(id.clone()); }
+            }
         }
-        if !self.index.contains_key(id) && self.trash.contains_key(id) { return Ok(()); }
-        anyhow::ensure!(self.index.contains_key(id), "文档或文件夹不存在");
-        let ride = root.unwrap_or(id).to_string();
-        let mut items = vec![];
-        if self.index[id].folder.is_some() && !self.flat {
-            let prefix = format!("{}/", self.index[id].rel);
-            let mut inside: Vec<(String, usize, bool)> = self.index.iter().filter(|(_, m)| !m.local() && m.rel.starts_with(&prefix))
-                .map(|(k, m)| (k.clone(), m.rel.matches('/').count(), m.folder.is_some())).collect();
-            // Deepest first, documents before the folder holding them.
-            inside.sort_by(|a, b| b.1.cmp(&a.1).then(a.2.cmp(&b.2)).then(a.0.cmp(&b.0)));
-            items.extend(inside.into_iter().map(|(k, _, _)| (k, Some(ride.clone()))));
-        }
-        items.push((id.to_string(), root.map(str::to_string)));
-        self.trash_many(&items, true)
+        if forgot { self.carry_mounts(&HashMap::new()); }
+        let r = if items.is_empty() { Ok(()) } else { self.trash_many(&items, true) };
+        // A failed move leaves the rest where they were (and still listed).
+        if r.is_err() { gone.retain(|id| !self.index.contains_key(id)); }
+        if forgot && (items.is_empty() || r.is_err()) && let Err(e) = self.save_index() { return (gone, Err(e)); }
+        (gone, r)
     }
 
     /// Put one entry in the 回收站: a document's file, or a folder with what is left in it.
@@ -2317,20 +2366,29 @@ impl Store {
     }
 
     /// 彻底删除 a page from the 回收站, with the pages that went with it.
-    pub fn purge(&mut self, id: &str) -> Result<()> {
+    pub fn purge(&mut self, id: &str) -> Result<()> { self.purge_many(&[id.to_string()]) }
+
+    /// `purge` several pages (清空回收站), in order, stopping at the first
+    /// that fails. The 回收站's index is written once at the end: a crash
+    /// midway leaves entries whose files are gone, which `list_trash` drops.
+    pub fn purge_many(&mut self, ids: &[String]) -> Result<()> {
         let _lock = self.begin_write()?;
-        for k in self.trash_group(id) {
-            let p = self.trash_path(&k);
-            let r = if p.fs_is_dir() { crate::vfs::remove_dir_all(&p) } else { crate::vfs::remove_file(&p) };
-            match r {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(e.into()),
+        let mut r = Ok(());
+        'pages: for id in ids {
+            for k in self.trash_group(id) {
+                let p = self.trash_path(&k);
+                let removed = if p.fs_is_dir() { crate::vfs::remove_dir_all(&p) } else { crate::vfs::remove_file(&p) };
+                match removed {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => { r = Err(e.into()); break 'pages; }
+                }
+                self.trash.remove(&k);
+                crate::versions::purge(&self.history_base(), &k);
             }
-            self.trash.remove(&k);
-            crate::versions::purge(&self.history_base(), &k);
         }
-        self.save_trash()
+        let saved = self.save_trash();
+        r.and(saved)
     }
 
     /// Copy a DocxXML file into the library under a fresh id.
@@ -2558,6 +2616,10 @@ thread_local! {
     /// to keep imports O(N) instead of O(N × library) (#216). Per thread:
     /// tests run in parallel and each counts only its own lookups.
     pub(crate) static DISK_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Atomic writes synced to the disk (each one or two full syncs).
+    pub(crate) static SYNCED_WRITES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Documents `list` read and parsed (not taken from its cache).
+    pub(crate) static DOC_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -3325,6 +3387,91 @@ mod tests {
         assert_eq!(list.len(), 2);
         assert_eq!(list.iter().find(|e| e.id == b).unwrap().meta.parent.as_deref(), Some(a.as_str()));
         assert!(s.list_trash().is_empty());
+    }
+
+    /// Deleting many pages (a folder and a selection) writes each index
+    /// once, not once a page: every synced write waits for the disk.
+    #[test]
+    fn delete_many_writes_each_index_once() {
+        let lib = Lib::new("delmany");
+        let mut s = lib.open();
+        let f = s.create_folder("夹", None).unwrap();
+        let inside: Vec<String> = (0..10).map(|i| { let d = s.create_from(&doc(&format!("里 {i}"))).unwrap(); s.set_parent(&d, Some(&f)).unwrap(); d }).collect();
+        let loose: Vec<String> = (0..10).map(|i| s.create_from(&doc(&format!("散 {i}"))).unwrap()).collect();
+        let _ = s.list();
+        let mut items = vec![(f.clone(), None)];
+        items.extend(inside.iter().map(|d| (d.clone(), Some(f.clone()))));
+        items.extend(loose.iter().map(|d| (d.clone(), None)));
+        let journal = s.track_file_changes();
+        SYNCED_WRITES.with(|n| n.set(0));
+        let (gone, r) = s.delete_many(&items);
+        r.unwrap();
+        let writes = SYNCED_WRITES.with(|n| n.get());
+        // 回收站 index and its backup, library index and its backup, local state.
+        assert!(writes <= 5, "{writes} synced writes");
+        assert_eq!(gone.len(), 21);
+        assert!(s.list().is_empty());
+        assert_eq!(s.list_trash().len(), 11, "the folder's pages ride along with it");
+        assert_eq!(journal.take().len(), 21, "撤销 sees every page");
+        // Opened again: nothing half deleted, and it all comes back.
+        let mut s = lib.open();
+        assert!(s.list().is_empty());
+        assert_eq!(s.list_trash().len(), 11);
+        assert!(!s.restore(&f).unwrap());
+        assert_eq!(s.list().len(), 11);
+    }
+
+    /// One page that cannot go (its name is taken in the 回收站) stays, alone.
+    #[test]
+    fn delete_many_keeps_only_the_page_that_cannot_go() {
+        let lib = Lib::new("delconflict");
+        let mut s = lib.open();
+        let a = s.create_from(&doc("一")).unwrap();
+        let b = s.create_from(&doc("二")).unwrap();
+        let c = s.create_from(&doc("三")).unwrap();
+        crate::vfs::write(s.trash_dir().join(format!("{b}.xml")), b"x").unwrap();
+        let (gone, r) = s.delete_many(&[(a.clone(), None), (b.clone(), None), (c.clone(), None)]);
+        r.unwrap();
+        assert_eq!(gone, vec![a.clone(), c.clone()]);
+        assert_eq!(s.take_warnings().len(), 1);
+        assert_eq!(s.list().into_iter().map(|e| e.id).collect::<Vec<_>>(), vec![b.clone()]);
+        assert_eq!(crate::vfs::read(s.trash_dir().join(format!("{b}.xml"))).unwrap(), b"x", "never overwritten");
+        // Alone, it is an error.
+        assert!(s.delete(&b, None).is_err());
+        assert!(s.take_warnings().is_empty());
+    }
+
+    /// 清空回收站 writes the 回收站's index once.
+    #[test]
+    fn purge_many_writes_the_trash_index_once() {
+        let lib = Lib::new("purgemany");
+        let mut s = lib.open();
+        let ids: Vec<String> = (0..10).map(|i| s.create_from(&doc(&format!("页 {i}"))).unwrap()).collect();
+        s.delete_many(&ids.iter().map(|d| (d.clone(), None)).collect::<Vec<_>>()).1.unwrap();
+        assert_eq!(s.list_trash().len(), 10);
+        SYNCED_WRITES.with(|n| n.set(0));
+        s.purge_many(&ids).unwrap();
+        assert!(SYNCED_WRITES.with(|n| n.get()) <= 2, "the index and its backup");
+        assert!(s.list_trash().is_empty());
+        let left = crate::vfs::read_dir(s.trash_dir()).unwrap().filter_map(|e| e.ok()).filter(|e| !e.file_name().to_string_lossy().starts_with("index.json")).count();
+        assert_eq!(left, 0);
+        assert!(lib.open().list_trash().is_empty());
+    }
+
+    /// The background writer reads back only files that changed.
+    #[test]
+    fn tree_writer_lists_from_the_parsed_documents() {
+        let lib = Lib::new("writerlist");
+        let mut s = lib.open();
+        let ids: Vec<String> = (0..5).map(|i| s.create_from(&doc(&format!("页 {i}"))).unwrap()).collect();
+        let _ = s.list();
+        let mut w = s.tree_writer();
+        DOC_READS.with(|n| n.set(0));
+        w.delete(&ids[0], None).unwrap();
+        let listed = w.list();
+        assert_eq!(listed.len(), 4);
+        assert!(listed.iter().all(|e| e.title.starts_with("页")));
+        assert_eq!(DOC_READS.with(|n| n.get()), 0);
     }
 
     #[test]
