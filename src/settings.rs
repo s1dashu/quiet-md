@@ -1451,7 +1451,7 @@ impl Workspace {
         };
         div().flex().items_center().ml(px(4.)).gap(px(4.))
             .child(bar_button("settings-collapse", if open { "panel-left-close" } else { "panel-left-open" })
-                .tip(if open { tr("收起侧栏", "Hide sidebar") } else { tr("展开侧栏", "Show sidebar") }, Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                .tip(if open { tr("收起侧栏", "Hide sidebar") } else { tr("展开侧栏", "Show sidebar") }, Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ⌥ + B")))
                 .on_click(cx.listener(|w, _, _, cx| { w.sidebar_open = !w.sidebar_open; cx.notify(); })))
             .child(bar_button("settings-home", "home").tip(tr("返回主页", "Home"), Some(crate::shortcuts::hint("workspace::GoHome", "⌘ + ⌥ + Home")))
                 .on_click(cx.listener(|w, _, _, cx| w.show_view(View::Home, cx))))

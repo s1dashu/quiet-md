@@ -374,7 +374,7 @@ impl Render for Tooltip {
 
 /// Tooltip anchored on the element rather than the mouse.
 pub trait TipExt: Sized {
-    /// Window chrome: below, shortcut in full-width parens ("展开面板（⌘ + ]）").
+    /// Window chrome: below, shortcut in full-width parens ("展开面板（⌘ + ⌥ + B）").
     fn tip(self, text: &str, keys: Option<&str>) -> Self {
         let text = crate::settings::label(text);
         let label = match keys {

@@ -1027,4 +1027,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Chino parcial"),
     ("下载后可预览", "Vista previa tras descargar"),
     ("其他语言和符号（{}）", "Otras escrituras y símbolos ({})"),
+    ("前往", "Ir"),
+    ("后退", "Atrás"),
+    ("前进", "Adelante"),
 ];

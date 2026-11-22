@@ -5,7 +5,7 @@
 <h1>A look around</h1>
 <img src=".assets/guides/home.jpg" caption="Home: your documents at a glance" align="center"/>
 <p>The window has two main areas.</p>
-<ol><li><b>The sidebar</b> contains Home, Pinned, My documents and Settings. Press <code>⌘ ]</code> to hide or show it.</li><li><b>The document</b> is the white writing surface. Its header contains the page path and title, with More, Search and New controls on the right.</li></ol>
+<ol><li><b>The sidebar</b> contains Home, Pinned, My documents and Settings. Press <code>⌘ ⌥ B</code> to hide or show it.</li><li><b>The document</b> is the white writing surface. Its header contains the page path and title, with More, Search and New controls on the right.</li></ol>
 <p>Documents with headings also have an <b>outline</b> near the top left of the page. Click a heading to jump to it; the current section is highlighted as you scroll.</p>
 <h1>Your first five minutes</h1>
 <p>Work through this list. Click a checkbox to mark an item complete, or place the cursor on it and press <code>⌘ Enter</code>.</p>
@@ -40,7 +40,7 @@
 <tr><td><p><code>⌘ K</code></p></td><td><p>Add or edit a link</p></td></tr>
 <tr><td><p><code>Tab</code> / <code>⇧ Tab</code></p></td><td><p>Indent / Outdent</p></td></tr>
 <tr><td><p><code>⌘ Z</code> / <code>⌘ ⇧ Z</code></p></td><td><p>Undo / Redo</p></td></tr>
-<tr><td><p><code>⌘ ]</code> / <code>⌘ /</code></p></td><td><p>Toggle the sidebar / View shortcuts</p></td></tr>
+<tr><td><p><code>⌘ ⌥ B</code> / <code>⌘ /</code></p></td><td><p>Toggle the sidebar / View shortcuts</p></td></tr>
 </tbody></table>
 <h1>Your notes belong to you</h1>
 <p>Your documents are stored in <code>~/Documents/Quiet.md</code>. Each document is an XML file in <code>docs</code>; images and attachments are stored in <code>assets</code>. Back up the whole folder with Time Machine or copy it to another Mac.</p>

@@ -83,6 +83,7 @@ pub fn set_menus(cx: &mut App) {
             },
             disabled: false,
         },
+        crate::nav_history::menu(),
         Menu {
             name: tr("窗口", "Window").into(),
             items: vec![
@@ -111,7 +112,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-o", OpenFolder, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
-        KeyBinding::new("cmd-]", ToggleSidebar, None),
+        KeyBinding::new("cmd-alt-b", ToggleSidebar, None),
         KeyBinding::new("cmd-\\", ToggleSidebar, None),
         KeyBinding::new("cmd-j", FocusSearch, None),
         KeyBinding::new("cmd-f", FindInDoc, None),
@@ -148,6 +149,7 @@ pub fn bind_keys(cx: &mut App) {
     });
     cx.on_action(|_: &Quit, cx| cx.defer(quit));
     crate::modes::bind_keys(cx);
+    crate::nav_history::bind_keys(cx);
 }
 
 /// 退出: the open document is saved first; when that fails its dialog asks
@@ -304,6 +306,8 @@ pub struct Workspace {
     pub row_menu: Option<RowMenu>,
     pub rename: Option<Rename>,
     pub(crate) file_history: crate::file_history::FileHistory,
+    /// 前往 › 后退 / 前进.
+    pub(crate) nav: crate::nav_history::NavHistory,
     /// Last-frame bounds of each row's "…" button, to hang its menu from.
     pub more_bounds: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
     /// Header "…" menu and its open submenu.
@@ -578,6 +582,7 @@ impl Workspace {
             row_menu: None,
             rename: None,
             file_history: Default::default(),
+            nav: Default::default(),
             more_bounds: Default::default(),
             doc_menu: false,
             doc_sub: None,
@@ -809,6 +814,7 @@ impl Workspace {
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
         crate::quick_note::used(id, cx);
+        self.nav.visit(id);
         self.reveal_in_tree(id);
         self.sync_sub_pages(cx);
         self.status = SaveStatus::Idle;
@@ -1659,7 +1665,7 @@ impl Workspace {
                         .rounded(px(8.))
                         .cursor_pointer()
                         .hover(|s| s.bg(Theme::fill_hover_strong()))
-                        .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                        .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ⌥ + B")))
                         .child(icon("panel-left-open", 17., Theme::icon()))
                         .on_click(cx.listener(|w, _, _, cx| {
                             w.sidebar_open = true;
@@ -1897,6 +1903,8 @@ impl Render for Workspace {
             .on_action(cx.listener(|w, _: &OpenAbout, _, cx| w.open_settings(crate::settings::Page::About, cx)))
             .on_action(cx.listener(|w, _: &CheckForUpdates, _, cx| { w.open_settings(crate::settings::Page::About, cx); crate::update::check(true, cx); }))
             .on_action(cx.listener(|w, _: &GoHome, _, cx| w.show_view(View::Home, cx)))
+            .on_action(cx.listener(|w, _: &crate::nav_history::GoBack, window, cx| w.go(crate::nav_history::Dir::Back, window, cx)))
+            .on_action(cx.listener(|w, _: &crate::nav_history::GoForward, window, cx| w.go(crate::nav_history::Dir::Forward, window, cx)))
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
             .on_action(cx.listener(|w, _: &ImportDoc, window, cx| w.open_import(window, cx)))
             .on_action(cx.listener(|w, _: &OpenFile, window, cx| w.open_file_dialog(window, cx)))
