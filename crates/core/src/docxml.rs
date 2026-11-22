@@ -1324,6 +1324,17 @@ mod tests {
         assert_eq!(serialize(&doc), x);
     }
 
+    /// A link to a heading of the same page is a plain `<a>` with a fragment.
+    #[test]
+    fn heading_links_round_trip() {
+        let x = "<title>T</title>\n<h2>第 3 节</h2>\n<p>见<a href=\"#第-3-节\">第 3 节</a></p>\n";
+        let doc = parse(x).unwrap();
+        let link = doc.blocks[1].text.spans().find_map(|(_, m)| m.link.clone());
+        assert_eq!(link.as_deref(), Some("#第-3-节"));
+        assert_eq!(crate::markdown::find_heading(&doc, "#第-3-节"), Some(doc.blocks[0].id));
+        assert_eq!(serialize(&doc), x);
+    }
+
     #[test]
     fn reminders_round_trip() {
         let doc = parse("<title>T</title><p>交付 <time expire-time=\"1761200000000\" notify-time=\"1761199700000\" should-notify=\"false\">x</time> 前</p>").unwrap();

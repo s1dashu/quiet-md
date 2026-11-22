@@ -780,11 +780,12 @@ impl Onboarding {
 /// wrong, for a toast in the main window.
 fn import_all(root: &Path, dirs: &[(PathBuf, Option<String>)]) -> Option<String> {
     let mut store = match crate::store::Store::open_root(root) { Ok(s) => s, Err(e) => return Some(e.to_string()) };
-    let (mut failed, batch) = (0, store.begin_batch().is_ok());
+    let (mut failed, mut cloud, batch) = (0, 0, store.begin_batch().is_ok());
     for (dir, name) in dirs {
         match crate::transfer::scan_folder(dir, 0) {
             Some(t) if t.files > crate::transfer::IMPORT_FOLDER_LIMIT => failed += t.files,
             Some(mut t) => {
+                cloud += t.cloud;
                 if let Some(n) = name { t.name = n.clone(); }
                 crate::transfer::import_tree(&mut store, &t, None, &mut failed);
             }
@@ -794,7 +795,7 @@ fn import_all(root: &Path, dirs: &[(PathBuf, Option<String>)]) -> Option<String>
     let saved = if batch { store.end_batch() } else { Ok(()) };
     match saved {
         Err(e) => Some(crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string()))),
-        Ok(()) => (failed > 0).then(|| crate::localized_count!(failed, "有 {failed} 个文件未能导入", "{failed} file could not be imported", "{failed} files could not be imported")),
+        Ok(()) => crate::transfer::import_problems(failed, cloud),
     }
 }
 

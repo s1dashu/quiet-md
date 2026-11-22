@@ -154,6 +154,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("在这台电脑上找到 {} 处笔记", "Bu bilgisayarda bulunan notlar ({})"),
     ("导入未能完成：{}", "İçe aktarma tamamlanamadı: {}"),
     ("有 {failed} 个文件未能导入", "{failed} dosya içe aktarılamadı"),
+    ("{cloud} 项只在 iCloud 中、没有下载到这台 Mac，已跳过；在访达中下载后可再导入", "Yalnızca iCloud'da bulunan {cloud} öge atlandı; bunları Finder'da indirip yeniden içe aktarın"),
     ("全局快捷键请使用字母、数字或空格", "Genel kısayol için bir harf, rakam veya Boşluk kullanın"),
     ("无法注册这个组合键，可能已被系统或其他应用占用", "Bu kısayol macOS veya başka bir uygulama tarafından kullanılıyor"),
     ("当前系统暂不支持全局快捷键", "Genel kısayollar bu sistemde henüz desteklenmiyor"),
@@ -1079,4 +1080,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Kısmi Çince"),
     ("下载后可预览", "İndirdikten sonra önizleme"),
     ("其他语言和符号（{}）", "Diğer yazılar ve simgeler ({})"),
+    ("本文标题", "Bu belgedeki başlıklar"),
+    ("找不到这个标题", "Başlık bulunamadı"),
+    ("区分大小写", "Büyük/küçük harf duyarlı"),
+    ("全词匹配", "Tam sözcük"),
+    ("只搜标题", "Yalnızca başlıklar"),
 ];

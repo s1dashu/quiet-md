@@ -318,6 +318,44 @@ pub fn percent_decode(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// A heading's link anchor, GitHub's way: lower case, letters, digits, `-`
+/// and `_` kept (any script), spaces made `-`, everything else dropped.
+pub fn heading_slug(text: &str) -> String {
+    text.trim().chars().filter_map(|c| match c {
+        ' ' => Some('-'),
+        c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+        _ => None,
+    }).flat_map(char::to_lowercase).collect()
+}
+
+/// Every heading of `doc` in order with its text and anchor; a repeated
+/// anchor gets `-1`, `-2` … the way GitHub numbers them.
+pub fn heading_anchors(doc: &Document) -> Vec<(BlockId, String, String)> {
+    let mut out: Vec<(BlockId, String, String)> = vec![];
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    doc.for_each_block(|b| {
+        if !matches!(b.kind, BlockKind::Heading { .. }) { return; }
+        let text: String = b.text.text.chars().filter(|c| *c != '\u{FFFC}').collect::<String>().trim().to_string();
+        let base = heading_slug(&text);
+        let n = seen.entry(base.clone()).or_insert(0);
+        let slug = if *n == 0 { base.clone() } else { format!("{base}-{n}") };
+        *n += 1;
+        out.push((b.id, text, slug));
+    });
+    out
+}
+
+/// The heading `#anchor` (percent-encoded or not, `#` or not) points at: its
+/// slug, else its text as typed, letter case aside.
+pub fn find_heading(doc: &Document, anchor: &str) -> Option<BlockId> {
+    let key = percent_decode(anchor.trim_start_matches('#')).trim().to_lowercase();
+    if key.is_empty() { return None; }
+    let all = heading_anchors(doc);
+    all.iter().find(|h| h.2 == key)
+        .or_else(|| all.iter().find(|h| { let t = h.1.to_lowercase(); t == key || t.replace(' ', "-") == key }))
+        .map(|h| h.0)
+}
+
 /// Relative and `file://` image sources made absolute against `base`.
 pub fn resolve_images(blocks: &mut [Block], base: &Path) {
     for b in blocks.iter_mut() {
@@ -1178,6 +1216,31 @@ mod tests {
         let xml = crate::docxml::serialize(&parse_file("[[Page#H|alias]]\n", "x", None));
         let back = crate::docxml::parse(&xml).unwrap();
         assert_eq!(to_markdown(&back), "# x\n\n[[Page#H|alias]]\n");
+    }
+
+    /// Headings get GitHub's anchors (repeats numbered); `[x](#anchor)` finds
+    /// them by anchor or by the text as typed, and round-trips through Markdown.
+    #[test]
+    fn heading_anchors_and_links() {
+        assert_eq!(heading_slug("Hello, World!"), "hello-world");
+        assert_eq!(heading_slug(" 第 3 节：安装 "), "第-3-节安装");
+        assert_eq!(heading_slug("a_b-C"), "a_b-c");
+        let src = "# 概述\n\n## Getting Started\n\n## 概述\n\n见[安装](#getting-started)和[第二个](#%E6%A6%82%E8%BF%B0-1)\n";
+        let doc = parse_file(src, "t", None);
+        let anchors: Vec<String> = heading_anchors(&doc).into_iter().map(|h| h.2).collect();
+        assert_eq!(anchors, ["概述", "getting-started", "概述-1"]);
+        let ids: Vec<BlockId> = heading_anchors(&doc).into_iter().map(|h| h.0).collect();
+        assert_eq!(find_heading(&doc, "#getting-started"), Some(ids[1]));
+        assert_eq!(find_heading(&doc, "#Getting Started"), Some(ids[1]));
+        assert_eq!(find_heading(&doc, "#%E6%A6%82%E8%BF%B0-1"), Some(ids[2]));
+        assert_eq!(find_heading(&doc, "概述"), Some(ids[0]));
+        assert_eq!(find_heading(&doc, "#nope"), None);
+        assert_eq!(find_heading(&doc, "#"), None);
+        let link = doc.blocks.iter().flat_map(|b| b.text.spans()).find_map(|(_, m)| m.link.clone());
+        assert_eq!(link.as_deref(), Some("#getting-started"));
+        let out = write_file(&doc, "", None);
+        assert!(out.contains("[安装](#getting-started)") && out.contains("[第二个](#%E6%A6%82%E8%BF%B0-1)"), "{out}");
+        assert_eq!(write_file(&parse_file(&out, "t", None), "", None), out);
     }
 
     #[test]

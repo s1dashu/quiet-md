@@ -8,7 +8,7 @@ use crate::settings::display_title;
 use crate::store::Entry;
 use crate::theme::{self, Theme};
 use crate::trash::scrim;
-use crate::ui::{ROW_RADIUS, format_visit, icon, ui_runs, ui_text};
+use crate::ui::{ROW_RADIUS, TipExt, TipSide, format_visit, icon, ui_runs, ui_text};
 use gpui::{prelude::FluentBuilder, *};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -45,39 +45,87 @@ fn find_folded(hay: &str, lower: &str, needle_lower: &str) -> Option<Range<usize
     }
 }
 
+/// The 搜索 toggles at the right of the input row.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct SearchOptions {
+    /// 区分大小写: the query is matched as typed, not lowercased.
+    pub case: bool,
+    /// 全词匹配: a match may not run on into the letters or digits around it.
+    pub word: bool,
+    /// 只搜标题: bodies are not searched.
+    pub title_only: bool,
+}
+
+/// A letter, digit or `_` that 全词匹配 won't cut through. CJK ideographs,
+/// kana and Hangul are written without spaces, so each stands alone.
+fn wordy(c: char) -> bool {
+    (c.is_alphanumeric() || c == '_') && !matches!(c as u32, 0x3040..=0x30ff | 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xac00..=0xd7a3 | 0xf900..=0xfaff | 0x20000..=0x2fa1f)
+}
+
+/// `m` (a match of `q`) is a whole word of `hay`: a word character at
+/// either end of `q` doesn't continue into one outside.
+fn whole(hay: &str, m: &Range<usize>, q: &str) -> bool {
+    let joins = |inner: Option<char>, outer: Option<char>| inner.is_some_and(wordy) && outer.is_some_and(wordy);
+    !joins(q.chars().next(), hay[..m.start].chars().next_back()) && !joins(q.chars().next_back(), hay[m.end..].chars().next())
+}
+
+/// The first match of `q` in `hay` at or after `from`, under `o`, in `hay`'s
+/// byte offsets. `lower` is `hay.to_lowercase()` (unused with `o.case`); `q`
+/// is lowercase unless `o.case`.
+fn find_opt(hay: &str, lower: &str, q: &str, o: SearchOptions, mut from: usize) -> Option<Range<usize>> {
+    if q.is_empty() {
+        return None;
+    }
+    loop {
+        let r = if o.case {
+            hay[from..].find(q).map(|i| i..i + q.len())
+        } else if lower.len() == hay.len() && lower.is_char_boundary(from) {
+            find_folded(&hay[from..], &lower[from..], q)
+        } else {
+            find_ci(&hay[from..], q)
+        }?;
+        let m = from + r.start..from + r.end;
+        if !o.word || whole(hay, &m, q) {
+            return Some(m);
+        }
+        from = m.start + hay[m.start..].chars().next().map_or(1, char::len_utf8);
+    }
+}
+
 /// Every match of `q` in `hay`.
-fn find_all(hay: &str, q: &str) -> Vec<Range<usize>> {
+fn find_all(hay: &str, q: &str, o: SearchOptions) -> Vec<Range<usize>> {
+    let lower = if o.case { String::new() } else { hay.to_lowercase() };
     let mut out = vec![];
     let mut at = 0;
-    while let Some(m) = find_ci(&hay[at..], q) {
-        out.push(at + m.start..at + m.end);
-        at += m.end;
+    while let Some(m) = find_opt(hay, &lower, q, o, at) {
+        at = m.end;
+        out.push(m);
     }
     out
 }
 
 /// Body text from the block holding the first match, with about 16
 /// characters of context before it and the following blocks after it.
-pub(crate) fn snippet(body: &str, q: &str) -> Option<(String, Vec<Range<usize>>)> {
-    if q.is_empty() {
+pub(crate) fn snippet(body: &str, q: &str, o: SearchOptions) -> Option<(String, Vec<Range<usize>>)> {
+    if q.is_empty() || o.title_only {
         return None;
     }
-    snippet_folded(body, &body.to_lowercase(), q)
+    snippet_folded(body, &if o.case { String::new() } else { body.to_lowercase() }, q, o)
 }
 
 /// [`snippet`] with `body.to_lowercase()` already at hand.
-fn snippet_folded(body: &str, lower: &str, q: &str) -> Option<(String, Vec<Range<usize>>)> {
-    let text = snippet_text(body, lower, q)?;
-    let hits = find_all(&text, q);
+fn snippet_folded(body: &str, lower: &str, q: &str, o: SearchOptions) -> Option<(String, Vec<Range<usize>>)> {
+    let text = snippet_text(body, lower, q, o)?;
+    let hits = find_all(&text, q, o);
     Some((text, hits))
 }
 
-/// [`snippet_folded`]'s text without the hits.
-fn snippet_text(body: &str, lower: &str, q: &str) -> Option<String> {
-    if q.is_empty() {
+/// [`snippet_folded`]'s text without the hits; none under 只搜标题.
+fn snippet_text(body: &str, lower: &str, q: &str, o: SearchOptions) -> Option<String> {
+    if q.is_empty() || o.title_only {
         return None;
     }
-    let m = find_folded(body, lower, q)?;
+    let m = find_opt(body, lower, q, o, 0)?;
     let line_start = body[..m.start].rfind('\n').map(|i| i + 1).unwrap_or(0);
     let before: Vec<(usize, char)> = body[line_start..m.start].char_indices().collect();
     let cut = if before.len() > 16 { line_start + before[before.len() - 16].0 } else { line_start };
@@ -180,6 +228,8 @@ pub(crate) struct SearchCache {
     /// Bumped whenever `docs` changes; older hits are stale.
     generation: u64,
     hits: Option<Hits>,
+    /// The toggles in effect.
+    pub(crate) options: SearchOptions,
     /// Advances of printable ASCII in the summary font (界面字体), for [`min_width`].
     ascii: Option<(&'static str, [f32; 128])>,
 }
@@ -187,6 +237,7 @@ pub(crate) struct SearchCache {
 struct Hits {
     generation: u64,
     q: String,
+    options: SearchOptions,
     /// Indices into the entries: title hits, then body hits, each in list order.
     rows: Vec<usize>,
     /// Each row's height in the 界面字体 it was measured in on first render.
@@ -211,22 +262,26 @@ impl SearchCache {
         self.generation += 1;
     }
 
-    /// The hits for `q` (lowercase, not empty) among `entries`.
+    /// The hits for `q` (not empty; lowercase unless 区分大小写) among `entries`.
     fn rows(&mut self, entries: &[Entry], q: &str) -> &mut Hits {
         self.sync(entries);
-        if !matches!(&self.hits, Some(h) if h.generation == self.generation && h.q == q) {
+        let o = self.options;
+        if !matches!(&self.hits, Some(h) if h.generation == self.generation && h.q == q && h.options == o) {
+            // No toggle on: a plain `contains` on the lowercased text.
+            let plain = o == SearchOptions::default();
+            let hit = |text: &str, lower: &str| if plain { lower.contains(q) } else { find_opt(text, lower, q, o, 0).is_some() };
             let (mut rows, mut body) = (vec![], vec![]);
             for (i, d) in self.docs.iter().enumerate() {
                 // A folder with a 正文 is found as that document (#357), not twice.
                 if entries[i].note.is_some() { continue; }
-                if d.title_l().contains(q) {
+                if hit(&d.title, d.title_l()) {
                     rows.push(i)
-                } else if d.body_l().contains(q) {
+                } else if !o.title_only && hit(&d.body, d.body_l()) {
                     body.push(i)
                 }
             }
             rows.extend(body);
-            self.hits = Some(Hits { generation: self.generation, q: q.into(), rows, heights: None });
+            self.hits = Some(Hits { generation: self.generation, q: q.into(), options: o, rows, heights: None });
         }
         self.hits.as_mut().unwrap()
     }
@@ -305,6 +360,28 @@ fn input_button(id: &'static str, glyph: &'static str, size: f32, color: Hsla) -
         .child(icon(glyph, size, color))
 }
 
+/// A text-glyph toggle of the input row, as 文档内查找's `.*`: 22 square,
+/// accent-filled while on.
+fn option_toggle(id: &'static str, glyph: &'static str, underline: bool, on: bool, tip: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(22.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(ROW_RADIUS))
+        .cursor_pointer()
+        .text_size(px(13.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(if on { Theme::primary() } else { Theme::text_caption() })
+        .when(on, |d| d.bg(crate::feishu_theme::Theme::fill_active()))
+        .when(!on, |d| d.hover(|s| s.bg(Theme::fill_hover_strong())))
+        .when(underline, |d| d.underline())
+        .child(glyph)
+        .tip_label(tip.into(), TipSide::Below)
+}
+
 /// One `·`-separated part of a row's extra line.
 fn extra_segment(glyph: Option<&'static str>, text: String) -> Div {
     div()
@@ -342,9 +419,9 @@ pub(crate) fn extra_line(e: &Entry) -> Div {
 }
 
 /// A result's title (13pt semibold, hits in the link colour), summary and extra line.
-pub(crate) fn result_info(e: &Entry, q: &str, summary: Option<(String, Vec<Range<usize>>)>, width: f32, window: &Window) -> Div {
+pub(crate) fn result_info(e: &Entry, q: &str, o: SearchOptions, summary: Option<(String, Vec<Range<usize>>)>, width: f32, window: &Window) -> Div {
     let title = display_title(&e.title);
-    let title_hit = find_ci(&title, q);
+    let title_hit = find_opt(&title, &if o.case { String::new() } else { title.to_lowercase() }, q, o, 0);
     div()
         .flex_1()
         .min_w_0()
@@ -419,14 +496,32 @@ impl Workspace {
             None => n - 1,
         };
         self.search_sel = Some(next);
-        let title = usize::from(self.query(cx).is_empty());
+        let title = usize::from(self.search_query(cx).is_empty());
         self.search_scroll.scroll_to_item(next + title);
         cx.notify();
     }
 
     /// Title hits first, then body hits; with no query, 最近浏览.
     pub fn search_results(&self, cx: &App) -> Vec<&Entry> {
-        self.search_rows(&self.query(cx)).into_iter().map(|i| &self.entries[i]).collect()
+        self.search_rows(&self.search_query(cx)).into_iter().map(|i| &self.entries[i]).collect()
+    }
+
+    /// The query: trimmed, and lowercased unless 区分大小写.
+    fn search_query(&self, cx: &App) -> String {
+        if self.search_cache.borrow().options.case { self.search.read(cx).text.trim().to_string() } else { self.query(cx) }
+    }
+
+    fn search_options(&self) -> SearchOptions {
+        self.search_cache.borrow().options
+    }
+
+    /// Flip one toggle; the list starts over at its first hit.
+    fn toggle_search_option(&mut self, flip: fn(&mut SearchOptions), window: &mut Window, cx: &mut Context<Self>) {
+        flip(&mut self.search_cache.borrow_mut().options);
+        self.search_sel = self.default_search_sel(cx);
+        self.search_scroll.set_offset(point(px(0.), px(0.)));
+        window.focus(&self.search.focus_handle(cx), cx);
+        cx.notify();
     }
 
     /// [`Self::search_results`] as indices into `entries`.
@@ -448,20 +543,21 @@ impl Workspace {
         if let Some((font, h)) = &cache.rows(&self.entries, q).heights && *font == theme::ui_family() {
             return h.clone();
         }
-        let SearchCache { docs, hits, ascii, .. } = cache;
+        let SearchCache { docs, hits, ascii, options, .. } = cache;
+        let o = *options;
         let hits = hits.as_mut().unwrap();
         let style = summary_style(window);
         let mut heights = Vec::with_capacity(hits.rows.len());
         for &i in &hits.rows {
             let d = &docs[i];
-            heights.push(match snippet_text(&d.body, d.body_l(), q) {
+            heights.push(match snippet_text(&d.body, d.body_l(), q, o) {
                 None => ROW_H,
                 // Clearly wider than a line: two lines, cut by `summary_text` if longer.
                 Some(text) if min_width(ascii, &text, &style, window) > INFO_W + 12. => ROW_H + 40.,
                 // Else shaped as `summary_text` and the row will.
                 Some(text) if summary_lines(&text, &style, &[], INFO_W, window) > 2 => ROW_H + 40.,
                 Some(text) => {
-                    let hits = find_all(&text, q);
+                    let hits = find_all(&text, q, o);
                     ROW_H + 20. * summary_lines(&text, &style, &hits, INFO_W, window) as f32
                 }
             });
@@ -473,9 +569,10 @@ impl Workspace {
     /// Result `ix`, the entry at `i`.
     fn search_row(&self, i: usize, ix: usize, q: &str, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let e = &self.entries[i];
+        let o = self.search_options();
         let summary = match self.search_cache.borrow().docs.get(i) {
-            Some(d) if d.holds(e) => snippet_folded(&d.body, d.body_l(), q),
-            _ => snippet(&e.body, q),
+            Some(d) if d.holds(e) && !o.title_only => snippet_folded(&d.body, d.body_l(), q, o),
+            _ => snippet(&e.body, q, o),
         };
         // Result indices match keyboard selection.
         let row = ix;
@@ -499,14 +596,15 @@ impl Workspace {
             }))
             .on_click(cx.listener(move |w, _, window, cx| w.pick_search(row, window, cx)))
             .child(entry_icon(e))
-            .child(result_info(e, q, summary, INFO_W, window))
+            .child(result_info(e, q, o, summary, INFO_W, window))
     }
 
     pub(crate) fn render_search(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.search_open {
             return None;
         }
-        let q = self.query(cx);
+        let q = self.search_query(cx);
+        let o = self.search_options();
         let has_text = !self.search.read(cx).text.is_empty();
         let results = self.search_rows(&q);
         let vh = f32::from(window.viewport_size().height);
@@ -541,7 +639,14 @@ impl Workspace {
                     },
                 )))
             })
-            ;
+            // Aa / ab / T: 区分大小写, 全词匹配, 只搜标题 — styled as 文档内查找's `.*`.
+            .child(div().flex_none().ml(px(8.)).flex().items_center().gap(px(2.))
+                .child(option_toggle("search-case", "Aa", false, o.case, crate::settings::tr("区分大小写", "Match case"))
+                    .on_click(cx.listener(|w, _, window, cx| w.toggle_search_option(|o| o.case = !o.case, window, cx))))
+                .child(option_toggle("search-word", "ab", true, o.word, crate::settings::tr("全词匹配", "Match whole word"))
+                    .on_click(cx.listener(|w, _, window, cx| w.toggle_search_option(|o| o.word = !o.word, window, cx))))
+                .child(option_toggle("search-title", "T", false, o.title_only, crate::settings::tr("只搜标题", "Titles only"))
+                    .on_click(cx.listener(|w, _, window, cx| w.toggle_search_option(|o| o.title_only = !o.title_only, window, cx)))));
 
         let mut list = div()
             .id("search-results")
@@ -667,7 +772,7 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{SearchCache, snippet};
+    use super::{SearchCache, SearchOptions, find_all, snippet};
     use crate::store::Entry;
 
     fn entry(id: &str, title: &str, body: &str) -> Entry {
@@ -734,13 +839,60 @@ mod tests {
 
     #[test]
     fn snippet_context() {
-        let (s, r) = snippet("first line\nsome long prefix text before the Needle here\nnext", "needle").unwrap();
+        let d = SearchOptions::default();
+        let (s, r) = snippet("first line\nsome long prefix text before the Needle here\nnext", "needle", d).unwrap();
         assert_eq!(&s[r[0].clone()], "Needle");
         assert!(s.starts_with('…'));
         assert!(s.ends_with("\u{a0}\u{a0}\u{a0}next"));
-        let (s, r) = snippet("中文内容测试内容", "内容").unwrap();
+        let (s, r) = snippet("中文内容测试内容", "内容", d).unwrap();
         assert_eq!(r.len(), 2);
         assert_eq!(&s[r[1].clone()], "内容");
-        assert!(snippet("abc", "x").is_none());
+        assert!(snippet("abc", "x", d).is_none());
+    }
+
+    const CASE: SearchOptions = SearchOptions { case: true, word: false, title_only: false };
+    const WORD: SearchOptions = SearchOptions { case: false, word: true, title_only: false };
+    const TITLE: SearchOptions = SearchOptions { case: false, word: false, title_only: true };
+
+    #[test]
+    fn match_case_and_whole_word() {
+        let all = |hay: &str, q: &str, o| find_all(hay, q, o).into_iter().map(|r| hay[r].to_string()).collect::<Vec<_>>();
+        assert_eq!(all("Apple apple APPLE", "apple", SearchOptions::default()), ["Apple", "apple", "APPLE"]);
+        assert_eq!(all("Apple apple APPLE", "Apple", CASE), ["Apple"]);
+        // Whole words: not inside pineapple / apples / apple_pie; punctuation and CJK end a word.
+        assert_eq!(all("pineapple apples apple_pie (apple) 吃apple了 Apple.", "apple", WORD), ["apple", "apple", "Apple"]);
+        let both = SearchOptions { case: true, word: true, title_only: false };
+        assert_eq!(all("Apple apple Apples", "Apple", both), ["Apple"]);
+        // A query ending in punctuation only needs the word side bounded.
+        assert_eq!(all("a.b a.bc xa.b", "a.b", WORD), ["a.b"]);
+        // CJK has no word breaks: a CJK query still matches inside CJK text.
+        assert_eq!(all("中文内容测试内容", "内容", WORD), ["内容", "内容"]);
+        // Folding that changes the byte length (İ) keeps offsets on `hay`.
+        assert_eq!(all("İstanbul istanbul", "istanbul", WORD).len(), 1);
+    }
+
+    #[test]
+    fn options_filter_and_rank_hits() {
+        let entries = vec![
+            entry("a", "Rust notes", "trust the borrow checker"),
+            entry("b", "Plans", "learn rust this year"),
+            entry("c", "rusty tools", "RUST"),
+            entry("d", "Other", "Rust"),
+        ];
+        let mut cache = SearchCache::default();
+        assert_eq!(cache.rows(&entries, "rust").rows, [0, 2, 1, 3]);
+        cache.options = WORD;
+        assert_eq!(cache.rows(&entries, "rust").rows, [0, 1, 2, 3]);
+        cache.options = CASE;
+        assert_eq!(cache.rows(&entries, "Rust").rows, [0, 3]);
+        assert_eq!(cache.rows(&entries, "rust").rows, [2, 0, 1]);
+        cache.options = TITLE;
+        assert_eq!(cache.rows(&entries, "rust").rows, [0, 2]);
+        assert!(snippet("learn rust", "rust", TITLE).is_none());
+        cache.options = SearchOptions { case: true, word: true, title_only: true };
+        assert_eq!(cache.rows(&entries, "Rust").rows, [0]);
+        // Switching back gives the plain hits again, not a stale cache.
+        cache.options = SearchOptions::default();
+        assert_eq!(cache.rows(&entries, "rust").rows, [0, 2, 1, 3]);
     }
 }
