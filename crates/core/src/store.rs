@@ -1661,19 +1661,7 @@ impl Store {
             }
             new_rel.insert(id.clone(), to.clone());
         }
-        // Documents whose links may change: the moved ones (links out of
-        // them are relative to where they are) and those mentioning one.
-        let affected: HashSet<&str> = new_rel.keys().map(String::as_str).collect();
-        let mut docs = vec![];
-        for (k, m) in &self.index {
-            if m.folder.is_some() || m.local() || m.named_by_file() { continue; }
-            let mentions = self.parsed.get(k).is_none_or(|p| p.2.links.iter().any(|l| affected.contains(l.target.as_str())));
-            if !affected.contains(k.as_str()) && !mentions { continue; }
-            let Ok(text) = crate::vfs::read_to_string(self.path(k)) else { continue };
-            if !text.contains("type=\"doc\"") { continue; }
-            let Ok(doc) = self.parse_doc(k, &text) else { continue };
-            docs.push((k.clone(), text, doc));
-        }
+        let docs = self.linking(&new_rel.keys().map(String::as_str).collect());
         let mut done: Vec<(PathBuf, PathBuf)> = vec![];
         for (id, to) in moves {
             let from = self.abs(&self.index[id].rel);
@@ -1697,6 +1685,29 @@ impl Store {
         self.foreign = std::mem::take(&mut self.foreign).into_iter()
             .map(|(k, a)| (dirs.iter().find_map(|(p, to)| k.strip_prefix(p.as_str()).map(|rest| format!("{to}/{rest}"))).unwrap_or(k), a)).collect();
         derive_tree(&mut self.index);
+        self.relink(docs);
+        self.save_index()
+    }
+
+    /// Documents whose links may change when `affected` move: the moved ones
+    /// (links out of them are relative to where they are) and those
+    /// mentioning one, read while the paths are still the old ones.
+    fn linking(&self, affected: &HashSet<&str>) -> Vec<(String, String, Document)> {
+        let mut docs = vec![];
+        for (k, m) in &self.index {
+            if m.folder.is_some() || m.local() || m.named_by_file() { continue; }
+            let mentions = self.parsed.get(k).is_none_or(|p| p.2.links.iter().any(|l| affected.contains(l.target.as_str())));
+            if !affected.contains(k.as_str()) && !mentions { continue; }
+            let Ok(text) = crate::vfs::read_to_string(self.path(k)) else { continue };
+            if !text.contains("type=\"doc\"") { continue; }
+            let Ok(doc) = self.parse_doc(k, &text) else { continue };
+            docs.push((k.clone(), text, doc));
+        }
+        docs
+    }
+
+    /// Write `linking`'s documents back with their links to the new paths.
+    fn relink(&mut self, docs: Vec<(String, String, Document)>) {
         for (k, text, doc) in docs {
             let out = self.serialize_doc(&k, &doc, None);
             if out == text { continue; }
@@ -1708,7 +1719,6 @@ impl Store {
                 Err(e) => self.warnings.push(format!("未能更新文档中的链接（{}）：{e}", self.index[&k].rel)),
             }
         }
-        self.save_index()
     }
 
     /// A title change renames the file (and keeps the links to it); outside
@@ -2584,7 +2594,18 @@ impl Store {
             return Ok(crate::table::file_doc(&self.markdown_title(id), &rel));
         }
         let text = self.version_text(id, name)?;
-        self.parse_doc(id, &text)
+        self.parse_version(id, name, &text)
+    }
+
+    /// A version as a document, in the format it was kept in: one from
+    /// before 转换为 Markdown is still DocxXML.
+    fn parse_version(&self, id: &str, name: &str, text: &str) -> Result<Document> {
+        let markdown = name.ends_with(".md");
+        if self.kind(id) != DocKind::Doc || markdown == self.is_markdown(id) { return self.parse_doc(id, text); }
+        if markdown { return Ok(crate::markdown::parse_file(text, &self.markdown_title(id), None)); }
+        let mut doc = docxml::parse(text)?;
+        if text.contains("href=") { self.links_to_ids(&self.doc_dir(id), &mut doc); }
+        Ok(doc)
     }
 
     /// A 数据表's file kept as a version: `force` is 保存当前版本 (no interval;
@@ -2641,7 +2662,7 @@ impl Store {
         let current = crate::vfs::read_to_string(self.path(id)).unwrap_or_default();
         let ext = if self.is_markdown(id) { "md" } else { "xml" };
         let _ = crate::versions::snapshot(&self.history_base(), id, ext, &current, crate::time::now_ms(), self.settings().history_limit(), true);
-        self.parse_doc(id, &text)
+        self.parse_version(id, name, &text)
     }
 
     /// 手动保存版本: bypass the interval, still capped by the retention limit.
@@ -2718,6 +2739,50 @@ impl Store {
         if was != title && !title.is_empty() { self.follow_title(id, title, true)?; meta = self.index[id].clone(); }
         self.record_file_change(id, before);
         Ok(meta)
+    }
+
+    /// 转换为 Markdown / 转换为 Quiet.md 文档: the document written in the
+    /// other format (as a Markdown file saves it, or as DocxXML) to a file of
+    /// the same name beside it, numbered when that name is taken. It keeps
+    /// its id, so its place, settings and history stay; its text before is
+    /// kept as a version, and the old file goes to the 回收站 as a page of its
+    /// own. A folder's own page (`Plan/Plan.xml`, which holds its child
+    /// pages) keeps its name or is not converted.
+    pub fn convert(&mut self, id: &str, markdown: bool) -> Result<()> {
+        let _lock = self.begin_write()?;
+        let m = self.index.get(id).cloned().ok_or_else(|| anyhow::anyhow!("文档不存在"))?;
+        anyhow::ensure!(!self.flat && m.folder.is_none() && m.kind.is_doc() && !m.local() && !m.rel.is_empty(), "这篇文档不能转换格式");
+        if m.markdown == markdown { return Ok(()); }
+        let text = self.read_doc_text(id)?;
+        let doc = self.parse_doc(id, &text)?;
+        let dir = parent_rel(&m.rel).to_string();
+        let stem = stem_of(base_name(&m.rel)).to_string();
+        let name = self.free_name(&dir, &stem, Some(DocKind::Doc.ext(markdown)), None);
+        anyhow::ensure!(base_name(&dir) != stem || stem_of(&name) == stem, "文件夹里已有同名文件：{stem}.{}", DocKind::Doc.ext(markdown));
+        // Mentions of it name its file: they follow it to the new one.
+        let mut docs = self.linking(&HashSet::from([id]));
+        docs.retain(|(k, ..)| k != id);
+        // The old file, under an id of its own, for the 回收站.
+        let old = uuid::Uuid::new_v4().to_string();
+        // Its 收藏 and 置顶 stay with the converted page, not with a copy restored later.
+        self.index.insert(old.clone(), Meta { pinned: false, starred: 0, ..m.clone() });
+        let e = self.index.get_mut(id).unwrap();
+        e.rel = join_rel(&dir, &name);
+        e.modified = now();
+        derive_tree(&mut self.index);
+        let body = self.serialize_doc(id, &doc, None);
+        if let Err(e) = self.write_file(&self.path(id), body.as_bytes()) {
+            self.index.remove(&old);
+            self.index.insert(id.to_string(), m);
+            return Err(e);
+        }
+        self.loaded.borrow_mut().remove(id);
+        self.relink(docs);
+        let limit = self.settings().history_limit();
+        if let Err(e) = crate::versions::snapshot(&self.history_base(), id, if m.markdown { "md" } else { "xml" }, &text, crate::time::now_ms(), limit, true) {
+            self.warnings.push(format!("保存版本历史失败：{e}"));
+        }
+        self.trash_one(&old, None)
     }
 
     /// Note that `id` was just opened (this computer only); on disk at the
@@ -3079,6 +3144,61 @@ mod tests {
         s.restore(&id).unwrap();
         assert!(file.fs_is_file());
         assert_eq!(s.load(&id).unwrap().title.text, "Renamed");
+    }
+
+    /// 转换为 Markdown and back: same id, folder, settings; the file before
+    /// in the 回收站 and in the history; a taken name numbered, except for a
+    /// folder's own page.
+    #[test]
+    fn convert_between_markdown_and_docxml() {
+        let lib = Lib::new("convert");
+        let mut s = lib.open();
+        let work = s.create_folder("工作", None).unwrap();
+        let mut d = doc("周报");
+        d.blocks = vec![crate::model::Block::text("正文 one")];
+        let id = s.create_from_in(&d, Some(&work)).unwrap();
+        s.set_starred(&id, true).unwrap();
+        let mention = s.create_from(&linking("乙", &[(&id, "周报")])).unwrap();
+        s.list();
+        s.convert(&id, true).unwrap();
+        assert!(lib.0.join("工作/周报.md").fs_is_file() && !lib.0.join("工作/周报.xml").fs_exists());
+        // Mentions of it follow it to the new file.
+        assert!(crate::vfs::read_to_string(s.abs("乙.xml")).unwrap().contains("href=\"工作/周报.md\""));
+        assert!(s.list().into_iter().find(|e| e.id == mention).unwrap().links.iter().any(|l| l.target == id));
+        assert_eq!(crate::vfs::read_to_string(lib.0.join("工作/周报.md")).unwrap(), "正文 one\n");
+        let e = s.list().into_iter().find(|e| e.id == id).unwrap();
+        assert!(e.meta.markdown && e.meta.starred > 0);
+        assert_eq!((e.title.as_str(), e.meta.parent.as_deref()), ("周报", Some(work.as_str())));
+        let trash = s.list_trash();
+        assert_eq!((trash.len(), trash[0].title.as_str()), (1, "周报"));
+        // The DocxXML version still opens as what it was.
+        let v = s.versions(&id);
+        assert!(v[0].name.ends_with(".xml"));
+        assert_eq!(s.version_document(&id, &v[0].name).unwrap().blocks[0].text.text, "正文 one");
+        // Back, beside a 周报.xml made meanwhile: numbered.
+        s.create_from_in(&doc("周报"), Some(&work)).unwrap();
+        s.convert(&id, false).unwrap();
+        assert!(lib.0.join("工作/周报 2.xml").fs_is_file() && !lib.0.join("工作/周报.md").fs_exists());
+        let back = s.load(&id).unwrap();
+        assert_eq!((back.title.text.as_str(), back.blocks[0].text.text.as_str()), ("周报", "正文 one"));
+        assert_eq!(s.list_trash().len(), 2);
+        // The old file comes back from the 回收站 as a page of its own (the
+        // .md one: both old files are titled 周报).
+        let md = s.list_trash().into_iter().find(|t| lib.0.join(format!(".quiet/trash/{}.md", t.id)).fs_is_file()).map(|t| t.id).unwrap();
+        s.restore(&md).unwrap();
+        assert!(lib.0.join("工作/周报.md").fs_is_file());
+        // A folder's own page keeps its name: 工作/工作.xml with 工作/工作.md there.
+        let own = s.create_from_in(&doc("工作"), Some(&work)).unwrap();
+        crate::vfs::write(lib.0.join("工作/工作.md"), "x\n").unwrap();
+        s.list();
+        assert!(s.convert(&own, true).is_err());
+        assert!(lib.0.join("工作/工作.xml").fs_is_file());
+        // With the name free it stays the folder's page, its child pages where they were.
+        crate::vfs::remove_file(lib.0.join("工作/工作.md")).unwrap();
+        s.list();
+        s.convert(&own, true).unwrap();
+        assert!(lib.0.join("工作/工作.md").fs_is_file() && lib.0.join("工作/周报 2.xml").fs_is_file());
+        assert_eq!(s.note_of(&work).as_deref(), Some(own.as_str()));
     }
 
     /// Into a folder outside a batch (a 本机文件 dragged onto a sidebar folder):

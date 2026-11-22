@@ -73,6 +73,11 @@ pub fn is_link_input(s: &str) -> bool {
     (!is_data(s) && EMAIL_FULL.is_match(s)) || INPUT_RE.is_match(s)
 }
 
+/// `#heading`: a link to a heading of this page.
+pub fn is_anchor_input(s: &str) -> bool {
+    s.len() > 1 && s.starts_with('#')
+}
+
 /// `gU`: the text contains something URL-like.
 pub fn contains_url(s: &str) -> bool {
     is_email(s) || CONTAINS_RE.is_match(s)
@@ -221,26 +226,62 @@ impl Editor {
     }
 
     pub(super) fn link_input_ok(&self, cx: &App) -> bool {
-        is_link_input(self.link_field.read(cx).text.trim())
+        let t = self.link_field.read(cx).text.trim().to_string();
+        is_link_input(&t) || is_anchor_input(&t)
+    }
+
+    /// The heading a `#…` link names: its id, text and anchor.
+    fn anchor_heading(&self, link: &str) -> Option<(BlockId, String, String)> {
+        let id = crate::markdown::find_heading(&self.core.doc, link)?;
+        crate::markdown::heading_anchors(&self.core.doc).into_iter().find(|h| h.0 == id)
+    }
+
+    /// Headings of this page matching the `#…` being typed (本文标题).
+    fn anchor_candidates(&self, cx: &App) -> Vec<(BlockId, u8, String, String)> {
+        let t = self.link_field.read(cx).text.trim().to_string();
+        let Some(q) = t.strip_prefix('#') else { return vec![] };
+        let q = q.to_lowercase();
+        let level = |id: BlockId| match self.core.block(id).map(|b| &b.kind) { Some(BlockKind::Heading { level, .. }) => *level, _ => 1 };
+        crate::markdown::heading_anchors(&self.core.doc).into_iter()
+            .filter(|(_, text, slug)| !text.is_empty() && (text.to_lowercase().contains(&q) || slug.contains(&q)))
+            .take(8).map(|(id, text, slug)| (id, level(id), text, slug)).collect()
+    }
+
+    fn pick_anchor(&mut self, text: &str, slug: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let only_link = matches!(self.menu, Some(Menu::Link { only_link: true, .. }));
+        if !only_link && self.link_text_field.read(cx).text.is_empty() {
+            self.link_text_field.update(cx, |f, cx| f.set_text(text, cx));
+        }
+        self.link_field.update(cx, |f, cx| f.set_text(&format!("#{slug}"), cx));
+        self.submit_link(window, cx);
     }
 
     pub(super) fn submit_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(Menu::Link { block, range, only_link }) = self.menu.clone() else { return };
         let link = self.link_field.read(cx).text.trim().to_string();
-        if !is_link_input(&link) {
+        let anchor = is_anchor_input(&link);
+        if !is_link_input(&link) && !anchor {
             return;
         }
+        // `#…`: a heading of this page, kept by its anchor — the first one
+        // offered when what was typed names none; with none offered it stays
+        // as typed.
+        let heading = if anchor { self.anchor_heading(&link).or_else(|| self.anchor_candidates(cx).into_iter().next().map(|(id, _, t, s)| (id, t, s))) } else { None };
         let (orig_text, orig_link) = self.link_ui.orig.clone();
         let mut text = if only_link { orig_text.clone() } else { self.link_text_field.read(cx).text.clone() };
         if text.is_empty() {
-            text = link.clone();
+            text = heading.as_ref().map_or_else(|| link.clone(), |h| h.1.clone());
         }
         self.close_link_panel(window, cx);
-        if text == orig_text && link == orig_link {
+        let url = match (&heading, anchor) {
+            (Some(h), _) => format!("#{}", h.2),
+            (None, true) => link.clone(),
+            _ => normalize(&link),
+        };
+        if text == orig_text && (link == orig_link || url == orig_link) {
             return;
         }
-        let url = normalize(&link);
-        if !contains_url(&url) {
+        if !anchor && !contains_url(&url) {
             return self.toast(crate::settings::text("请输入有效的链接。"), cx);
         }
         self.core.sel = Selection { anchor: Pos::new(block, range.start), head: Pos::new(block, range.end) };
@@ -298,6 +339,7 @@ impl Editor {
         };
         let label = |t: &'static str| div().h(px(30.)).mr(px(8.)).flex().items_center().text_size(px(13.)).child(t);
         let ok = self.link_input_ok(cx);
+        let candidates = self.anchor_candidates(cx);
         // The primary button: accent, white 13pt semibold, radius 9.
         let button = div()
             .id("link-ok")
@@ -329,15 +371,33 @@ impl Editor {
                 .child(div().flex().flex_col().gap(px(10.)).child(label(crate::settings::text("文本"))).child(label(crate::settings::text("链接"))))
                 .child(div().flex().flex_col().gap(px(10.)).child(input(&self.link_text_field)).child(input(&self.link_field)))
         };
+        // Typing `#` offers this page's headings (本文标题) under the fields.
+        let anchors = (!candidates.is_empty()).then(|| {
+            let rows = candidates.into_iter().enumerate().map(|(i, (_, level, text, slug))| {
+                let id = SharedString::from(format!("link-anchor-{i}"));
+                let glyph = if level <= 6 { format!("heading-{level}") } else { "heading".into() };
+                let label = text.clone();
+                menu_row(id.clone(), id.clone())
+                    .child(menu_glyph(&glyph, 16., id))
+                    .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::editor_ui::ui_text(label)))
+                    .on_click(cx.listener(move |e, _, window, cx| e.pick_anchor(&text, &slug, window, cx)))
+            });
+            div()
+                .w_full()
+                .pb(px(crate::editor_ui::MENU_PAD_Y))
+                .flex()
+                .flex_col()
+                .child(div().px(px(16.)).pb(px(4.)).text_size(px(12.)).text_color(Theme::text_caption()).child(crate::settings::tr("本文标题", "Headings in this document")))
+                .children(rows)
+        });
         let el = panel()
             .id("link-panel")
             .occlude()
-            .p(px(16.))
             .flex()
-            .items_end()
+            .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(rows)
-            .child(button);
+            .child(div().p(px(16.)).flex().items_end().child(rows).child(button))
+            .children(anchors);
         Some(at(self.rel(point(x, bottom)), Anchor::TopLeft, el))
     }
 
@@ -573,7 +633,13 @@ impl Editor {
         if let Some(url) = self.link_ui.click.take()
             && self.core.sel.is_collapsed()
         {
-            if url.starts_with("quiet-wiki:") || crate::paste::relative_link(&url) && !url.starts_with("www.") {
+            // `#heading`: a heading of this page, reached like the outline does.
+            if url.starts_with('#') {
+                match crate::markdown::find_heading(&self.core.doc, &url) {
+                    Some(id) => self.go_to_heading(id, cx),
+                    None => self.toast(crate::settings::tr("找不到这个标题", "Heading not found"), cx),
+                }
+            } else if url.starts_with("quiet-wiki:") || crate::paste::relative_link(&url) && !url.starts_with("www.") {
                 cx.emit(super::view::EditorEvent::OpenRelative(url));
             } else { open(cx, &normalize(&url)); }
         }

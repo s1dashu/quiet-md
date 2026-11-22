@@ -446,6 +446,13 @@ impl Workspace {
                 crate::settings::tr("移除", "Remove"),
                 false,
             ),
+            Confirm::Convert { markdown, losses, .. } => (
+                if *markdown { crate::settings::tr("转换为 Markdown？", "Convert to Markdown?") } else { crate::settings::tr("转换为 Quiet.md 文档？", "Convert to a Quiet.md document?") }.to_string(),
+                crate::localized_format!("转换后会丢失：{}。原文件会移到回收站，可以从那里恢复。", "Converting drops {}. The original file goes to the Trash, where you can restore it.",
+                    losses.iter().map(|l| crate::docmenu::loss_label(*l)).collect::<Vec<_>>().join(crate::settings::tr("、", ", "))),
+                crate::settings::tr("转换", "Convert"),
+                false,
+            ),
             Confirm::Import { what, target } => {
                 let place = self.drop_place(target);
                 let what_s = match what {
@@ -545,6 +552,7 @@ impl Workspace {
                             Confirm::Migrate(_) => w.migrate_library(window, cx),
                             Confirm::RemoveRoot(key, _) => w.remove_root(&key, window, cx),
                             Confirm::Import { what, target } => w.import_dropped(what, target, window, cx),
+                            Confirm::Convert { id, markdown, .. } => w.convert_doc(&id, markdown, window, cx),
                         }
                         cx.notify();
                     }))),

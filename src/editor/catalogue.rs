@@ -285,6 +285,12 @@ impl Editor {
         cx.notify();
     }
 
+    /// A `#heading` link: the outline's jump, with the caret at the heading.
+    pub(super) fn go_to_heading(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        self.jump_to_heading(id, cx);
+        self.core.sel = super::core::Selection::caret(super::core::Pos::new(id, 0));
+    }
+
     pub(super) fn render_catalogue(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let mode = self.layout.cat;
         if mode == CatMode::None {

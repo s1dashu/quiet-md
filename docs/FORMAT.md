@@ -26,6 +26,8 @@ Quiet.md/
     └── before-folders-4/   Pre-migration layout backup, removed after 30 days
 ```
 
+A document's right-click menu converts it between the two formats (`Store::convert`). The new file takes the old one's name, with a numbered suffix if that name is taken, and keeps the document's ID, so its place, settings and history stay with it. The old body is saved as a version and the old file goes to the trash as a separate page. A folder's own document (`Plan/Plan.xml`, see below) is converted only if it can keep its name, and its child pages stay as they are; each can be converted on its own. Before converting to Markdown, the app lists what the file can't keep (`markdown::losses`, checked against what the writer and reader actually do). Going the other way, it warns if the file has front matter.
+
 The scanner recursively finds `.md`, `.xml` and `.excalidraw` files, including files added in Finder. It skips names beginning with a dot, including `.quiet`, `.assets`, `.git` and `.obsidian`. Window dimensions belong to the device and live in local application data. Standalone whiteboards use official Excalidraw JSON and take their title from the filename. Older versions skip this extension. The write lock allows multiple app instances.
 
 ### Child pages: a folder's own document

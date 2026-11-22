@@ -107,6 +107,71 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 转换为 Markdown / 转换为 Quiet.md 文档 (#312): asks first, listing it,
+    /// when the other format cannot keep something.
+    pub fn ask_convert(&mut self, id: &str, markdown: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_doc_menu(cx);
+        self.row_menu = None;
+        if self.current.as_deref() == Some(id) {
+            let retry = id.to_string();
+            if !self.save_before(cx, move |w, window, cx| w.ask_convert(&retry, markdown, window, cx)) { return; }
+        }
+        if !self.document_peers(id, window, cx).is_empty() {
+            self.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::tr("请先关闭正在编辑这篇文档的其他窗口，再转换", "Close the other windows editing this document first, then convert it"), cx);
+            return;
+        }
+        let losses = if !markdown {
+            if self.store.front_matter_of(id).trim().is_empty() { vec![] } else { vec![crate::markdown::Loss::FrontMatter] }
+        } else {
+            match self.store.load(id) {
+                Ok(doc) => crate::markdown::losses(&doc),
+                Err(e) => return self.convert_failed(&e, cx),
+            }
+        };
+        if losses.is_empty() { return self.convert_doc(id, markdown, window, cx); }
+        self.confirm = Some(crate::app::Confirm::Convert { id: id.to_string(), markdown, losses });
+        cx.notify();
+    }
+
+    /// The conversion itself; the open document is reopened in its new format.
+    pub(crate) fn convert_doc(&mut self, id: &str, markdown: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
+        let open = self.current.as_deref() == Some(id);
+        if open {
+            let retry = id.to_string();
+            if !self.save_before(cx, move |w, window, cx| w.convert_doc(&retry, markdown, window, cx)) { return; }
+        }
+        if let Err(e) = self.store.convert(id, markdown) { return self.convert_failed(&e, cx); }
+        if open {
+            self.save_task = None;
+            self.unsaved = false;
+            self.current = None;
+            self.editor = None;
+            self.editor_sub = None;
+        }
+        let (entries, trash) = (self.store.list(), self.store.list_trash());
+        self.sync_peers(cx, &entries, Some(&trash));
+        self.entries = entries;
+        self.trash = trash;
+        self.sort();
+        if open {
+            let view = self.view;
+            self.open(id, window, cx);
+            self.view = view;
+        }
+        let warnings = self.store.take_warnings();
+        if warnings.is_empty() { self.show_toast(if markdown { crate::settings::tr("已转换为 Markdown", "Converted to Markdown") } else { crate::settings::tr("已转换为 Quiet.md 文档", "Converted to a Quiet.md document") }, cx); }
+        else { self.show_toast_kind(crate::ui::ToastKind::Error, &warnings.iter().map(|s| crate::settings::diagnostic(s)).collect::<Vec<_>>().join(crate::settings::tr("；", "; ")), cx); }
+        cx.notify();
+    }
+
+    fn convert_failed(&mut self, e: &anyhow::Error, cx: &mut Context<Self>) {
+        let msg = crate::localized_format!("转换失败：{}", "Could not convert document: {}", crate::settings::diagnostic(&e.to_string()));
+        self.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
+        self.status = crate::app::SaveStatus::Failed(msg);
+        cx.notify();
+    }
+
     /// Write "<标题> 副本" of `id` to the library; the caller refreshes the list.
     pub(crate) fn copy_doc(&mut self, id: &str, cx: &mut Context<Self>) -> Option<String> {
         if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some()) { return self.copy_folder(id, cx); }
@@ -440,5 +505,34 @@ impl Workspace {
                     .child(card("pw-wide", crate::settings::text("较宽"), PageWidth::Wide, 28.))
                     .child(card("pw-full", crate::settings::text("全宽"), PageWidth::Full, 38.)),
             )
+    }
+}
+
+/// What 转换为 Markdown would drop, as the confirmation lists it.
+pub(crate) fn loss_label(l: crate::markdown::Loss) -> &'static str {
+    use crate::markdown::Loss::*;
+    use crate::settings::tr;
+    match l {
+        IconCover => tr("文档图标和封面", "document icon and cover"),
+        Colors => tr("文字颜色和背景色", "text and background colors"),
+        Underline => tr("下划线", "underline"),
+        LineBreaks => tr("段内换行", "line breaks within a paragraph"),
+        Align => tr("对齐方式", "alignment"),
+        Indent => tr("缩进", "indentation"),
+        HeadingNumbers => tr("标题自动编号", "heading numbering"),
+        DeepHeadings => tr("七到九级标题", "headings below level 6"),
+        CodeOptions => tr("代码块名称和自动换行", "code block names and wrapping"),
+        Callout => tr("高亮块", "callouts"),
+        Grid => tr("分栏", "columns"),
+        Table => tr("表格的合并单元格、单元格背景和格内排版", "merged cells, cell colors and layout inside table cells"),
+        ImageSize => tr("图片尺寸和裁剪", "image sizes and cropping"),
+        Files => tr("文件和视频卡片", "file and video cards"),
+        Objects => tr("提及、日期提醒和按钮", "mentions, date reminders and buttons"),
+        Board => tr("画板", "whiteboards"),
+        DataTable => tr("数据表", "data tables"),
+        Countdown => tr("倒计时", "countdowns"),
+        SubPages => tr("子页面列表", "subpage lists"),
+        Unknown => tr("无法识别的内容（如书签、电子表格）", "content Quiet.md doesn't recognize (bookmarks, sheets …)"),
+        FrontMatter => tr("文件开头的 YAML 信息（front matter）", "the YAML front matter at the top of the file"),
     }
 }

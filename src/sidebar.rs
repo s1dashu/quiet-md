@@ -801,7 +801,9 @@ impl Workspace {
         // file for what concerns the page, the folder for 移动到, 重命名 and 删除.
         let doc = self.note_or(&m.id);
         let child = !m.batch && self.takes_children(&m.id);
-        let Some((pinned, starred)) = self.entries.iter().find(|e| e.id == doc).map(|e| (e.meta.pinned, e.meta.starred > 0)) else { return vec![] };
+        let Some((pinned, starred, kind, markdown)) = self.entries.iter().find(|e| e.id == doc).map(|e| (e.meta.pinned, e.meta.starred > 0, e.meta.kind, e.meta.markdown)) else { return vec![] };
+        // 转换为 Markdown / 转换为 Quiet.md 文档: documents only, not a 画板 or 数据表.
+        let convertible = kind.is_doc();
         // The context menu: rows on the quiet hover fill.
         let item_c = |id: &'static str, ic: &'static str, label: &'static str, color: Hsla, icon_color: Hsla| {
             let g = SharedString::from(id);
@@ -849,6 +851,7 @@ impl Workspace {
         let pdf = doc.clone();
         let new_window = doc.clone();
         let sub_doc = m.id.clone();
+        let conv = doc.clone();
         let sub_bounds = self.row_sub_bounds.clone();
         // The menu follows its longest translation too (#225); its rendered
         // width (from the previous frame — a submenu only opens after one)
@@ -922,6 +925,11 @@ impl Workspace {
                     .child(icon("chevron-right", 10., Theme::icon()))
                     .on_hover(set_sub(true)),
             )
+            .when(convertible, |d| d.child(
+                item("rm-convert", if markdown { "doc" } else { "doc-md" }, if markdown { crate::settings::tr("转换为 Quiet.md 文档", "Convert to Quiet.md Document") } else { crate::settings::tr("转换为 Markdown", "Convert to Markdown") })
+                    .on_hover(set_sub(false))
+                    .on_click(cx.listener(move |w, _, window, cx| w.ask_convert(&conv, !markdown, window, cx))),
+            ))
             .child(
                 item("rm-rename", "square-pen", crate::settings::text("重命名"))
                     .on_hover(set_sub(false))
@@ -934,7 +942,7 @@ impl Workspace {
                     .on_click(cx.listener(move |w, _, _, cx| w.ask_delete(&del, cx))),
             );
         let vh = f32::from(window.viewport_size().height);
-        let extra = usize::from(child);
+        let extra = usize::from(child) + usize::from(convertible);
         let menu_h = row_menu_height(ROW_ITEMS + extra, ROW_DIVIDERS);
         // From the "…" button: hang 2px below it, or sit 2px above it when
         // there's no room below. From a right-click: at the pointer.

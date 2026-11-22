@@ -318,6 +318,44 @@ pub fn percent_decode(s: &str) -> String {
     String::from_utf8(out).unwrap_or_else(|_| s.to_string())
 }
 
+/// A heading's link anchor, GitHub's way: lower case, letters, digits, `-`
+/// and `_` kept (any script), spaces made `-`, everything else dropped.
+pub fn heading_slug(text: &str) -> String {
+    text.trim().chars().filter_map(|c| match c {
+        ' ' => Some('-'),
+        c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+        _ => None,
+    }).flat_map(char::to_lowercase).collect()
+}
+
+/// Every heading of `doc` in order with its text and anchor; a repeated
+/// anchor gets `-1`, `-2` … the way GitHub numbers them.
+pub fn heading_anchors(doc: &Document) -> Vec<(BlockId, String, String)> {
+    let mut out: Vec<(BlockId, String, String)> = vec![];
+    let mut seen = std::collections::HashMap::<String, usize>::new();
+    doc.for_each_block(|b| {
+        if !matches!(b.kind, BlockKind::Heading { .. }) { return; }
+        let text: String = b.text.text.chars().filter(|c| *c != '\u{FFFC}').collect::<String>().trim().to_string();
+        let base = heading_slug(&text);
+        let n = seen.entry(base.clone()).or_insert(0);
+        let slug = if *n == 0 { base.clone() } else { format!("{base}-{n}") };
+        *n += 1;
+        out.push((b.id, text, slug));
+    });
+    out
+}
+
+/// The heading `#anchor` (percent-encoded or not, `#` or not) points at: its
+/// slug, else its text as typed, letter case aside.
+pub fn find_heading(doc: &Document, anchor: &str) -> Option<BlockId> {
+    let key = percent_decode(anchor.trim_start_matches('#')).trim().to_lowercase();
+    if key.is_empty() { return None; }
+    let all = heading_anchors(doc);
+    all.iter().find(|h| h.2 == key)
+        .or_else(|| all.iter().find(|h| { let t = h.1.to_lowercase(); t == key || t.replace(' ', "-") == key }))
+        .map(|h| h.0)
+}
+
 /// Relative and `file://` image sources made absolute against `base`.
 pub fn resolve_images(blocks: &mut [Block], base: &Path) {
     for b in blocks.iter_mut() {
@@ -873,9 +911,108 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
     out.replace('\n', "<br>")
 }
 
+/// What a document holds that a Markdown file of it (`write_file`, read back
+/// by `parse_file`) does not: 转换为 Markdown lists these before going ahead.
+/// Measured on what the two actually do (see the test), leaving aside what
+/// is not the writer's formatting: fold state, column widths (fitted to the
+/// text on reading), empty paragraphs and whitespace.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Loss { IconCover, Colors, Underline, LineBreaks, Align, Indent, HeadingNumbers, DeepHeadings, CodeOptions, Callout, Grid, Table, ImageSize, Files, Objects, Board, DataTable, Countdown, SubPages, Unknown,
+    /// The other way: a Markdown file's front matter, which a document has no place for.
+    FrontMatter }
+
+pub fn losses(doc: &Document) -> Vec<Loss> {
+    let mut out = std::collections::BTreeSet::new();
+    if doc.icon.is_some() || doc.cover.is_some() { out.insert(Loss::IconCover); }
+    lost_in(&doc.blocks, false, &mut out);
+    out.into_iter().collect()
+}
+
+fn lost_in(bs: &[Block], cell: bool, out: &mut std::collections::BTreeSet<Loss>) {
+    for b in bs {
+        let mut add = |l| { out.insert(l); };
+        if b.bg.is_some() { add(Loss::Colors); }
+        // An image reads back centred; table cells take their column's alignment.
+        let plain_align = if matches!(b.kind, BlockKind::Image { .. }) { Align::Center } else { Align::Left };
+        if !cell && b.align != plain_align { add(Loss::Align); }
+        match &b.kind {
+            BlockKind::Text if !b.children.is_empty() => add(Loss::Indent),
+            BlockKind::Heading { level, seq_auto } => {
+                if *seq_auto { add(Loss::HeadingNumbers); }
+                if *level > 6 { add(Loss::DeepHeadings); }
+                if !b.children.is_empty() { add(Loss::Indent); }
+            }
+            BlockKind::Code { caption, wrap, .. } if caption.is_some() || *wrap => add(Loss::CodeOptions),
+            BlockKind::Callout { .. } => add(Loss::Callout),
+            BlockKind::Grid | BlockKind::Column { .. } => add(Loss::Grid),
+            BlockKind::Table(t) => {
+                let rich = |c: &TableCell| c.colspan > 1 || c.rowspan > 1 || c.bg.is_some() || c.valign.is_some()
+                    || c.blocks.iter().filter(|b| !b.text.text.trim().is_empty() || !matches!(b.kind, BlockKind::Text)).count() > 1
+                    || c.blocks.iter().any(|b| !matches!(b.kind, BlockKind::Text) || !b.children.is_empty());
+                if t.header_rows != 1 || t.header_col || t.rows.iter().flatten().any(rich) { add(Loss::Table); }
+                for c in t.rows.iter().flatten() { lost_in(&c.blocks, true, out); }
+            }
+            BlockKind::Image { width, height, crop, .. } if width.is_some() || height.is_some() || crop.is_some() => add(Loss::ImageSize),
+            BlockKind::File(_) => add(Loss::Files),
+            BlockKind::Board(_) => add(Loss::Board),
+            BlockKind::DataTable(_) => add(Loss::DataTable),
+            BlockKind::Countdown(_) => add(Loss::Countdown),
+            BlockKind::SubPageList => add(Loss::SubPages),
+            BlockKind::Raw { .. } => add(Loss::Unknown),
+            _ => {}
+        }
+        if !matches!(b.kind, BlockKind::Code { .. }) {
+            if b.text.text.contains('\n') { out.insert(Loss::LineBreaks); }
+            for (_, m) in b.text.spans() {
+                if m.text_color.is_some() || m.bg_color.is_some() { out.insert(Loss::Colors); }
+                if m.underline { out.insert(Loss::Underline); }
+                match m.inline.as_ref().map(|i| &i.kind) {
+                    None | Some(InlineKind::Equation(_)) => {}
+                    Some(InlineKind::File(_)) => { out.insert(Loss::Files); }
+                    Some(_) => { out.insert(Loss::Objects); }
+                }
+            }
+        }
+        lost_in(&b.children, cell, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `losses` names something exactly when a Markdown file of the block
+    /// reads back as something else (fold state, column widths, empty
+    /// paragraphs and spacing aside), for every block in the fixture and
+    /// for the inline objects and plain blocks it lacks.
+    #[test]
+    fn losses_are_what_markdown_drops() {
+        let fixture = crate::vfs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/all-blocks.xml")).unwrap();
+        let extra = "<title>t</title>\n<table>\n  <thead>\n    <tr><th><p>A</p></th><th><p>B</p></th></tr>\n  </thead>\n  <tbody>\n    <tr><td><p>1 <b>x</b></p></td><td><p>2 <latex>y</latex></p></td></tr>\n  </tbody>\n</table>\n\
+            <img src=\"https://x/y.png\" caption=\"c\"/>\n<img src=\"https://x/y.png\" align=\"left\"/>\n<img src=\"https://x/y.png\" width=\"20\"/>\n<p>a <a href=\"https://q.com\">q</a> <latex>a\\b</latex> <code>c</code></p>\n<p>a<u>u</u></p>\n<p><span text-color=\"red\">r</span></p>\n\
+            <p><source path=\".assets/a.pdf\" name=\"a.pdf\"/></p>\n<figure><source path=\".assets/a.pdf\" name=\"a.pdf\"/></figure>\n<p>x<time date=\"1700000000000\"/></p>\n<p>x<cite type=\"user\" user-id=\"ou_1\"/></p>\n<p>x<button action=\"OpenLink\" href=\"https://a.b\">去</button></p>\n\
+            <pre lang=\"go\" wrap=\"true\"><code>x</code></pre>\n<blockquote>\n  <p>q<span background-color=\"light-yellow\">h</span></p>\n</blockquote>\n<ul>\n  <li>a\n    <p>b\n      <p>c</p>\n    </p>\n  </li>\n</ul>\n<countdown duration=\"60\" start-time=\"0\"/>\n<sub-page-list/>\n<p>纯文本 <b>粗</b> <em>斜</em> <del>删</del></p>\n";
+        let blocks: Vec<Block> = [fixture.as_str(), extra].iter().flat_map(|x| crate::docxml::parse(x).unwrap().blocks).collect();
+        let norm = |d: &Document| {
+            let mut x = crate::docxml::serialize(d);
+            for (re, to) in [(r"<p>[ \t]+", "<p>"), (r"[ \t]+</p>", "</p>"), (r"(?m)^\s*<p></p>\n", ""), (r" href=", " src="), (r#" folded="true""#, ""), (r"<colgroup>.*?</colgroup>\n\s*", "")] {
+                x = regex::Regex::new(re).unwrap().replace_all(&x, to).into_owned();
+            }
+            x
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for b in blocks {
+            let d = Document { title: RichText::plain("t"), icon: None, cover: None, blocks: vec![b] };
+            let back = parse_file(&write_file(&d, "", None), "t", None);
+            let lost = losses(&d);
+            assert_eq!(norm(&d) != norm(&back), !lost.is_empty(), "{lost:?}\n{}\nread back as\n{}", norm(&d), norm(&back));
+            seen.extend(lost);
+        }
+        // Every kind of loss is met above, except the document's icon and cover.
+        assert_eq!(seen.len(), Loss::Unknown as usize, "{seen:?}");
+        let doc = crate::docxml::parse(&fixture).unwrap();
+        assert!(losses(&doc).contains(&Loss::IconCover));
+    }
 
     #[test]
     fn inline_attachments_export_links_and_copies_including_tables() {
@@ -1178,6 +1315,31 @@ mod tests {
         let xml = crate::docxml::serialize(&parse_file("[[Page#H|alias]]\n", "x", None));
         let back = crate::docxml::parse(&xml).unwrap();
         assert_eq!(to_markdown(&back), "# x\n\n[[Page#H|alias]]\n");
+    }
+
+    /// Headings get GitHub's anchors (repeats numbered); `[x](#anchor)` finds
+    /// them by anchor or by the text as typed, and round-trips through Markdown.
+    #[test]
+    fn heading_anchors_and_links() {
+        assert_eq!(heading_slug("Hello, World!"), "hello-world");
+        assert_eq!(heading_slug(" 第 3 节：安装 "), "第-3-节安装");
+        assert_eq!(heading_slug("a_b-C"), "a_b-c");
+        let src = "# 概述\n\n## Getting Started\n\n## 概述\n\n见[安装](#getting-started)和[第二个](#%E6%A6%82%E8%BF%B0-1)\n";
+        let doc = parse_file(src, "t", None);
+        let anchors: Vec<String> = heading_anchors(&doc).into_iter().map(|h| h.2).collect();
+        assert_eq!(anchors, ["概述", "getting-started", "概述-1"]);
+        let ids: Vec<BlockId> = heading_anchors(&doc).into_iter().map(|h| h.0).collect();
+        assert_eq!(find_heading(&doc, "#getting-started"), Some(ids[1]));
+        assert_eq!(find_heading(&doc, "#Getting Started"), Some(ids[1]));
+        assert_eq!(find_heading(&doc, "#%E6%A6%82%E8%BF%B0-1"), Some(ids[2]));
+        assert_eq!(find_heading(&doc, "概述"), Some(ids[0]));
+        assert_eq!(find_heading(&doc, "#nope"), None);
+        assert_eq!(find_heading(&doc, "#"), None);
+        let link = doc.blocks.iter().flat_map(|b| b.text.spans()).find_map(|(_, m)| m.link.clone());
+        assert_eq!(link.as_deref(), Some("#getting-started"));
+        let out = write_file(&doc, "", None);
+        assert!(out.contains("[安装](#getting-started)") && out.contains("[第二个](#%E6%A6%82%E8%BF%B0-1)"), "{out}");
+        assert_eq!(write_file(&parse_file(&out, "t", None), "", None), out);
     }
 
     #[test]

@@ -219,6 +219,8 @@ pub enum Confirm {
     Migrate(crate::store::ConsentReason),
     /// 从侧栏移除 a root folder (key, name): the folder and its files stay.
     RemoveRoot(String, String),
+    /// 转换为 Markdown / 转换为 Quiet.md 文档 when the other format drops something.
+    Convert { id: String, markdown: bool, losses: Vec<crate::markdown::Loss> },
     /// Dropped on the sidebar from outside: import it into the library there?
     Import { what: DropImport, target: crate::sidebar_drop::SidebarDropAt },
 }

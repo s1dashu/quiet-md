@@ -230,6 +230,7 @@ impl SharedStore {
     pub fn restore_version(&self, id: &str, name: &str) -> Result<Document> { self.on_res(id, |s| s.restore_version(id, name)) }
     pub fn save_version_now(&self, id: &str) -> Result<bool> { self.on_res(id, |s| s.save_version_now(id)) }
     pub fn rename(&mut self, id: &str, title: &str) -> Result<Meta> { self.on_res(id, |s| s.rename(id, title)) }
+    pub fn convert(&mut self, id: &str, markdown: bool) -> Result<()> { self.on_res(id, |s| s.convert(id, markdown)) }
     pub fn touch(&mut self, id: &str) -> Option<Meta> { self.on(id, |s| s.touch(id)).flatten() }
     pub fn create_folder(&mut self, title: &str, parent: Option<&str>) -> Result<String> { self.put(parent, |s, parent| s.create_folder(title, parent)) }
     pub fn accept_file_title(&self, id: &str, title: &str) -> Result<()> { self.on_res(id, |s| s.accept_file_title(id, title)) }
