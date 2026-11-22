@@ -108,16 +108,8 @@ impl Workspace {
         self.entries = self.store.list();
         self.sort();
         if self.try_open(&id, window, cx) && !anchor.is_empty() && let Some(ed) = &self.editor {
-            let key = anchor.to_lowercase();
             ed.update(cx, |e, cx| {
-                let mut found = None;
-                e.core.doc.for_each_block(|b| {
-                    if found.is_none() && matches!(b.kind, crate::model::BlockKind::Heading { .. }) {
-                        let label = b.text.text.trim().to_lowercase();
-                        if label == key || label.replace(' ', "-") == key { found = Some(b.id); }
-                    }
-                });
-                if let Some(id) = found { e.scroll_to_block(id, cx); }
+                if let Some(id) = crate::markdown::find_heading(&e.core.doc, &anchor) { e.scroll_to_block(id, cx); }
             });
         }
     }

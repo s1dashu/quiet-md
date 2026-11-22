@@ -709,6 +709,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("已导出，但有 {missing} 个图片或附件未能复制", "Exportado, pero no se pudieron copiar {missing} imágenes o adjuntos"),
     ("文件夹里有 {} 个文件，一次最多导入 {} 个", "La carpeta tiene {} archivos; se pueden importar hasta {} a la vez"),
     ("有 {failed} 个文件未能导入", "No se pudieron importar {failed} archivos"),
+    ("{cloud} 项只在 iCloud 中、没有下载到这台 Mac，已跳过；在访达中下载后可再导入", "Se omitieron {cloud} elementos que solo están en iCloud; descárgalos en el Finder y vuelve a importar"),
     ("另存副本", "Guardar una copia"),
     ("重新载入", "Volver a cargar"),
     ("{} 天", "{} días"),
@@ -1026,4 +1027,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Chino parcial"),
     ("下载后可预览", "Vista previa tras descargar"),
     ("其他语言和符号（{}）", "Otras escrituras y símbolos ({})"),
+    ("本文标题", "Encabezados de este documento"),
+    ("找不到这个标题", "No se encuentra el encabezado"),
 ];

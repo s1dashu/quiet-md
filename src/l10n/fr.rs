@@ -155,6 +155,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("在这台电脑上找到 {} 处笔记", "Notes trouvées sur cet ordinateur ({})"),
     ("导入未能完成：{}", "L’import n’a pas pu aboutir : {}"),
     ("有 {failed} 个文件未能导入", "{failed} fichiers n’ont pas pu être importés"),
+    ("{cloud} 项只在 iCloud 中、没有下载到这台 Mac，已跳过；在访达中下载后可再导入", "{cloud} éléments présents uniquement dans iCloud ont été ignorés ; téléchargez-les dans le Finder, puis importez à nouveau"),
     ("全局快捷键请使用字母、数字或空格", "Utilisez une lettre, un chiffre ou Espace pour le raccourci global"),
     ("无法注册这个组合键，可能已被系统或其他应用占用", "Ce raccourci est déjà utilisé par macOS ou une autre app"),
     ("当前系统暂不支持全局快捷键", "Les raccourcis globaux ne sont pas encore pris en charge sur ce système"),
@@ -1111,4 +1112,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Chinois partiel"),
     ("下载后可预览", "Aperçu après téléchargement"),
     ("其他语言和符号（{}）", "Autres écritures et symboles ({})"),
+    ("本文标题", "Titres de ce document"),
+    ("找不到这个标题", "Titre introuvable"),
 ];
