@@ -42,8 +42,25 @@ pub fn init(cx: &mut App) {
     #[cfg(not(target_os = "macos"))]
     let base = if mac() || again { base } else { base.into_iter().filter_map(pc_binding).collect() };
     let custom = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let custom = yield_to_custom(&base, custom);
     cx.set_global(Shortcuts { base, custom });
     rebuild(cx);
+}
+
+/// The user's keys are kept by action name, so a new default never replaces
+/// them; but a default that now lands on one of them (⌘⌥B taken for
+/// 展开 / 收起侧栏 after the user gave it to another action) goes unset, as
+/// 设置 does when it records a taken key. Only in memory: shortcuts.json is
+/// left as the user wrote it.
+fn yield_to_custom(base: &[KeyBinding], mut custom: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let taken: Vec<(String, Vec<Keystroke>)> = custom.iter().filter(|(_, k)| !k.is_empty()).filter_map(|(id, k)| Some((id.clone(), sequence(k).ok()?))).collect();
+    for b in base {
+        let name = b.action().name();
+        if label(name).is_none() || custom.contains_key(name) { continue; }
+        let keys = b.keystrokes().iter().map(AsKeystroke::as_keystroke).cloned().collect::<Vec<_>>();
+        if taken.iter().any(|(id, k)| id != name && overlaps(&keys, k)) { custom.insert(name.into(), String::new()); }
+    }
+    custom
 }
 
 #[cfg(any(test, not(target_os = "macos")))]
@@ -55,13 +72,9 @@ fn pc_binding(binding: KeyBinding) -> Option<KeyBinding> {
     if keys == "cmd-backspace" { return None; }
     // Ctrl+Shift+C is 行内代码 there, so 复制为 Markdown takes M. Not Ctrl+Alt:
     // Windows reads Ctrl+Alt as AltGr, which types a letter on many layouts (#290).
-    // 后退 / 前进 are Alt+← / Alt+→ there, as in browsers and Explorer (Alt
-    // with an arrow is otherwise Ctrl: word moves map to it above, not here).
-    match binding.action().name() {
-        n if n.ends_with("nav_history::GoBack") => return load("alt-left", &binding),
-        n if n.ends_with("nav_history::GoForward") => return load("alt-right", &binding),
-        _ => {}
-    }
+    // 后退 / 前进 also take Alt+← / Alt+→ there, as in browsers and Explorer:
+    // kept as written (Alt with an arrow is otherwise Ctrl, the word moves).
+    if binding.action().name().contains("nav_history::") && matches!(keys.as_str(), "alt-left" | "alt-right") { return load(&keys, &binding); }
     let keys = if binding.action().name().ends_with("::InlineCode") { "ctrl-shift-c".to_string() } else if binding.action().name().ends_with("::CopyMarkdown") { "ctrl-shift-m".to_string() } else { keys.split(' ').map(|key| match key {
         "cmd-left" => "home".into(), "cmd-right" => "end".into(),
         "cmd-shift-left" => "shift-home".into(), "cmd-shift-right" => "shift-end".into(),
@@ -112,13 +125,35 @@ mod tests {
     #[test]
     fn pc_back_and_forward_are_alt_arrows() {
         use crate::nav_history::{GoBack, GoForward};
-        let back = pc_binding(KeyBinding::new("ctrl-cmd-left", GoBack, None)).unwrap();
-        let forward = pc_binding(KeyBinding::new("ctrl-cmd-right", GoForward, None)).unwrap();
-        assert_eq!(back.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-left"]);
-        assert_eq!(forward.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-right"]);
+        let keys = |b: KeyBinding| pc_binding(b).unwrap().keystrokes().iter().map(unparse).collect::<Vec<_>>();
+        assert_eq!(keys(KeyBinding::new("cmd-[", GoBack, None)), ["ctrl-["]);
+        assert_eq!(keys(KeyBinding::new("cmd-]", GoForward, None)), ["ctrl-]"]);
+        assert_eq!(keys(KeyBinding::new("alt-left", GoBack, None)), ["alt-left"]);
+        assert_eq!(keys(KeyBinding::new("alt-right", GoForward, None)), ["alt-right"]);
+        assert_eq!(keys(KeyBinding::new("cmd-alt-b", crate::app::ToggleSidebar, None)), ["ctrl-alt-b"]);
         for words in [KeyBinding::new("alt-left", crate::editor::keymap::WordLeft, Some("Editor")), KeyBinding::new("alt-right", crate::input::WordRight, Some("TextField"))] {
             assert_ne!(pc_binding(words).unwrap().keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-left"]);
         }
+    }
+    /// Keys the user set are kept by action name: moving 展开 / 收起侧栏 to
+    /// ⌘⌥B and giving ⌘[ / ⌘] to 后退 / 前进 leaves them as they were, and a
+    /// new default landing on one of them yields.
+    #[test]
+    fn new_defaults_keep_custom_keys() {
+        use super::{Shortcuts, yield_to_custom, default_key};
+        use crate::{app::{ToggleSidebar, FocusSearch}, nav_history::{GoBack, GoForward}};
+        let base = vec![KeyBinding::new("cmd-alt-b", ToggleSidebar, None), KeyBinding::new("cmd-\\", ToggleSidebar, None), KeyBinding::new("cmd-[", GoBack, None), KeyBinding::new("cmd-]", GoForward, None), KeyBinding::new("cmd-j", FocusSearch, None)];
+        let custom = |pairs: &[(&str, &str)]| pairs.iter().map(|(a, k)| (a.to_string(), k.to_string())).collect::<std::collections::BTreeMap<_, _>>();
+        // A sidebar key of the user's own, and 搜索文档 unset: both kept.
+        let mine = custom(&[("workspace::ToggleSidebar", "cmd-shift-s"), ("workspace::FocusSearch", "")]);
+        let s = Shortcuts { custom: yield_to_custom(&base, mine.clone()), base: base.clone() };
+        assert_eq!(s.custom, mine);
+        assert_eq!(default_key(&s, "workspace::ToggleSidebar"), "alt-cmd-b");
+        assert_eq!(default_key(&s, "nav_history::GoBack"), "cmd-[");
+        // 搜索文档 moved by the user to ⌘[: 后退 gives it up, 前进 keeps ⌘].
+        let mine = custom(&[("workspace::FocusSearch", "cmd-[")]);
+        let s = Shortcuts { custom: yield_to_custom(&base, mine), base };
+        assert_eq!(s.custom, custom(&[("workspace::FocusSearch", "cmd-["), ("nav_history::GoBack", "")]));
     }
 }
 /// Mac key notation (⌘ ⌥ ⇧ ⌃, "⌘ + Shift + 7") as Windows writes it, the way

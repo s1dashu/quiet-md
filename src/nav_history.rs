@@ -60,10 +60,12 @@ impl NavHistory {
     }
 }
 
-/// macOS: ⌃⌘← / ⌃⌘→ (Xcode's; ⌘] is 展开 / 收起侧栏). Windows and Linux:
-/// Alt+← / Alt+→, kept as written by `shortcuts::pc_binding`.
+/// ⌘[ / ⌘] (Ctrl+[ / Ctrl+] on Windows and Linux, where Alt+← / Alt+→ work
+/// too, kept as written by `shortcuts::pc_binding`). In a board ⌘[ / ⌘] stay
+/// 下移一层 / 上移一层: its context is deeper.
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([KeyBinding::new("ctrl-cmd-left", GoBack, None), KeyBinding::new("ctrl-cmd-right", GoForward, None)]);
+    cx.bind_keys([KeyBinding::new("cmd-[", GoBack, None), KeyBinding::new("cmd-]", GoForward, None)]);
+    if !crate::shortcuts::mac() { cx.bind_keys([KeyBinding::new("alt-left", GoBack, None), KeyBinding::new("alt-right", GoForward, None)]); }
 }
 
 /// The 前往 menu.

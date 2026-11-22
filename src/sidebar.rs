@@ -135,7 +135,7 @@ impl Workspace {
                     .rounded(px(8.))
                     .cursor_pointer()
                     .hover(|s| s.bg(Theme::sidebar_hover()))
-                    .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                    .tip(crate::settings::tr("收起侧栏", "Hide sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ⌥ + B")))
                     .child(icon("panel-left-close", 17., Theme::icon()))
                     .on_click(cx.listener(|w, _, _, cx| {
                         w.sidebar_open = false;

@@ -112,7 +112,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-shift-o", OpenFolder, None),
         KeyBinding::new("cmd-alt-home", GoHome, None),
         KeyBinding::new("cmd-w", CloseWindow, None),
-        KeyBinding::new("cmd-]", ToggleSidebar, None),
+        KeyBinding::new("cmd-alt-b", ToggleSidebar, None),
         KeyBinding::new("cmd-\\", ToggleSidebar, None),
         KeyBinding::new("cmd-j", FocusSearch, None),
         KeyBinding::new("cmd-f", FindInDoc, None),
@@ -1665,7 +1665,7 @@ impl Workspace {
                         .rounded(px(8.))
                         .cursor_pointer()
                         .hover(|s| s.bg(Theme::fill_hover_strong()))
-                        .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
+                        .tip(crate::settings::tr("展开侧栏", "Show sidebar"), Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ⌥ + B")))
                         .child(icon("panel-left-open", 17., Theme::icon()))
                         .on_click(cx.listener(|w, _, _, cx| {
                             w.sidebar_open = true;
