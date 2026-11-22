@@ -40,6 +40,7 @@ mod html;
 mod input;
 mod logging;
 mod modes;
+mod nav_history;
 mod onboarding;
 #[cfg(target_os = "macos")]
 mod native_header;

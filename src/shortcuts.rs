@@ -55,6 +55,13 @@ fn pc_binding(binding: KeyBinding) -> Option<KeyBinding> {
     if keys == "cmd-backspace" { return None; }
     // Ctrl+Shift+C is 行内代码 there, so 复制为 Markdown takes M. Not Ctrl+Alt:
     // Windows reads Ctrl+Alt as AltGr, which types a letter on many layouts (#290).
+    // 后退 / 前进 are Alt+← / Alt+→ there, as in browsers and Explorer (Alt
+    // with an arrow is otherwise Ctrl: word moves map to it above, not here).
+    match binding.action().name() {
+        n if n.ends_with("nav_history::GoBack") => return load("alt-left", &binding),
+        n if n.ends_with("nav_history::GoForward") => return load("alt-right", &binding),
+        _ => {}
+    }
     let keys = if binding.action().name().ends_with("::InlineCode") { "ctrl-shift-c".to_string() } else if binding.action().name().ends_with("::CopyMarkdown") { "ctrl-shift-m".to_string() } else { keys.split(' ').map(|key| match key {
         "cmd-left" => "home".into(), "cmd-right" => "end".into(),
         "cmd-shift-left" => "shift-home".into(), "cmd-shift-right" => "shift-end".into(),
@@ -99,6 +106,19 @@ mod tests {
         assert_ne!(copy.keystrokes(), code.keystrokes());
         let md = pc_binding(KeyBinding::new("cmd-shift-c", crate::editor::keymap::CopyMarkdown, Some("Editor"))).unwrap();
         assert_eq!(md.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["ctrl-shift-m"]);
+    }
+    /// 后退 / 前进: Alt+← / Alt+→ on PCs, which no PC-mapped key takes (word
+    /// moves become Ctrl+←/→ there).
+    #[test]
+    fn pc_back_and_forward_are_alt_arrows() {
+        use crate::nav_history::{GoBack, GoForward};
+        let back = pc_binding(KeyBinding::new("ctrl-cmd-left", GoBack, None)).unwrap();
+        let forward = pc_binding(KeyBinding::new("ctrl-cmd-right", GoForward, None)).unwrap();
+        assert_eq!(back.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-left"]);
+        assert_eq!(forward.keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-right"]);
+        for words in [KeyBinding::new("alt-left", crate::editor::keymap::WordLeft, Some("Editor")), KeyBinding::new("alt-right", crate::input::WordRight, Some("TextField"))] {
+            assert_ne!(pc_binding(words).unwrap().keystrokes().iter().map(unparse).collect::<Vec<_>>(), ["alt-left"]);
+        }
     }
 }
 /// Mac key notation (⌘ ⌥ ⇧ ⌃, "⌘ + Shift + 7") as Windows writes it, the way
@@ -214,6 +234,8 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "OpenSettings" => (0, "打开设置", "Open Settings"),
         "GoHome" => (0, "返回主页", "Go to Home"),
         "ToggleSidebar" => (0, "展开 / 收起侧栏", "Show / hide sidebar"),
+        "GoBack" => (0, "后退", "Back"),
+        "GoForward" => (0, "前进", "Forward"),
         "FocusSearch" => (0, "搜索文档", "Search documents"),
         "ToggleShortcuts" => (0, "查看快捷键", "Show shortcuts"),
         "OpenFile" => (1, "打开 Markdown 文件", "Open Markdown file"),
