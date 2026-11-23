@@ -145,6 +145,10 @@ pub struct Preferences {
     /// letters or digits. Off by default.
     #[serde(default)]
     pub cjk_spacing: bool,
+    /// 在原文中编辑公式 (experimental): ← / → and clicks go into an inline
+    /// equation's LaTeX source in place instead of the popover. Off by default.
+    #[serde(default)]
+    pub inline_math: bool,
     /// 外观's font lists: 收藏 (both lists share it) and the last families
     /// picked for each, newest first.
     #[serde(default)]
@@ -191,7 +195,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![] }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, inline_math: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![] }
     }
 }
 
@@ -1535,6 +1539,8 @@ impl Workspace {
                     switch("pref-backspace-title", p.backspace_to_title).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.backspace_to_title = !p.backspace_to_title, cx)))).into_any_element(),
                 row(tr("中英文之间自动加空格", "Space between Chinese and English"), desc(tr("输入时在汉字和英文字母、数字之间自动加一个空格，代码、链接和公式里不加。已有的文字可用「编辑 › 整理本文空格」。", "While typing, adds a space between Chinese characters and Latin letters or digits, except in code, links and formulas. For existing text use Edit › Add Spaces Between Chinese and English.")),
                     switch("pref-cjk-spacing", p.cjk_spacing).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.cjk_spacing = !p.cjk_spacing, cx)))).into_any_element(),
+                row(tr("在原文中编辑公式（实验）", "Edit formulas in place (experimental)"), desc(tr("方向键或点击进入行内公式时，就地显示 LaTeX 源码并在下方预览，代替弹出的编辑框。", "Arrow keys or a click on an inline formula show its LaTeX source in place, with a preview below, instead of the pop-up editor.")),
+                    switch("pref-inline-math", p.inline_math).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.inline_math = !p.inline_math, cx)))).into_any_element(),
                 // The key as bound (Ctrl+N off macOS, or the user's own), in every language's text.
                 row(tr("快捷新建默认类型", "Quick new (⌘N)").replace("⌘N", new_key), Some(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.").replace("⌘N", new_key).into()), {
                     let sel = match p.new_default.as_str() { "doc" => 1, "markdown" => 2, _ => 0 };

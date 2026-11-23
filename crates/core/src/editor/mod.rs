@@ -4,4 +4,5 @@
 pub mod core;
 #[cfg(test)]
 mod fuzz_tests;
+pub mod math_edit;
 pub mod table_ops;

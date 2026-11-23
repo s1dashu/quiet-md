@@ -440,6 +440,8 @@ pub struct Core {
     /// Backspace at the start of the body merges the first paragraph into the
     /// title and moves the caret there (设置 › 退格键回到标题).
     pub backspace_to_title: bool,
+    /// 公式原位编辑: the equation whose source the caret is in (`math_edit.rs`).
+    pub math: Option<super::math_edit::MathEdit>,
 }
 
 impl Core {
@@ -464,6 +466,7 @@ impl Core {
             path_misses: Cell::new((0, 1)),
             notice: None,
             backspace_to_title: false,
+            math: None,
         }
     }
 
@@ -748,6 +751,7 @@ impl Core {
     }
 
     pub fn undo(&mut self) -> bool {
+        self.math = None;
         let Some(s) = self.undo.pop_back() else { return false };
         self.generation += 1;
         let mut doc = s.doc.clone();
@@ -763,6 +767,7 @@ impl Core {
     }
 
     pub fn redo(&mut self) -> bool {
+        self.math = None;
         let Some(s) = self.redo.pop() else { return false };
         self.generation += 1;
         let mut doc = s.doc.clone();
@@ -791,6 +796,9 @@ impl Core {
                     Pos::new(p.block, o)
                 }
                 None if us.iter().any(|u| u.id == p.block) => Pos::new(p.block, 0),
+                // An atomic block under a heading folded since (undo keeps the
+                // folds as they are now): still a caret stop, once revealed.
+                None if core.block(p.block).is_some_and(|b| !b.kind.is_container() && !matches!(b.kind, BlockKind::Table(_))) => Pos::new(p.block, 0),
                 None => Pos::new(us.get(1).map(|u| u.id).unwrap_or(TITLE), 0),
             }
         };
@@ -3575,6 +3583,21 @@ mod tests {
         c.select_block(a);
         assert!(c.selection_holds(Pos::new(a, 0)));
         assert!(!c.selection_holds(Pos::new(b, 0)));
+    }
+
+    /// Undo back to a selection from an image to text in one table cell, the
+    /// heading above folded meanwhile: the selection stays in that cell (it
+    /// went to the first block and crossed into the table before).
+    #[test]
+    fn undo_keeps_a_hidden_atomic_selection_end() {
+        let mut c = doc("<title>T</title><h1>H</h1><table><tbody><tr><td><img src=\"a.png\"/><p>xy</p></td></tr></tbody></table>");
+        let (h, img, p) = (id(&c, 1), id(&c, 2), id(&c, 3));
+        c.sel = Selection { anchor: Pos::new(img, 0), head: Pos::new(p, 1) };
+        c.delete_selection();
+        c.sel = Selection::caret(Pos::new(h, 0));
+        c.toggle_fold(h);
+        assert!(c.undo());
+        assert_eq!(c.sel, Selection { anchor: Pos::new(img, 0), head: Pos::new(p, 1) });
     }
 
     /// #220: a pasted web image relinked to its download, in tables too and

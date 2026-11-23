@@ -107,6 +107,7 @@ This approach copies the entire document at each history step. A historical benc
 | `time.rs` | Date conversion, local timezone and current time |
 | `editor/core.rs` | Editing engine |
 | `editor/table_ops.rs` | Table operations and cell selection (`CellSel`) |
+| `editor/math_edit.rs` | Editing an inline equation's LaTeX source in place (experimental setting): the visit (`Core::math`) and its moves and edits, each an ordinary `set_equation_source` |
 | `editor/fuzz_tests.rs` | Random edit fuzzer |
 
 Whiteboard and history modules in core:
@@ -162,6 +163,7 @@ Whiteboard and history modules in core:
 | `table.rs` / `grid.rs` | Table UI (operations live in core's `table_ops.rs`) and columns |
 | `image.rs` / `file.rs` / `cover.rs` | Images, video and files, icons and covers |
 | `math.rs` | Formula layout from katex-rs HTML |
+| `math_inline.rs` | The in-place equation source (Settings › General, experimental): keys, IME, pointer and the preview under it; the popover stays the default |
 | `link.rs` / `links.rs` | Link panels and cards, document mentions and references |
 | `button.rs` / `countdown.rs` / `reminder.rs` / `subpages.rs` | Buttons, countdowns, date reminders and subpage lists |
 | `emoji.rs` / `emoji_picker.rs` | Emoji data and picker |

@@ -248,11 +248,77 @@ fn step(c: &mut Core, rng: &mut Rng) -> String {
         }
         // A miss on the chance guard falls through to trailing_line below.
         24 if rng.chance(15) => format!("space_document = {}", c.space_document()),
+        25 if rng.chance(70) => math_step(c, rng),
         _ => {
             c.trailing_line();
             "trailing_line".into()
         }
     }
+}
+
+/// 公式原位编辑: a visit to an equation (the one next to the caret, else any),
+/// then a few source edits the way the view sends them; it may stay open
+/// into the next step, where most commands move the caret away from it.
+fn math_step(c: &mut Core, rng: &mut Rng) -> String {
+    let mut log = String::from("math:");
+    if c.math_valid().is_none() && !c.math_enter_from_side(rng.chance(50)) {
+        let mut eqs = vec![];
+        for u in c.units() {
+            let Some(t) = c.text_of(u.id) else { continue };
+            eqs.extend(t.text.match_indices(EQUATION).map(|(i, _)| Pos::new(u.id, i)));
+        }
+        eqs.retain(|p| c.equation_source(*p).is_some());
+        // none left: one at the caret (where the slash menu puts it)
+        if let Some(p) = if eqs.is_empty() { c.insert_equation("a+b") } else { Some(*rng.pick(&eqs)) } {
+            c.math_enter(p, rng.below(8));
+        }
+    }
+    log += &format!(" {:?}", c.math);
+    for _ in 0..1 + rng.below(6) {
+        let what = match rng.below(9) {
+            0 | 1 => {
+                let s = *rng.pick(&["x", "^", "中", "👍🏽", "\\frac{a}{b}", "$", "\n"]);
+                c.math_type(s);
+                format!("type({s:?})")
+            }
+            2 => {
+                let (f, w) = (rng.chance(50), rng.chance(30));
+                c.math_delete(f, w);
+                format!("delete({f}, {w})")
+            }
+            3 | 4 => {
+                let (r, w, e) = (rng.chance(50), rng.chance(20), rng.chance(30));
+                c.math_move(r, w, e);
+                format!("move({r}, {w}, {e})")
+            }
+            5 => {
+                let (end, e) = (rng.chance(50), rng.chance(50));
+                c.math_edge(end, e);
+                format!("edge({end}, {e})")
+            }
+            6 => {
+                let (a, h) = (rng.below(12), rng.below(12));
+                c.math_select(a, h);
+                format!("select({a}, {h})")
+            }
+            7 => {
+                // IME composition: replace a range, then the marked text again
+                let (a, b) = (rng.below(12), rng.below(12));
+                c.math_replace(a..b, "ni");
+                let o = c.math.map_or(0, |m| m.head);
+                c.math_replace(o.saturating_sub(2)..o, "你");
+                format!("compose({a}..{b})")
+            }
+            _ => {
+                let a = rng.chance(50);
+                c.math_leave(a);
+                format!("leave({a})")
+            }
+        };
+        log += " ";
+        log += &what;
+    }
+    log
 }
 
 /// 画板: a random board block gets a changed scene (what leaving the

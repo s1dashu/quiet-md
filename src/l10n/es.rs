@@ -1035,4 +1035,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Chino parcial"),
     ("下载后可预览", "Vista previa tras descargar"),
     ("其他语言和符号（{}）", "Otras escrituras y símbolos ({})"),
+    ("在原文中编辑公式（实验）", "Editar fórmulas en el texto (experimental)"),
+    ("方向键或点击进入行内公式时，就地显示 LaTeX 源码并在下方预览，代替弹出的编辑框。", "Al entrar en una fórmula en línea con las flechas o un clic, su código LaTeX aparece en su lugar, con una vista previa debajo, en vez del editor emergente."),
 ];

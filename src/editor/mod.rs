@@ -20,6 +20,7 @@ pub mod keymap;
 mod link;
 pub mod links;
 pub mod math;
+mod math_inline;
 pub mod menus;
 mod overlays;
 mod numbering;

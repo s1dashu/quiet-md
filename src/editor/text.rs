@@ -46,6 +46,42 @@ pub struct TextLayout {
     pub eqs: Vec<(usize, Bounds<Pixels>)>,
     /// 按钮: byte offset and window bounds of the button box.
     pub buttons: Vec<(usize, Bounds<Pixels>)>,
+    /// 公式原位编辑: the equation source drawn in place of its rendering.
+    pub source: Option<SourceBox>,
+}
+
+/// 公式原位编辑: what an equation's source being edited shows (byte offsets in
+/// `src`: the selection, the caret, the IME marked text).
+#[derive(Clone)]
+pub struct MathSource {
+    pub ix: usize,
+    pub src: String,
+    pub sel: Range<usize>,
+    pub head: usize,
+    pub marked: Option<Range<usize>>,
+}
+
+/// Where the source is drawn (window coordinates), for clicks and the IME.
+pub struct SourceBox {
+    pub ix: usize,
+    pub view: Bounds<Pixels>,
+    /// x of the opening `$`.
+    x0: Pixels,
+    line: ShapedLine,
+    top: Pixels,
+    text_h: Pixels,
+}
+
+impl SourceBox {
+    /// The source offset closest to window x.
+    pub fn index_for_x(&self, x: Pixels) -> usize {
+        self.line.closest_index_for_x(x - self.x0).clamp(1, self.line.len().saturating_sub(1).max(1)) - 1
+    }
+
+    /// The caret's box before source offset `i`.
+    pub fn caret_bounds(&self, i: usize) -> Bounds<Pixels> {
+        Bounds::new(point(self.x0 + self.line.x_for_index(i + 1), self.top), size(px(2.), self.text_h))
+    }
 }
 
 impl TextLayout {
@@ -354,6 +390,8 @@ pub struct RichTextElement {
     /// Single-line fields keep their horizontal scroll here, so a long URL
     /// can be read and edited instead of being clipped on the right.
     pub scroll: Option<Rc<Cell<Pixels>>>,
+    /// 公式原位编辑: this equation shows its source (and the caret is in it).
+    pub math: Option<MathSource>,
     /// Unwrapped text as wide as its longest line (at least the parent), for
     /// a scroller around it: a code block that doesn't wrap (#161).
     pub fit_content: bool,
@@ -412,10 +450,14 @@ enum EqBody {
     /// 日期提醒: the clock icon box (x, y, size), filled when it notifies,
     /// and the date text from `text_x`.
     Reminder { line: ShapedLine, icon: [f32; 3], icon_color: Hsla, filled: bool, text_x: f32 },
+    /// 公式原位编辑: `$source$` from `pad - sx` in the view (`sx`: scrolled
+    /// to keep the caret in a source wider than the row), baseline at `base`.
+    Source { line: ShapedLine, pad: f32, sx: f32, base: f32, m: MathSource },
 }
 
 enum ObjSrc {
     Eq(String),
+    Src(MathSource),
     Btn(crate::model::InlineButton, bool),
     File(crate::model::FileBlock),
     Rem(crate::model::InlineReminder),
@@ -573,6 +615,35 @@ fn button_geom(ix: usize, b: &crate::model::InlineButton, editing: bool, spec: &
             wrap_h,
             pad: 8.,
         },
+    }
+}
+
+/// 公式原位编辑: the source as `$…$` in the code font on an inline code chip,
+/// its middle where an equation's is; never wider than the row.
+fn source_geom(m: &MathSource, spec: &TextSpec, row_w: f32, window: &mut Window) -> EqGeom {
+    let fs = spec.size;
+    let shown = format!("${}$", m.src.replace('\n', " "));
+    let font = font_for(spec, &Marks { code: true, ..Marks::default() });
+    let run = |len: usize, color: Hsla| TextRun { len, font: font.clone(), color, background_color: None, underline: None, strikethrough: None };
+    let dim = Theme::text_caption();
+    let mut runs = vec![run(1, dim)];
+    if !m.src.is_empty() { runs.push(run(m.src.len(), Theme::text())); }
+    runs.push(run(1, dim));
+    let line = window.text_system().shape_line(shown.into(), px(fs), &runs, None);
+    let pad = 4.;
+    let w = f32::from(line.width) + 2. * pad;
+    let view_w = w.min((row_w - 4.).max(2. * pad + 16.));
+    let sx = if w > view_w { f32::from(hscroll(line.width, line.x_for_index(m.head + 1), px(view_w - 2. * pad), px(0.))) } else { 0. };
+    let h = (fs * 1.6).min(spec.line_height.max(fs * 1.2));
+    EqGeom {
+        ix: m.ix,
+        display: false,
+        adv: view_w + 2.,
+        box_h: h,
+        view: [1., -h / 2., view_w, h],
+        placeholder: false,
+        ext: None,
+        body: EqBody::Source { line, pad, sx, base: EQ_MIDDLE * fs, m: m.clone() },
     }
 }
 
@@ -880,7 +951,10 @@ impl Element for RichTextElement {
                 let Some(obj) = m.inline.as_ref() else { continue };
                 if let Some(src) = obj.equation() {
                     for (i, _) in self.text.text[r.clone()].char_indices() {
-                        eq_src.push((r.start + i, ObjSrc::Eq(src.to_string())));
+                        match &self.math {
+                            Some(m) if m.ix == r.start + i => eq_src.push((m.ix, ObjSrc::Src(m.clone()))),
+                            _ => eq_src.push((r.start + i, ObjSrc::Eq(src.to_string()))),
+                        }
                     }
                 } else if let Some(f) = obj.file() {
                     for (i, _) in self.text.text[r.clone()].char_indices() {
@@ -960,6 +1034,10 @@ impl Element for RichTextElement {
                         let g = Rc::new(eq_geom(*ix, src, fs, row_w, color, eqno, window));
                         eqno += math::numbers_in(src);
                         g
+                    }
+                    ObjSrc::Src(m) => {
+                        eqno += math::numbers_in(&m.src);
+                        Rc::new(source_geom(m, &spec, row_w, window))
                     }
                     ObjSrc::Btn(b, editing) => Rc::new(button_geom(*ix, b, *editing, &spec, row_w, window)),
                     ObjSrc::File(f) => Rc::new(file_geom(*ix, f, &spec, row_w, window)),
@@ -1076,7 +1154,7 @@ impl Element for RichTextElement {
                 y += h;
             }
         }
-        let mut layout = TextLayout { bounds: Bounds::new(text_origin, bounds.size), lines: p.lines, rows, line_height: lh, mono: self.spec.mono, eqs: vec![], buttons: vec![] };
+        let mut layout = TextLayout { bounds: Bounds::new(text_origin, bounds.size), lines: p.lines, rows, line_height: lh, mono: self.spec.mono, eqs: vec![], buttons: vec![], source: None };
         let mut placed = vec![];
         for e in p.eqs {
             let ri = layout.row_for(e.ix);
@@ -1092,6 +1170,10 @@ impl Element for RichTextElement {
                 layout.buttons.push((e.ix, view));
             } else {
                 layout.eqs.push((e.ix, view));
+            }
+            if let EqBody::Source { line, pad, sx, base, .. } = &e.body {
+                let top = origin.y + px(*base) - line.ascent;
+                layout.source = Some(SourceBox { ix: e.ix, view, x0: view.left() + px(pad - sx), line: line.clone(), top, text_h: line.ascent + line.descent });
             }
             let hitbox = window.insert_hitbox(view, HitboxBehavior::Normal);
             placed.push(PlacedEq { origin, view, hitbox, geom: e });
@@ -1171,7 +1253,7 @@ impl Element for RichTextElement {
                 window.paint_quad(fill(r, Theme::selection()));
             }
         }
-        for eq in prepaint.placed.iter().filter(|e| e.geom.ext.is_none()) {
+        for eq in prepaint.placed.iter().filter(|e| e.geom.ext.is_none() && !matches!(e.geom.body, EqBody::Source { .. })) {
             let ix = eq.geom.ix;
             let selected = self.selection.as_ref().is_some_and(|s| s.start <= ix && ix + 3 <= s.end);
             let pressed = EQ_PRESSED.get() == Some((self.id, ix));
@@ -1209,6 +1291,7 @@ impl Element for RichTextElement {
                 EqBody::File { .. } => self.paint_file(eq, window, cx),
                 EqBody::Doc { .. } => self.paint_doc(eq, window, cx),
                 EqBody::Reminder { .. } => self.paint_reminder(eq, window, cx),
+                EqBody::Source { .. } => self.paint_source(eq, layout, window, cx),
                 EqBody::Text { line, at, icon } => {
                     let top = o.y + px(at[1]) - line.ascent;
                     let _ = line.paint(point(o.x + px(at[0]), top), line.ascent + line.descent, TextAlign::Left, None, window, cx);
@@ -1241,6 +1324,7 @@ impl Element for RichTextElement {
             }
         }
         if self.show_caret
+            && self.math.is_none()
             && let Some(c) = self.caret
         {
             let p = if self.text.is_empty() {
@@ -1264,6 +1348,27 @@ impl Element for RichTextElement {
 }
 
 impl RichTextElement {
+    /// 公式原位编辑: the chip, then the selection, the source, the IME
+    /// underline and the caret, clipped to the chip.
+    fn paint_source(&self, eq: &PlacedEq, layout: &TextLayout, window: &mut Window, cx: &mut App) {
+        let (EqBody::Source { line, m, .. }, Some(b)) = (&eq.geom.body, &layout.source) else { return };
+        let v = eq.view;
+        window.paint_quad(quad(v, px(4.), Theme::code_chip(), px(1.), Theme::code_chip_border(), BorderStyle::Solid));
+        let x = |i: usize| b.caret_bounds(i).left();
+        window.with_content_mask(Some(ContentMask { bounds: v }), |window| {
+            if !m.sel.is_empty() {
+                window.paint_quad(fill(Bounds::from_corners(point(x(m.sel.start), b.top), point(x(m.sel.end), b.top + b.text_h)), Theme::selection()));
+            }
+            let _ = line.paint(point(b.x0, b.top), b.text_h, TextAlign::Left, None, window, cx);
+            if let Some(r) = &m.marked {
+                window.paint_quad(fill(Bounds::from_corners(point(x(r.start), b.top + b.text_h - px(1.)), point(x(r.end), b.top + b.text_h)), Theme::text()));
+            }
+            if self.show_caret {
+                window.paint_quad(fill(b.caret_bounds(m.head), Theme::caret()).corner_radii(px(1.)));
+            }
+        });
+    }
+
     fn paint_button(&self, eq: &PlacedEq, window: &mut Window, cx: &mut App) {
         let EqBody::Button { line, font, color, disabled, editing, bh, wrap_h, pad } = &eq.geom.body else { return };
         let ix = eq.geom.ix;
@@ -1379,8 +1484,9 @@ impl RichTextElement {
         let id = self.id;
         let hits: Vec<(Hitbox, usize, bool)> =
             placed.iter().map(|e| (e.hitbox.clone(), e.geom.ix, e.hitbox.is_hovered(window))).collect();
-        for (h, _, _) in &hits {
-            window.set_cursor_style(CursorStyle::PointingHand, h);
+        for ((h, _, _), e) in hits.iter().zip(placed) {
+            let source = matches!(e.geom.body, EqBody::Source { .. });
+            window.set_cursor_style(if source { CursorStyle::IBeam } else { CursorStyle::PointingHand }, h);
         }
         let hs = hits.clone();
         window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {

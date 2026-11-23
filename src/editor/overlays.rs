@@ -332,6 +332,7 @@ impl Editor {
             _ => None,
         };
         out.extend(menu_el);
+        out.extend(self.math_preview(window));
         // After the handle menu: 在下方添加's panel sits on top of it.
         out.extend(self.slash_menu(window, cx));
         out.extend(self.mention_panel(window, cx));

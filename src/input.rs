@@ -581,6 +581,7 @@ impl Render for TextField {
             eq_counter: 0,
             button_edit: None,
             scroll: Some(self.scroll.clone()),
+            math: None,
         };
         let entity = cx.entity();
         let focus = self.focus.clone();

@@ -1088,4 +1088,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("部分中文", "Kısmi Çince"),
     ("下载后可预览", "İndirdikten sonra önizleme"),
     ("其他语言和符号（{}）", "Diğer yazılar ve simgeler ({})"),
+    ("在原文中编辑公式（实验）", "Formülleri metin içinde düzenle (deneysel)"),
+    ("方向键或点击进入行内公式时，就地显示 LaTeX 源码并在下方预览，代替弹出的编辑框。", "Ok tuşları veya bir tıklama satır içi bir formüle girdiğinde, açılır düzenleyici yerine LaTeX kaynağı yerinde ve altında bir önizlemeyle gösterilir."),
 ];

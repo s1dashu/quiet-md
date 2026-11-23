@@ -174,6 +174,10 @@ pub struct Editor {
     /// Last-frame layout lookups the overlays were positioned from.
     pub probes: RefCell<Vec<(super::overlays::Probe, Option<Bounds<Pixels>>)>>,
     pub marked: Option<(BlockId, Range<usize>)>,
+    /// 公式原位编辑: the IME marked text in the source (`math_inline.rs`),
+    /// and whether a press in the source is being dragged.
+    pub math_marked: Option<Range<usize>>,
+    pub math_drag: bool,
     pub dragging: bool,
     /// Text drag: the pointer's last position and when the page last scrolled
     /// under it (`text_autoscroll`).
@@ -310,11 +314,11 @@ impl Focusable for Editor {
     }
 }
 
-fn to16(s: &str, o: usize) -> usize {
+pub(super) fn to16(s: &str, o: usize) -> usize {
     s[..o.min(s.len())].encode_utf16().count()
 }
 
-fn from16(s: &str, o16: usize) -> usize {
+pub(super) fn from16(s: &str, o16: usize) -> usize {
     let mut n = 0;
     for (i, ch) in s.char_indices() {
         if n >= o16 {
@@ -437,6 +441,8 @@ impl Editor {
             content_origin: Rc::new(Cell::new(Point::default())),
             probes: RefCell::new(vec![]),
             marked: None,
+            math_marked: None,
+            math_drag: false,
             dragging: false,
             drag_at: None,
             drag_scrolled: None,
@@ -581,10 +587,12 @@ impl Editor {
     /// Call after every command: emits Changed, keeps menus consistent,
     /// scrolls the caret into view and restarts the caret blink.
     pub fn receive_document(&mut self, core: &Core, cx: &mut Context<Self>) {
-        let sel = self.core.sel;
+        let (sel, math) = (self.core.sel, self.core.math);
         let generation = self.core.generation;
         self.core = core.clone();
         self.core.sel = sel;
+        // A visit here goes on if its equation is still there (`math_valid`).
+        self.core.math = math;
         self.core.block_sel = None;
         self.core.cell_sel = None;
         self.core.pending_marks = None;
@@ -992,6 +1000,7 @@ impl Editor {
         match kind {
             SlashKind::Formula => {
                 if let Some(p) = self.core.insert_equation("") {
+                    if super::math_inline::enabled() && self.math_open(p, 0, window, cx) { return; }
                     self.changed(window, cx);
                     return self.open_equation_editor(p, window, cx);
                 }
@@ -1486,7 +1495,7 @@ impl Editor {
     // ---- action handlers
 
     fn on_move_left(&mut self, _: &k::MoveLeft, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.guard(window, cx) || self.list_menu_key(ListKey::Left, window, cx) {
+        if !self.guard(window, cx) || self.list_menu_key(ListKey::Left, window, cx) || self.math_enter_side(false, window, cx) {
             return;
         }
         if self.core.in_block_mode() {
@@ -1499,7 +1508,7 @@ impl Editor {
     }
 
     fn on_move_right(&mut self, _: &k::MoveRight, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.guard(window, cx) || self.list_menu_key(ListKey::Right, window, cx) {
+        if !self.guard(window, cx) || self.list_menu_key(ListKey::Right, window, cx) || self.math_enter_side(true, window, cx) {
             return;
         }
         if self.core.in_block_mode() {
@@ -2406,7 +2415,7 @@ impl Editor {
 
     /// The text position under `p`, and whether it is the end of a wrapped row
     /// (the caret is drawn there rather than at the next row's start).
-    fn pos_at(&self, p: Point<Pixels>) -> Option<(Pos, bool)> {
+    pub(super) fn pos_at(&self, p: Point<Pixels>) -> Option<(Pos, bool)> {
         let us = self.core.units();
         let atomic = {
             let bb = self.block_bounds.borrow();
@@ -2460,6 +2469,9 @@ impl Editor {
         self.link_ui.click = None;
         self.btn_press_reset();
         self.gap_press = None;
+        if self.math_mouse_down(ev, window, cx) {
+            return;
+        }
         if !ev.modifiers.shift && self.button_press(ev.position) {
             // The caret stays; the action runs on release.
             window.prevent_default();
@@ -2560,6 +2572,9 @@ impl Editor {
     }
 
     pub fn drag_to(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.math_drag {
+            return self.math_drag_to(p, cx);
+        }
         self.drag_at = Some(p);
         if self.cell_drag_to(p, cx) {
             return;
@@ -2604,6 +2619,12 @@ impl Editor {
     /// arrive before the frame that registers the window-level drag listeners,
     /// so the element-level handlers call this too.
     pub fn end_drag(&mut self, p: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+        if self.math_drag {
+            if let Some(p) = p { self.math_drag_to(p, cx); }
+            self.math_drag = false;
+            self.dragging = false;
+            return cx.notify();
+        }
         if self.dragging {
             if let Some(p) = p {
                 self.drag_to(p, cx);
@@ -2888,7 +2909,7 @@ impl EntityInputHandler for Editor {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let t = self.head_text()?;
+        let t = self.math_ime_source().or_else(|| self.head_text())?;
         let r = from16(&t, range.start)..from16(&t, range.end);
         actual.replace(to16(&t, r.start)..to16(&t, r.end));
         Some(t[r].to_string())
@@ -2897,16 +2918,22 @@ impl EntityInputHandler for Editor {
     /// The caret block's length: iOS (gpui_ios) brings up the keyboard only
     /// for a handler that reports one.
     fn text_length_utf16(&mut self, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
-        Some(self.head_text()?.encode_utf16().count())
+        Some(self.math_ime_source().or_else(|| self.head_text())?.encode_utf16().count())
     }
 
     fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        if let Some((range, reversed)) = self.math_ime_selected() {
+            return Some(UTF16Selection { range, reversed });
+        }
         let t = self.head_text()?;
         let (r, reversed) = self.reported_range(&t);
         Some(UTF16Selection { range: to16(&t, r.start)..to16(&t, r.end), reversed })
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+        if self.core.math.is_some() {
+            return self.math_ime_marked();
+        }
         let (b, r) = self.marked.as_ref()?;
         if *b != self.core.sel.head.block {
             return None;
@@ -2917,11 +2944,12 @@ impl EntityInputHandler for Editor {
 
     fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
         self.marked = None;
+        self.math_marked = None;
     }
 
     fn replace_text_in_range(&mut self, range: Option<Range<usize>>, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.pointer_hidden = true;
-        if self.core.in_block_mode() {
+        if self.core.in_block_mode() || self.math_ime_replace(range.clone(), text, false, None, window, cx) {
             return;
         }
         let head = self.core.sel.head.block;
@@ -2948,7 +2976,7 @@ impl EntityInputHandler for Editor {
         cx: &mut Context<Self>,
     ) {
         self.pointer_hidden = true;
-        if self.core.in_block_mode() {
+        if self.core.in_block_mode() || self.math_ime_replace(range.clone(), text, true, new_sel.clone(), window, cx) {
             return;
         }
         if self.core.text_of(self.core.sel.head.block).is_none() || self.core.sel.head.block != self.core.sel.anchor.block {
@@ -2982,6 +3010,9 @@ impl EntityInputHandler for Editor {
     }
 
     fn bounds_for_range(&mut self, range: Range<usize>, _: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+        if self.core.math.is_some() && let Some(b) = self.math_ime_bounds(range.clone()) {
+            return Some(b);
+        }
         let head = self.core.sel.head.block;
         let t = self.core.text_of(head)?.text.clone();
         let cache = self.cache.borrow();
@@ -2996,6 +3027,9 @@ impl EntityInputHandler for Editor {
     }
 
     fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        if self.core.math.is_some() && let Some(i) = self.math_ime_index(p) {
+            return Some(i);
+        }
         let head = self.core.sel.head.block;
         let t = self.core.text_of(head)?.text.clone();
         let cache = self.cache.borrow();
@@ -3012,6 +3046,8 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
 ) -> impl Fn(&A, &mut Window, &mut App) + 'static {
     cx.listener(move |e, a: &A, w, cx| {
         if e.cd.dialog.is_none() && !e.tables_focused(w, cx) {
+            // 公式原位编辑: the source being edited takes the action first.
+            if e.math_action(a, w, cx) { return }
             f(e, a, w, cx)
         } else {
             cx.propagate()

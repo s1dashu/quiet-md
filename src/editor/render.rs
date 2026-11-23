@@ -262,6 +262,7 @@ impl R<'_> {
             eq_counter: self.eqnos.get(&id).copied().unwrap_or(0),
             button_edit: if self.ghost { None } else { self.ed.button_preview(id) },
             scroll: None,
+            math: if self.ghost { None } else { self.ed.math_shown(id) },
             fit_content: false,
         }
     }
