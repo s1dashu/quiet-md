@@ -1,0 +1,25 @@
+# The AI assistant's agent layer (docs/design/ai-assistant.md): finds the
+# user's own `codex`, keeps one `codex app-server` running and talks to it.
+# No GPUI, no async runtime, so it builds and tests on its own.
+[package]
+name = "quiet_agent"
+version.workspace = true
+edition = "2024"
+description = "Codex app-server client for Quiet.md's assistant"
+license = "MIT"
+authors = ["s1dashu"]
+publish = false
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[lints]
+workspace = true
+
+# The fake `codex app-server` the tests drive (tests/app_server.rs).
+[[bin]]
+name = "quiet-agent-fake-app-server"
+path = "tests/support/fake_app_server.rs"
+test = false
+doc = false
