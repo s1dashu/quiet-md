@@ -513,7 +513,7 @@ impl Editor {
             tables: Default::default(),
             captions: HashMap::new(),
             img: super::image::ImageUi::new(cx),
-            file: super::file::FileUi::new(),
+            file: super::file::FileUi::new(cx),
             heading_orders: Default::default(),
             size_pick: (0, 0),
             modified,
@@ -2066,6 +2066,7 @@ impl Editor {
             return;
         }
         let fake = crate::clipboard::FAKE_CLIPBOARD.lock().unwrap().clone();
+        let native_files = match &fake { Some(f) => f.files.clone(), None => crate::clipboard::clipboard_files() };
         let item = if fake.is_some() { None } else { cx.read_from_clipboard() };
         let (text, meta, image) = match (&fake, &item) {
             (Some(f), _) => (Some(f.text.clone()), None, (!f.images.is_empty()).then(|| f.images.iter().collect::<Vec<_>>())),
@@ -2081,14 +2082,14 @@ impl Editor {
                 let image = (!images.is_empty()).then_some(images);
                 (s.map(|s| s.text().clone()), s.and_then(|s| s.metadata_json::<String>()), image)
             }
+            (None, None) if !native_files.is_empty() => (None, None, None),
             (None, None) => return,
         };
-        // A macOS file copy (including WeChat) can contain only native file
-        // references. GPUI returns these before looking for bitmap data.
-        let file_refs = item.as_ref().and_then(|item| item.entries().iter().find_map(|entry| match entry {
+        // Prefer modern native URLs, then GPUI's platform file references.
+        let file_refs = if !native_files.is_empty() { native_files } else { item.as_ref().and_then(|item| item.entries().iter().find_map(|entry| match entry {
             ClipboardEntry::ExternalPaths(files) => Some(files.paths()),
             _ => None,
-        }));
+        })).map_or_else(Vec::new, |paths| paths.to_vec()) };
         if self.core.in_block_mode() {
             // Paste after the selected blocks.
             if let Some(last) = self.core.block_sel_ids().last().copied() {
@@ -2102,14 +2103,21 @@ impl Editor {
         let md = self.markdown;
         let keep = |b: Vec<Block>| if md { crate::markdown::keepable(b) } else { b };
         let internal = meta.and_then(|xml| docxml::parse(&xml).ok()).map(|d| keep(d.blocks)).filter(|b| !b.is_empty());
+        // File copies may include Finder icons as bitmap or HTML fallbacks.
+        // Real file contents win, including for image-only copies.
+        if !plain && !md && rich_target && internal.is_none() && file_refs.iter().any(|p| super::file::kind_of(&p.to_string_lossy()) != super::file::Kind::Image) {
+            self.paste_files(file_refs, window, cx);
+            return;
+        }
+        let file_images = if !plain && rich_target && internal.is_none() { super::image::clipboard_file_images(&file_refs) } else { None };
         let html = match &fake {
             Some(f) => f.html.clone(),
-            None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
+            None if !plain && internal.is_none() && file_images.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
                 crate::clipboard::clipboard_html()
             }
             None => None,
         };
-        let html = html.filter(|_| !plain && rich_target).map(|h| {
+        let html = html.filter(|_| !plain && rich_target && file_images.is_none()).map(|h| {
             let mut b = keep(crate::paste::html_to_blocks(&h));
             super::image::localize_pasted_images(&mut b);
             b
@@ -2134,6 +2142,11 @@ impl Editor {
             }
         } else if let Some(b) = internal {
             self.core.paste_blocks(b);
+        } else if let Some(result) = file_images {
+            match result {
+                Ok(mut blocks) => { blocks.push(Block::text("")); self.core.paste_blocks(blocks); }
+                Err(msg) => self.toast(msg, cx),
+            }
         } else if let Some(b) = html.filter(|b| !b.is_empty() && !restates(b) && !(image.is_some() && b.iter().all(|b| matches!(b.kind, BlockKind::Image { .. })))) {
             let remote = super::image::pasted_remote(&b);
             self.core.paste_blocks(b);
@@ -2155,8 +2168,8 @@ impl Editor {
         } else {
             let files = if !rich_target {
                 None
-            } else if let Some(paths) = file_refs.filter(|paths| !paths.is_empty()) {
-                paths.iter().all(|p| super::image::is_local_image_file(p)).then(|| paths.to_vec())
+            } else if !file_refs.is_empty() {
+                file_refs.iter().all(|p| super::image::is_local_image_file(p)).then(|| file_refs.clone())
             } else {
                 text.as_deref().and_then(|s| {
                     s.lines().map(str::trim).filter(|line| !line.is_empty())

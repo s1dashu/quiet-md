@@ -867,7 +867,7 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
                 window.dispatch_keystroke(ks, cx);
             }
         }
-        // `clip html|text|image <file>`: what the next paste reads instead of the
+        // `clip html|text|image <file>` / `clip files <path>|…`: what the next paste reads instead of the
         // system clipboard (`clip text` with HTML keeps its plain fallback).
         "clip" => {
             let (kind, path) = rest.trim().split_once(' ').unwrap_or((rest.trim(), ""));
@@ -883,6 +883,7 @@ fn run(cmd: &str, rest: &str, window: &mut Window, cx: &mut App) {
                     cur.images.push(Image::from_bytes(format, bytes));
                 }
                 "html" => cur.html = Some(std::fs::read_to_string(path.trim()).unwrap_or_default()),
+                "files" => cur.files = path.trim().split('|').map(std::path::PathBuf::from).collect(),
                 _ => cur.text = std::fs::read_to_string(path.trim()).unwrap_or_default(),
             }
         }

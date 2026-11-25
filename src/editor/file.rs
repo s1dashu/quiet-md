@@ -1,6 +1,6 @@
 //! 视频或文件 (`<figure><source/></figure>`): the file card, the preview
-//! (the first page or frame from Quick Look's thumbnailer, the inline audio
-//! player), its toolbar, and inserting picked or dropped files.
+//! (the first page from Quick Look's thumbnailer, inline video and audio
+//! players), its toolbar, and inserting picked or dropped files.
 
 use fdl_core::vfs::{PathExt as _, KindExt as _};
 use super::core::{DropPlace, Pos, Selection, TITLE};
@@ -11,17 +11,29 @@ use crate::store::image_path;
 use crate::model::*;
 use crate::store::Store;
 use crate::editor_theme::{self as theme, Theme, craft};
-use crate::editor_ui::{ROW_RADIUS, TipExt, icon};
+use crate::editor_ui::{TipExt, icon};
 use crate::design::toolbar::{TOOLBAR_H, toolbar_layout, w as tw};
 use crate::design::{Button, ButtonGroupSeparator, ButtonSize, Toggle, Toolbar};
 use super::image::picture;
 use gpui::{prelude::FluentBuilder, *};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+mod video;
+
+actions!(video_player, [VideoClose, VideoToggle]);
+
+pub(super) fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("escape", VideoClose, Some("VideoPlayer")),
+        KeyBinding::new("space", VideoToggle, Some("VideoPlayer")),
+    ]);
+}
 
 /// `.docx-width-mode .preview-wrap:not(audio):not(video) { max-width: 818px }`.
 const PREVIEW_MAX_W: f32 = 818.;
@@ -67,7 +79,7 @@ pub fn kind_of(name: &str) -> Kind {
     }
 }
 
-/// What 预览视图 can show: a first page / frame, or the audio player for
+/// What 预览视图 can show: a first page or an inline media player for
 /// the formats AVFoundation plays.
 fn preview_of(name: &str) -> Option<Kind> {
     let k = kind_of(name);
@@ -150,6 +162,10 @@ pub fn format_size(n: u64) -> String {
     format!("{v:.2}{}", UNITS[i])
 }
 
+fn skip_time(time: f64, duration: f64, delta: f64) -> Option<f64> {
+    (time.is_finite() && duration.is_finite() && duration > 0. && delta.is_finite()).then(|| (time + delta).clamp(0., duration))
+}
+
 fn clock(t: f64) -> String {
     let s = t.max(0.).round() as u64;
     format!("{:02}:{:02}", s / 60, s % 60)
@@ -173,16 +189,21 @@ pub(super) struct FileUi {
     sizes: RefCell<HashMap<PathBuf, Option<u64>>>,
     /// Box of every card / preview drawn this frame (window coordinates).
     pub(super) boxes: Rc<RefCell<HashMap<BlockId, Bounds<Pixels>>>>,
-    /// Audio players by file, made when the player first shows.
+    /// Media players by file, made when the player first shows.
     players: RefCell<HashMap<PathBuf, Option<Rc<player::Player>>>>,
-    /// Progress bars of the audio players drawn this frame.
+    /// Progress bars of the media players drawn this frame.
     bars: Rc<RefCell<HashMap<BlockId, Bounds<Pixels>>>>,
+    video_hover: RefCell<HashMap<(BlockId, bool), Rc<Cell<bool>>>>,
+    opened_video: Option<PathBuf>,
+    fullscreen: Option<BlockId>,
+    fullscreen_focus: FocusHandle,
+    seeking: Option<BlockId>,
     muted: bool,
     ticking: bool,
 }
 
 impl FileUi {
-    pub fn new() -> Self {
+    pub fn new(cx: &mut App) -> Self {
         FileUi {
             thumbs: RefCell::default(),
             queue: RefCell::default(),
@@ -190,6 +211,11 @@ impl FileUi {
             boxes: Rc::default(),
             players: RefCell::default(),
             bars: Rc::default(),
+            video_hover: RefCell::default(),
+            opened_video: None,
+            fullscreen: None,
+            fullscreen_focus: cx.focus_handle(),
+            seeking: None,
             muted: false,
             ticking: false,
         }
@@ -234,8 +260,8 @@ impl FileUi {
         pl
     }
 
-    fn any_playing(&self) -> bool {
-        self.players.borrow().values().flatten().any(|p| p.playing())
+    fn needs_tick(&self) -> bool {
+        self.players.borrow().values().flatten().any(|p| p.needs_tick())
     }
 }
 
@@ -312,19 +338,6 @@ fn open_listener(p: Option<PathBuf>, cx: &mut Context<Editor>) -> impl Fn(&Mouse
 /// A toolbar action (design::toolbar): a ghost `icon-sm` button.
 fn tool_btn(id: impl Into<ElementId>) -> Button { Button::ghost(id).sized(ButtonSize::Sm) }
 
-/// The audio player's buttons (in the page).
-fn shell_btn(id: impl Into<ElementId>) -> Stateful<Div> {
-    div()
-        .id(id)
-        .size(px(24.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(ROW_RADIUS))
-        .cursor_pointer()
-        .hover(|s| s.bg(Theme::fill_hover_strong()))
-}
-
 impl R<'_> {
     pub(super) fn file(&self, b: &Block, f: &FileBlock, env: Env, cx: &mut Context<Editor>) -> AnyElement {
         let ed = self.ed;
@@ -341,7 +354,8 @@ impl R<'_> {
         let path = local_path(f);
         let size = path.as_ref().and_then(|p| ed.file.size(p));
         let kind = kind_of(&f.name);
-        let preview = (f.view == FileView::Preview && size.is_some()).then(|| preview_of(&f.name)).flatten();
+        let opened_video = kind == Kind::Video && path.as_ref().is_some_and(|p| ed.file.opened_video.as_ref() == Some(p));
+        let preview = ((f.view == FileView::Preview || opened_video) && size.is_some()).then(|| preview_of(&f.name)).flatten();
         // The card rim: a hairline, a step darker under the pointer, the
         // accent once selected.
         let border = if selected {
@@ -372,140 +386,25 @@ impl R<'_> {
             })
         };
         let body: AnyElement = match (preview, &path) {
-            (Some(Kind::Audio), Some(p)) => {
-                let pl = ed.file.player(p);
-                let (t, d) = pl.as_ref().map_or((0., 0.), |pl| (pl.time(), pl.duration()));
-                let playing = pl.as_ref().is_some_and(|pl| pl.playing());
-                let frac = if d > 0. { (t / d).clamp(0., 1.) as f32 } else { 0. };
-                let bars = ed.file.bars.clone();
-                let bar_rec = (!self.ghost).then(|| {
-                    canvas(move |bounds, _, _| { bars.borrow_mut().insert(id, bounds); }, |_, _, _, _| {})
-                        .absolute()
-                        .inset_0()
-                });
-                let ok = pl.is_some();
-                let title = div()
-                    .min_h(px(30.))
-                    .mb(px(2.))
-                    .flex()
-                    .items_center()
-                    .child(div().flex_1().min_w_0().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).text_ellipsis().whitespace_nowrap().overflow_hidden().child(f.name.clone()))
-                    .child(div().ml(px(8.)).flex_none().text_size(px(12.)).text_color(Theme::text_caption()).child(if ok { format!("{} / {}", clock(t), clock(d)) } else { crate::settings::text("无法播放").into() }));
-                let icon_c = if ok { Theme::icon() } else { Theme::text_disabled() };
-                let play = shell_btn((if playing { "file-pause" } else { "file-play" }, id.0))
-                    .tip_above(if playing { crate::settings::text("暂停") } else { crate::settings::text("播放") }, None)
-                    .child(icon(if playing { "pause-filled" } else { "play-filled" }, 18., icon_c))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |e, _, window, cx| {
-                            cx.stop_propagation();
-                            window.prevent_default();
-                            e.toggle_audio(id, cx);
-                        }),
-                    );
-                let muted = ed.file.muted;
-                let volume = shell_btn((if muted { "file-unmute" } else { "file-mute" }, id.0))
-                    .tip_above(if muted { crate::settings::text("取消静音") } else { crate::settings::text("静音") }, None)
-                    .child(icon(if muted { "volume-x" } else { "volume-2" }, 18., icon_c))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|e, _, window, cx| {
-                            cx.stop_propagation();
-                            window.prevent_default();
-                            e.toggle_mute(cx);
-                        }),
-                    );
-                let progress = div()
-                    .id(("file-progress", id.0))
-                    .relative()
-                    .flex_1()
-                    .h(px(12.))
-                    .flex()
-                    .items_center()
-                    .cursor_pointer()
-                    .child(
-                        div()
-                            .relative()
-                            .w_full()
-                            .h(px(4.))
-                            .rounded(px(2.))
-                            .bg(Theme::line_border())
-                            .child(div().absolute().left_0().top_0().bottom_0().w(relative(frac)).rounded(px(2.)).bg(Theme::primary())),
-                    )
-                    .children(bar_rec)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
-                            cx.stop_propagation();
-                            window.prevent_default();
-                            e.seek_audio(id, ev.position.x, cx);
-                        }),
-                    );
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(title)
-                    .child(
-                        div()
-                            .id(("file-audio", id.0))
-                            .relative()
-                            .px(px(18.))
-                            .py(px(6.))
-                            .flex()
-                            .items_center()
-                            .gap(px(14.))
-                            // The player bar: a quiet fill in the card rim.
-                            .rounded(px(RADIUS))
-                            .bg(Theme::bg_overlay())
-                            .border_1()
-                            .border_color(border)
-                            .child(play)
-                            .child(progress)
-                            .child(volume)
-                            .children(recorder),
-                    )
-                    .into_any_element()
-            }
+            (Some(Kind::Audio | Kind::Video), Some(p)) => ed.media(id, f, p, container, selected, self.ghost, None, cx),
             (Some(k), Some(p)) => {
-                let video = k == Kind::Video;
-                let w = if video { container } else { container.min(PREVIEW_MAX_W) };
+                let w = container.min(PREVIEW_MAX_W);
                 let iw = (w - 2.).max(0.);
                 let thumb = ed.file.thumb(p, k);
                 let content: AnyElement = match &thumb {
                     Thumb::Ready(t) => {
                         let (tw, th) = ed.img.dims(t).unwrap_or((16., 9.));
                         let full = iw * th / tw.max(1.);
-                        let h = full.clamp(if video { 160. } else { 120. }, 600.);
-                        let pic = picture(t, iw.max(full)).object_fit(if video { ObjectFit::Contain } else { ObjectFit::Fill }).id(("file-thumb", id.0));
-                        let pic = if video { pic.size_full() } else { pic.absolute().top_0().left_0().w(px(iw)).h(px(full)) };
+                        let h = full.clamp(120., 600.);
+                        let pic = picture(t, iw.max(full)).object_fit(ObjectFit::Fill).id(("file-thumb", id.0));
+                        let pic = pic.absolute().top_0().left_0().w(px(iw)).h(px(full));
                         div()
                             .relative()
                             .w(px(iw))
                             .h(px(h))
                             .overflow_hidden()
-                            .bg(if video { gpui::black() } else { Theme::bg_body() })
+                            .bg(Theme::bg_body())
                             .child(pic)
-                            .when(video, |d| {
-                                let l = open_listener(path.clone(), cx);
-                                d.child(
-                                    div().absolute().inset_0().flex().items_center().justify_center().child(
-                                        div()
-                                            .id(("file-play-video", id.0))
-                                            .size(px(56.))
-                                            .rounded_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .bg(theme::rgbaf(0, 0, 0, 0.5))
-                                            .cursor_pointer()
-                                            .hover(|s| s.bg(theme::rgbaf(0, 0, 0, 0.65)))
-                                            .tip_above(crate::settings::text("播放"), None)
-                                            .child(icon("play-filled", 24., gpui::white()))
-                                            .on_mouse_down(MouseButton::Left, l),
-                                    ),
-                                )
-                            })
                             .into_any_element()
                     }
                     t => div()
@@ -527,7 +426,7 @@ impl R<'_> {
                     .px(px(12.))
                     .flex()
                     .items_center()
-                    .bg(if video { Theme::bg_body() } else { Theme::bg_overlay() })
+                    .bg(Theme::bg_overlay())
                     .border_t_1()
                     .border_color(Theme::line_divider())
                     .child(type_icon(kind, 20.))
@@ -627,6 +526,169 @@ impl R<'_> {
 }
 
 impl Editor {
+    /// Shared inline and fullscreen controls keep the same player, time and volume.
+    fn media(&self, id: BlockId, f: &FileBlock, p: &Path, container: f32, selected: bool, ghost: bool, height: Option<f32>, cx: &mut Context<Self>) -> AnyElement {
+        let ed = self;
+        let kind = kind_of(&f.name);
+        let boxes = ed.file.boxes.clone();
+        let recorder = (!ghost && height.is_none()).then(|| {
+            canvas(move |bounds, _, _| { boxes.borrow_mut().insert(id, bounds); }, |_, _, _, _| {}).absolute().inset_0()
+        });
+        let video = kind == Kind::Video;
+        let scope = if height.is_some() { "video-full" } else { "video-inline" };
+        let anchor = |part: &str| crate::devtools::anchor_probe(format!("{scope}-{part}"));
+        let pl = (!ghost).then(|| ed.file.player(p)).flatten();
+        let (t, d) = pl.as_ref().map_or((0., 0.), |pl| (pl.time(), pl.duration()));
+        let playing = pl.as_ref().is_some_and(|pl| pl.playing());
+        let frac = if d > 0. { (t / d).clamp(0., 1.) as f32 } else { 0. };
+        let bars = ed.file.bars.clone();
+        let bar_rec = (!ghost).then(|| {
+            canvas(move |bounds, _, _| { bars.borrow_mut().insert(id, bounds); }, |_, _, _, _| {})
+                .absolute()
+                .inset_0()
+        });
+        let ok = pl.as_ref().is_some_and(|pl| !pl.failed());
+        let title = div()
+            .min_h(px(30.))
+            .mb(px(2.))
+            .flex()
+            .items_center()
+            .when(video, |d| d.child(div().mr(px(8.)).child(type_icon(kind, 20.))))
+            .child(div().flex_1().min_w_0().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).text_ellipsis().whitespace_nowrap().overflow_hidden().child(f.name.clone()))
+            .child(div().ml(px(8.)).flex_none().text_size(px(12.)).text_color(Theme::text_caption()).child(if ok { format!("{} / {}", clock(t), clock(d)) } else { crate::settings::text("无法播放").into() }));
+        let play = Button::ghost((if playing { "file-pause" } else { "file-play" }, id.0)).sized(ButtonSize::Xs).disabled(!ok)
+            .tip_above(if playing { crate::settings::text("暂停") } else { crate::settings::text("播放") }, None)
+            .editor_icon(if playing { "pause-filled" } else { "play-filled" })
+            .children(video.then(|| anchor("play")).flatten())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |e, _, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    e.toggle_media(id, cx);
+                }),
+            );
+        let muted = ed.file.muted;
+        let volume = Button::ghost((if muted { "file-unmute" } else { "file-mute" }, id.0)).sized(ButtonSize::Xs).disabled(!ok)
+            .tip_above(if muted { crate::settings::text("取消静音") } else { crate::settings::text("静音") }, None)
+            .editor_icon(if muted { "volume-x" } else { "volume-2" })
+            .children(video.then(|| anchor("mute")).flatten())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|e, _, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    e.toggle_mute(cx);
+                }),
+            );
+        let progress = div()
+            .id(("file-progress", id.0))
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h(px(12.))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(px(4.))
+                    .rounded(px(2.))
+                    .bg(crate::design::color::border())
+                    .child(div().absolute().left_0().top_0().bottom_0().w(relative(frac)).rounded(px(2.)).bg(crate::design::color::primary())),
+            )
+            .children(bar_rec)
+            .children(video.then(|| anchor("progress")).flatten())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |e, ev: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    e.file.seeking = Some(id);
+                    e.seek_media(id, ev.position.x, cx);
+                }),
+            )
+            .on_mouse_move(cx.listener(move |e, ev: &MouseMoveEvent, _, cx| {
+                if e.file.seeking == Some(id) && ev.pressed_button == Some(MouseButton::Left) {
+                    cx.stop_propagation();
+                    e.seek_media(id, ev.position.x, cx);
+                }
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|e, _, _, _| e.file.seeking = None))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|e, _, _, _| e.file.seeking = None));
+        let body = if video {
+            let full = height.is_some();
+            let hover = ed.file.video_hover.borrow_mut().entry((id, full)).or_default().clone();
+            let probe = hover.clone();
+            let enabled = !ghost && if full { ed.file.fullscreen == Some(id) } else { ed.file.fullscreen.is_none() };
+            // Popovers occlude their parent's hitbox. Use the video's bounds so
+            // moving onto the floating controls keeps them visible too.
+            let hover_probe = canvas(|bounds, window, _| bounds.intersect(&window.content_mask().bounds), move |_, bounds, window, _| {
+                let inside = enabled && bounds.contains(&window.mouse_position());
+                if probe.replace(inside) != inside { window.request_animation_frame(); }
+                let probe = probe.clone();
+                window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, _| {
+                    if phase != DispatchPhase::Capture { return; }
+                    let inside = enabled && bounds.contains(&ev.position);
+                    if probe.replace(inside) != inside { window.refresh(); }
+                });
+            }).absolute().inset_0();
+            let skip = |forward: bool, cx: &mut Context<Self>| {
+                let part = if forward { "forward" } else { "back" };
+                Button::ghost((if forward { "file-forward" } else { "file-back" }, id.0)).sized(ButtonSize::Xs)
+                    .label(if forward { "+3s" } else { "−3s" }).disabled(!ok || d <= 0. || if forward { t >= d } else { t <= 0. })
+                    .tip_above(if forward { crate::settings::tr("前进 3 秒", "Skip forward 3 seconds") } else { crate::settings::tr("后退 3 秒", "Skip back 3 seconds") }, None)
+                    .children(anchor(part))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                        cx.stop_propagation();
+                        window.prevent_default();
+                        e.skip_media(id, if forward { 3. } else { -3. }, cx);
+                    }))
+            };
+            let controls = div().absolute().bottom(px(12.)).left(px(12.)).right(px(12.))
+                .when(playing && !hover.get() && ed.file.seeking != Some(id), |d| d.invisible())
+                .child(Toolbar::new(("file-video-controls", id.0)).w_full()
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| { window.prevent_default(); cx.stop_propagation(); })
+                    .child(play).child(skip(false, cx)).child(progress).child(skip(true, cx)).child(volume));
+            let center = (!playing && ok).then(|| {
+                div().absolute().inset_0().flex().items_center().justify_center().child(
+                    Button::primary(("file-video-center-play", id.0)).sized(ButtonSize::Lg).rounded_full()
+                        .editor_icon("play-filled").shadow(crate::design::shadow::popover())
+                        .tip_above(crate::settings::text("播放"), None).children(anchor("center-play"))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                            cx.stop_propagation();
+                            window.prevent_default();
+                            e.toggle_media(id, cx);
+                        }))
+                )
+            });
+            let content = pl.as_ref().and_then(|pl| pl.picture(container, height)).unwrap_or_else(|| {
+                div().w_full().h(px(height.unwrap_or((container * 9. / 16.).clamp(160., 600.)))).flex().items_center().justify_center()
+                    .child(if ok && pl.as_ref().is_some_and(|pl| pl.needs_tick()) {
+                        super::image::spinning("file-video-loading", 32., crate::design::color::muted_foreground(), 2.)
+                    } else { div().child(crate::settings::text("无法播放")).into_any_element() }).into_any_element()
+            });
+            div().id(("file-video", id.0)).relative().w_full().mb(px(6.))
+                .bg(gpui::black()).text_color(gpui::white()).child(content).children(center).child(controls).child(hover_probe)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                    e.toggle_media(id, cx);
+                })).into_any_element()
+        } else {
+            div().id(("file-audio", id.0)).relative().px(px(18.)).py(px(6.)).flex().items_center().gap(px(14.))
+                .rounded(px(crate::design::geo().button_r)).bg(crate::design::color::muted())
+                .child(play).child(progress).child(volume).into_any_element()
+        };
+        let mut title = Some(title);
+        div().relative().w_full().flex().flex_col().bg(crate::design::color::background())
+            .when(selected, |d| d.shadow(vec![crate::design::shadow::ring(crate::design::color::ring(), 0.5)]))
+            .when(!video, |d| d.children(title.take()))
+            .child(body).children(title).children(recorder).into_any_element()
+    }
+
     /// The attachment showing as selected (toolbar, accent rim).
     pub(super) fn active_file(&self, focused: bool) -> Option<BlockId> {
         let h = self.core.sel.head.block;
@@ -640,6 +702,19 @@ impl Editor {
 
     pub(super) fn open_file(&mut self, p: Option<&Path>, cx: &mut Context<Self>) {
         match p.filter(|p| p.fs_is_file()) {
+            Some(p) if kind_of(&p.to_string_lossy()) == Kind::Video && previewable(&p.to_string_lossy()) => {
+                let mut in_page = false;
+                self.core.doc.for_each_block(|b| {
+                    if let BlockKind::File(f) = &b.kind { in_page |= local_path(f).as_deref() == Some(p); }
+                });
+                if !in_page { return quick_look(p); }
+                let Some(pl) = self.file.player(p).filter(|pl| !pl.failed()) else { return self.toast(crate::settings::text("无法播放"), cx) };
+                for other in self.file.players.borrow().values().flatten() { other.pause(); }
+                self.file.opened_video = Some(p.to_path_buf());
+                pl.play();
+                self.tick_media(cx);
+                cx.notify();
+            }
             Some(p) => quick_look(p),
             None => self.toast(crate::settings::text("文件不存在"), cx),
         }
@@ -666,15 +741,64 @@ impl Editor {
         .detach();
     }
 
-    // ---- audio
+    // ---- media
 
-    fn audio_player(&self, id: BlockId) -> Option<Rc<player::Player>> {
+    fn open_video_fullscreen(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pl) = self.media_player(id).filter(|p| !p.failed()) else { return self.toast(crate::settings::text("无法播放"), cx) };
+        self.file.fullscreen = Some(id);
+        self.slash = None;
+        self.menu = None;
+        window.focus(&self.file.fullscreen_focus, cx);
+        if pl.needs_tick() { self.tick_media(cx); }
+        cx.notify();
+    }
+
+    fn close_video_fullscreen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.file.fullscreen = None;
+        self.file.seeking = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    pub(super) fn video_fullscreen_el(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let id = self.file.fullscreen?;
+        let Some(BlockKind::File(f)) = self.core.kind_of(id).cloned() else {
+            self.close_video_fullscreen(window, cx);
+            return None;
+        };
+        let Some(path) = local_path(&f) else { self.close_video_fullscreen(window, cx); return None };
+        let vp = window.viewport_size();
+        let width = (f32::from(vp.width) - 32.).max(1.);
+        let height = (f32::from(vp.height) - 116.).max(80.);
+        let close = Button::ghost("video-close").sized(ButtonSize::Sm).editor_icon("x")
+            .tip_above(crate::settings::text("关闭"), Some("Esc"))
+            .children(crate::devtools::anchor_probe("video-close"))
+            .on_mouse_down(MouseButton::Left, cx.listener(|e, _, window, cx| {
+                cx.stop_propagation();
+                window.prevent_default();
+                e.close_video_fullscreen(window, cx);
+            }));
+        let layer = div().id("video-fullscreen").key_context("VideoPlayer").track_focus(&self.file.fullscreen_focus)
+            .occlude().relative().w(vp.width).h(vp.height).p(px(16.)).flex().flex_col().gap(px(8.))
+            .bg(crate::design::color::background())
+            .on_action(cx.listener(|e, _: &VideoClose, window, cx| e.close_video_fullscreen(window, cx)))
+            .on_action(cx.listener(move |e, _: &VideoToggle, _, cx| e.toggle_media(id, cx)))
+            .on_mouse_down(MouseButton::Left, |_, window, cx| { window.prevent_default(); cx.stop_propagation(); })
+            .on_mouse_up(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, window, cx| { window.prevent_default(); cx.stop_propagation(); })
+            .on_scroll(|_, _, cx| cx.stop_propagation())
+            .child(div().w_full().h(px(32.)).flex_none().flex().justify_end().child(close))
+            .child(self.media(id, &f, &path, width, false, false, Some(height), cx));
+        Some(deferred(anchored().position_mode(AnchoredPositionMode::Window).position(point(px(0.), px(0.))).child(layer)).with_priority(10).into_any_element())
+    }
+
+    fn media_player(&self, id: BlockId) -> Option<Rc<player::Player>> {
         let Some(BlockKind::File(f)) = self.core.kind_of(id) else { return None };
         self.file.player(&local_path(f)?)
     }
 
-    fn toggle_audio(&mut self, id: BlockId, cx: &mut Context<Self>) {
-        let Some(pl) = self.audio_player(id) else { return self.toast(crate::settings::text("无法播放该音频"), cx) };
+    fn toggle_media(&mut self, id: BlockId, cx: &mut Context<Self>) {
+        let Some(pl) = self.media_player(id).filter(|pl| !pl.failed()) else { return self.toast(crate::settings::text("无法播放"), cx) };
         if pl.playing() {
             pl.pause();
         } else {
@@ -685,16 +809,31 @@ impl Editor {
                 }
             }
             pl.play();
-            self.tick_audio(cx);
+            self.tick_media(cx);
         }
         cx.notify();
     }
 
-    fn seek_audio(&mut self, id: BlockId, x: Pixels, cx: &mut Context<Self>) {
-        let Some(pl) = self.audio_player(id) else { return };
+    fn pause_media(&self, id: BlockId) {
+        let Some(BlockKind::File(f)) = self.core.kind_of(id) else { return };
+        let Some(p) = local_path(f) else { return };
+        if let Some(Some(pl)) = self.file.players.borrow().get(&p) { pl.pause(); }
+    }
+
+    fn seek_media(&mut self, id: BlockId, x: Pixels, cx: &mut Context<Self>) {
+        let Some(pl) = self.media_player(id) else { return };
         let Some(b) = self.file.bars.borrow().get(&id).copied() else { return };
         let k = ((x - b.left()) / b.size.width.max(px(1.))).clamp(0., 1.) as f64;
         pl.seek(k * pl.duration());
+        self.tick_media(cx);
+        cx.notify();
+    }
+
+    fn skip_media(&mut self, id: BlockId, delta: f64, cx: &mut Context<Self>) {
+        let Some(pl) = self.media_player(id).filter(|pl| !pl.failed()) else { return };
+        let Some(target) = skip_time(pl.seek_time(), pl.duration(), delta) else { return };
+        pl.seek(target);
+        self.tick_media(cx);
         cx.notify();
     }
 
@@ -708,18 +847,18 @@ impl Editor {
     }
 
     /// Redraws the time and progress while something plays.
-    fn tick_audio(&mut self, cx: &mut Context<Self>) {
+    fn tick_media(&mut self, cx: &mut Context<Self>) {
         if self.file.ticking {
             return;
         }
         self.file.ticking = true;
         cx.spawn(async |this, cx| {
             loop {
-                cx.background_executor().timer(Duration::from_millis(200)).await;
+                cx.background_executor().timer(Duration::from_millis(33)).await;
                 let go = this
                     .update(cx, |e, cx| {
                         cx.notify();
-                        let go = e.file.any_playing();
+                        let go = e.file.needs_tick();
                         e.file.ticking = go;
                         go
                     })
@@ -736,6 +875,7 @@ impl Editor {
 
     /// Makes queued Quick Look thumbnails off the main thread.
     pub(super) fn start_thumbs(&mut self, cx: &mut Context<Self>) {
+        if self.file.needs_tick() { self.tick_media(cx); }
         let queued: Vec<PathBuf> = self.file.queue.borrow_mut().drain(..).collect();
         for p in queued {
             let q = p.clone();
@@ -767,8 +907,8 @@ impl Editor {
         }
         let Some(BlockKind::File(f)) = self.core.kind_of(id) else { return None };
         let preview = preview_of(&f.name);
-        let view = f.view;
         let path = local_path(f);
+        let view = if path.as_ref().is_some_and(|p| self.file.opened_video.as_ref() == Some(p)) { FileView::Preview } else { f.view };
         let act = |f: fn(&mut Editor, BlockId, &mut Window, &mut Context<Editor>)| {
             cx.listener(move |e: &mut Editor, _: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
@@ -785,12 +925,16 @@ impl Editor {
         if preview.is_some_and(|k| k != Kind::Audio) {
             let p = path.clone();
             bar = bar.child(
-                tool_btn("ftb-full").editor_icon("maximize").tip_above(crate::settings::text("全屏"), None).on_mouse_down(
+                tool_btn("ftb-full").editor_icon("maximize").children(crate::devtools::anchor_probe("file-fullscreen")).tip_above(crate::settings::text("全屏"), None).on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |e, _, window, cx| {
                         cx.stop_propagation();
                         window.prevent_default();
-                        e.open_file(p.as_deref(), cx);
+                        match p.as_deref().filter(|p| p.fs_is_file()) {
+                            Some(p) if kind_of(&p.to_string_lossy()) == Kind::Video => e.open_video_fullscreen(id, window, cx),
+                            Some(p) => quick_look(p),
+                            None => e.toast(crate::settings::text("文件不存在"), cx),
+                        }
                     }),
                 ),
             );
@@ -809,6 +953,8 @@ impl Editor {
             .child(tool_btn("ftb-text").editor_icon("view-text").tip_above(crate::settings::text("文本视图"), None).on_mouse_down(
                 MouseButton::Left,
                 act(|e, id, window, cx| {
+                    e.pause_media(id);
+                    e.file.opened_video = None;
                     e.core.file_to_inline(id);
                     e.changed(window, cx);
                 }),
@@ -831,6 +977,8 @@ impl Editor {
                         cx.listener(move |e, _, window, cx| {
                             cx.stop_propagation();
                             window.prevent_default();
+                            e.file.opened_video = None;
+                            if v == FileView::Card { e.pause_media(id); }
                             e.core.set_file_view(id, v);
                             e.changed_preserving_viewport(window, cx);
                         }),
@@ -900,6 +1048,32 @@ impl Editor {
 
     // ---- inserting
 
+    /// Copied files replace the selection just like pasted images. Copy off
+    /// the UI thread; use the same attachment representation as picked files.
+    pub(super) fn paste_files(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        let task = cx.background_executor().spawn(async move {
+            paths.iter().map(|p| {
+                if kind_of(&p.to_string_lossy()) == Kind::Image {
+                    super::image::image_block_from_file(p).map_err(str::to_string)
+                } else { file_block_from_path(p).ok_or_else(|| crate::settings::text("文件读取失败").to_string()) }
+            }).collect::<Vec<_>>()
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let results = task.await;
+            let _ = this.update_in(cx, |e, window, cx| {
+                let mut blocks = Vec::new();
+                for result in results {
+                    match result { Ok(b) => blocks.push(b), Err(msg) => e.toast(&msg, cx) }
+                }
+                if blocks.is_empty() { return; }
+                blocks.push(Block::text(""));
+                e.core.paste_blocks(blocks);
+                e.slash = None;
+                e.changed(window, cx);
+            });
+        }).detach();
+    }
+
     /// 视频或文件: the picked files become attachments at the caret.
     pub(super) fn pick_files(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let picked = crate::devtools::take_pick();
@@ -957,7 +1131,7 @@ impl Editor {
     }
 }
 
-/// `AVAudioPlayer` for the inline audio player.
+/// AVAudioPlayer for audio, AVPlayer with decoded surfaces for video.
 #[cfg(target_os = "macos")]
 mod player {
     use objc::runtime::{BOOL, Object, YES};
@@ -967,10 +1141,11 @@ mod player {
     #[link(name = "AVFoundation", kind = "framework")]
     unsafe extern "C" {}
 
-    pub struct Player(*mut Object);
+    pub enum Player { Audio(*mut Object), Video(super::video::Player) }
 
     impl Player {
         pub fn open(path: &Path) -> Option<Self> {
+            if super::kind_of(&path.to_string_lossy()) == super::Kind::Video { return super::video::Player::open(path).map(Self::Video); }
             let s = path.to_str()?;
             unsafe {
                 let ns: *mut Object = msg_send![class!(NSString), alloc];
@@ -989,55 +1164,43 @@ mod player {
                     return None;
                 }
                 let _: BOOL = msg_send![p, prepareToPlay];
-                Some(Player(p))
+                Some(Player::Audio(p))
             }
         }
 
         pub fn play(&self) {
-            unsafe {
-                let _: BOOL = msg_send![self.0, play];
-            }
+            match self { Self::Video(v) => v.play(), Self::Audio(p) => unsafe { let _: BOOL = msg_send![*p, play]; } }
         }
-
         pub fn pause(&self) {
-            unsafe {
-                let _: () = msg_send![self.0, pause];
-            }
+            match self { Self::Video(v) => v.pause(), Self::Audio(p) => unsafe { let _: () = msg_send![*p, pause]; } }
         }
-
         pub fn playing(&self) -> bool {
-            unsafe {
-                let b: BOOL = msg_send![self.0, isPlaying];
-                b == YES
-            }
+            match self { Self::Video(v) => v.playing(), Self::Audio(p) => unsafe { let b: BOOL = msg_send![*p, isPlaying]; b == YES } }
         }
-
         pub fn time(&self) -> f64 {
-            unsafe { msg_send![self.0, currentTime] }
+            match self { Self::Video(v) => v.time(), Self::Audio(p) => unsafe { msg_send![*p, currentTime] } }
         }
-
         pub fn seek(&self, t: f64) {
-            unsafe {
-                let _: () = msg_send![self.0, setCurrentTime: t];
-            }
+            match self { Self::Video(v) => v.seek(t), Self::Audio(p) => unsafe { let _: () = msg_send![*p, setCurrentTime: t]; } }
         }
-
         pub fn duration(&self) -> f64 {
-            unsafe { msg_send![self.0, duration] }
+            match self { Self::Video(v) => v.duration(), Self::Audio(p) => unsafe { msg_send![*p, duration] } }
         }
-
         pub fn set_volume(&self, v: f32) {
-            unsafe {
-                let _: () = msg_send![self.0, setVolume: v];
-            }
+            match self { Self::Video(p) => p.set_volume(v), Self::Audio(p) => unsafe { let _: () = msg_send![*p, setVolume: v]; } }
         }
+        pub fn seek_time(&self) -> f64 { match self { Self::Video(v) => v.seek_time(), _ => self.time() } }
+        pub fn failed(&self) -> bool { matches!(self, Self::Video(v) if v.failed()) }
+        pub fn needs_tick(&self) -> bool { match self { Self::Audio(_) => self.playing(), Self::Video(v) => v.needs_tick() } }
+        pub fn picture(&self, width: f32, height: Option<f32>) -> Option<gpui::AnyElement> { match self { Self::Video(v) => v.picture(width, height), _ => None } }
     }
 
     impl Drop for Player {
         fn drop(&mut self) {
+            let Self::Audio(p) = self else { return };
             unsafe {
-                let _: () = msg_send![self.0, stop];
-                let _: () = msg_send![self.0, release];
+                let _: () = msg_send![*p, stop];
+                let _: () = msg_send![*p, release];
             }
         }
     }
@@ -1050,6 +1213,10 @@ mod player {
     pub struct Player;
 
     impl Player {
+        pub fn seek_time(&self) -> f64 { self.time() }
+        pub fn failed(&self) -> bool { true }
+        pub fn needs_tick(&self) -> bool { false }
+        pub fn picture(&self, _: f32, _: Option<f32>) -> Option<gpui::AnyElement> { None }
         pub fn open(_: &Path) -> Option<Self> {
             None
         }
@@ -1071,7 +1238,19 @@ mod player {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kind, clock, format_size, kind_of, previewable};
+    use super::{Kind, clock, format_size, kind_of, previewable, skip_time};
+
+    #[test]
+    fn skips_stop_at_the_start_and_end() {
+        assert_eq!(skip_time(4., 10., 3.), Some(7.));
+        assert_eq!(skip_time(4., 10., -3.), Some(1.));
+        assert_eq!(skip_time(0.5, 10., -3.), Some(0.));
+        assert_eq!(skip_time(9.5, 10., 3.), Some(10.));
+        assert_eq!(skip_time(0., 2., 3.), Some(2.));
+        assert_eq!(skip_time(2., 2., -3.), Some(0.));
+        assert_eq!(skip_time(0., 0., 3.), None);
+        assert_eq!(skip_time(0., f64::NAN, 3.), None);
+    }
 
     #[test]
     fn sizes_and_kinds() {

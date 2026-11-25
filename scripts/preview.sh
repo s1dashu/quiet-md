@@ -5,8 +5,15 @@
 # bundled 开始指南 on first launch, just like an installed build.
 # Only this checkout's own binaries are stopped:
 # pkill matches this checkout's absolute path. Log: /tmp/quiet-md-preview.log
+# --no-launch updates the bundle for a manual launch from Finder.
 set -e
 cd "$(dirname "$0")/.."
+launch_preview=1
+case "${1:-}" in
+  --no-launch) launch_preview=0 ;;
+  '') ;;
+  *) echo "usage: scripts/preview.sh [--no-launch]" >&2; exit 2 ;;
+esac
 preview_library="${QUIET_MD_HOME:-$(cat dist-preview/library-path 2>/dev/null || printf '%s' "$HOME/Documents/Quiet.md")}"
 # An empty path would put the library in the current directory.
 [ -n "$preview_library" ] || { echo "preview.sh: no preview library" >&2; exit 1; }
@@ -66,5 +73,9 @@ codesign --force --sign - "$app" >/dev/null 2>&1 || true
 # The Dock and Finder cache a bundle's icon by path: tell them it changed.
 touch "$app"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
+if [ "$launch_preview" = 0 ]; then
+  echo "Ready for manual launch: $app"
+  exit 0
+fi
 (QUIET_MD_HOME="$QUIET_MD_HOME" nohup "$bin" >/tmp/quiet-md-preview.log 2>&1 &)
 sleep 2; pgrep -fl "^$bin"

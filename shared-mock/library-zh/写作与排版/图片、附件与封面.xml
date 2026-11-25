@@ -7,11 +7,11 @@
 <h2>描述</h2><p>点击“添加描述”，可以写上图片来源、日期或一句简短说明。导出时描述会一并保留。</p>
 <h2>图片查看器</h2><p>再次点击已选中的图片，即可打开查看器。</p><table><colgroup><col width="300"/><col width="390"/></colgroup><tbody><tr><td><p>放大 / 缩小</p></td><td><p><code>⌘ +</code> / <code>⌘ -</code>，或 <code>↑</code> / <code>↓</code></p></td></tr><tr><td><p>适应页面 / 原始尺寸</p></td><td><p><code>⌘ 0</code> / <code>⌘ 1</code></p></td></tr><tr><td><p>上一张 / 下一张</p></td><td><p><code>←</code> / <code>→</code></p></td></tr><tr><td><p>旋转 / 关闭</p></td><td><p><code>R</code> / <code>Esc</code></p></td></tr></tbody></table>
 <h2>网络图片</h2><p>从网页粘贴来的内容，可能通过网址引用图片。在 设置 › 通用 中可以打开“自动下载网络图片”。关闭时，网络图片先显示为占位，等你点击后才加载。</p>
-<h1>附件与视频</h1><p>在斜杠菜单中选择“视频或文件”，或者直接把文件拖进文档。PDF、Office 文档、音频、视频和压缩包都会复制一份到文档文件夹里。</p>
+<h1>附件与视频</h1><p>在斜杠菜单中选择“视频或文件”，直接把文件拖进文档，或者在访达复制文件后按 <code>⌘ V</code> 粘贴。PDF、Office 文档、音频、视频和压缩包都会复制一份到文档文件夹里。</p>
 <h2>附件的三种展示方式</h2><h3>卡片视图</h3><p>以紧凑的卡片显示文件的图标、名称和大小。</p><figure view-type="Card"><source path=".assets/guides/quiet-md-cheatsheet.pdf" name="quiet-md-cheatsheet.pdf"/></figure>
-<h3>预览视图</h3><p>直接在笔记里展示支持的内容：PDF、Office 文档、图片、文本和代码。音频文件可以显示播放器。</p><figure view-type="Preview"><source path=".assets/guides/meeting-notes.md" name="meeting-notes.md"/></figure>
+<h3>预览视图</h3><p>直接在笔记里展示支持的内容：PDF、Office 文档、图片、文本和代码。在 macOS 上，音频和 MP4、MOV、M4V 视频可以显示播放器，支持播放、暂停、进度跳转和静音。视频控件悬浮在画面上，播放时移入鼠标即可显示；暂停时，画面中央会一直显示播放按钮。点击进度条两侧的 −3s 或 +3s，可以后退或前进三秒，超出时停在开头或结尾。点击视频画面也可以播放或暂停。</p><figure view-type="Preview"><source path=".assets/guides/meeting-notes.md" name="meeting-notes.md"/></figure>
 <h3>文本视图</h3><p>在句子中间提到某个文件，比如这份参考资料：<source path=".assets/guides/quiet-md-cheatsheet.pdf" name="quiet-md-cheatsheet.pdf"/>。</p>
-<h2>打开与另存</h2><ul><li>再次点击已选中的文件，会用 macOS 的“快速查看”打开它。点击“全屏”按钮效果相同。</li><li>点击“下载”，可以把文件另存一份到文档文件夹之外。</li><li>MP4、MOV 和 M4V 支持视频预览。其他格式可以保留为卡片，用外部应用打开。</li></ul>
+<h2>打开与另存</h2><ul><li>再次点击已选中的文件，会用 macOS 的“快速查看”打开它；支持的视频会直接在笔记中播放。视频的“全屏”按钮会在 Quiet.md 内展开同一个播放器，按 <code>Esc</code> 或点击关闭即可返回。其他文件仍使用“快速查看”。</li><li>点击“下载”，可以把文件另存一份到文档文件夹之外。</li><li>MP4、MOV 和 M4V 支持视频预览。其他格式可以保留为卡片，用外部应用打开。</li></ul>
 <h1>文档图标</h1><p>把指针移到标题上方，点击“添加图标”，即可选择一个表情符号。点击已有的图标，可以搜索、按分类浏览、随机挑选或移除。</p><p>这些指南使用的是默认图标。在侧栏中，带有子文档的文档仍显示自己的图标，并多出一个展开箭头。</p>
 <h1>封面</h1><p>封面是显示在文档标题上方的一条横幅。这篇指南就有封面，其他大多数指南没有。</p><h2>选择封面</h2><p>把指针移到标题上方，点击“添加封面”。可以从官方图库中挑选，也可以本地上传自己的图片。宽幅图片效果最好，推荐尺寸约 2000 × 400 像素。</p>
 <grid><column width-ratio="0.5"><h3>官方图库</h3><p>浏览渐变、山峦等各种图案，也可以点“随机”让它帮你挑一张。</p></column><column width-ratio="0.5"><h3>自己的图片</h3><p>可以使用 Mac 里的照片、插画或项目横幅。</p></column></grid>

@@ -2375,10 +2375,33 @@ pub(crate) fn image_block_from_file_in(assets: &Path, p: &Path) -> Result<Block,
         return Err(TOO_BIG);
     }
     let bytes = fdl_core::vfs::read(p).map_err(|_| BAD_DIMS)?;
-    let b = image_block_named(assets, &bytes, &ext, p.file_stem().and_then(|s| s.to_str()))?;
+    image_file_block(assets, p, &bytes, &ext)
+}
+
+fn image_file_block(assets: &Path, p: &Path, bytes: &[u8], ext: &str) -> Result<Block, &'static str> {
+    let b = image_block_named(assets, bytes, ext, p.file_stem().and_then(|s| s.to_str()))?;
     // The copy in the assets keeps the picture's change time, as a copy in the Finder does.
     if let (BlockKind::Image { src, .. }, Some((_, changed))) = (&b.kind, fdl_core::vfs::file_times(p)) { let _ = fdl_core::vfs::set_modified(Path::new(src), changed); }
     Ok(b)
+}
+
+/// A file copy can also offer its Finder icon as PNG/TIFF. Prefer the
+/// originals; only an unavailable source falls back to the clipboard bitmap.
+pub(super) fn clipboard_file_images(paths: &[PathBuf]) -> Option<Result<Vec<Block>, &'static str>> {
+    if paths.is_empty() || !paths.iter().all(|p| p.is_absolute() && p.fs_is_file() && super::file::kind_of(&p.to_string_lossy()) == super::file::Kind::Image) { return None; }
+    let assets = Store::assets_dir();
+    let mut blocks = Vec::new();
+    for p in paths {
+        let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
+        if !FORMATS.contains(&ext.as_str()) { return Some(Err(BAD_FORMAT)); }
+        if fdl_core::vfs::metadata(p).ok()?.len() > MAX_BYTES { return Some(Err(TOO_BIG)); }
+        let bytes = fdl_core::vfs::read(p).ok()?;
+        match image_file_block(&assets, p, &bytes, &ext) {
+            Ok(b) => blocks.push(b),
+            Err(msg) => return Some(Err(msg)),
+        }
+    }
+    Some(Ok(blocks))
 }
 
 /// One line of pasted text that is nothing but a local image file path

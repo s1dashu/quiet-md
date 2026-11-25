@@ -80,6 +80,7 @@ actions!(
 );
 
 pub fn bind_keys(cx: &mut App) {
+    super::file::bind_keys(cx);
     // Moving, selecting and copying also work in 阅读模式 ("EditorRO"),
     // which binds nothing that edits.
     for c in [Some("Editor"), Some("EditorRO")] {
