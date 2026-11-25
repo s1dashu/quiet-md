@@ -28,14 +28,14 @@ pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); 
 /// 界面语言, in the order Settings lists them. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar, Tr }
+pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar, Tr, Vi }
 
 impl Lang {
-    pub const ALL: [Lang; 9] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
+    pub const ALL: [Lang; 10] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr, Lang::Vi];
     /// The `language` preference value.
-    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar", Lang::Tr => "tr" } }
+    pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar", Lang::Tr => "tr", Lang::Vi => "vi" } }
     /// The language's own name, as Settings lists it.
-    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::ZhTw => "繁體中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية", Lang::Tr => "Türkçe" } }
+    pub fn name(self) -> &'static str { match self { Lang::Zh => "简体中文", Lang::ZhTw => "繁體中文", Lang::En => "English", Lang::Ja => "日本語", Lang::Ko => "한국어", Lang::Fr => "Français", Lang::Es => "Español", Lang::Ar => "العربية", Lang::Tr => "Türkçe", Lang::Vi => "Tiếng Việt" } }
 }
 
 pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).copied().unwrap_or(Lang::En) }

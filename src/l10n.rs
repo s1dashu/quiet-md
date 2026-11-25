@@ -23,9 +23,10 @@ mod ja;
 mod ko;
 mod tr;
 mod zh_tw;
+mod vi;
 
 fn strings(lang: Lang) -> &'static [(&'static str, &'static str)] {
-    match lang { Lang::ZhTw => zh_tw::STRINGS, Lang::Ja => ja::STRINGS, Lang::Ko => ko::STRINGS, Lang::Fr => fr::STRINGS, Lang::Es => es::STRINGS, Lang::Ar => ar::STRINGS, Lang::Tr => tr::STRINGS, Lang::Zh | Lang::En => &[] }
+    match lang { Lang::ZhTw => zh_tw::STRINGS, Lang::Ja => ja::STRINGS, Lang::Ko => ko::STRINGS, Lang::Fr => fr::STRINGS, Lang::Es => es::STRINGS, Lang::Ar => ar::STRINGS, Lang::Tr => tr::STRINGS, Lang::Vi => vi::STRINGS, Lang::Zh | Lang::En => &[] }
 }
 
 pub fn get(lang: Lang, zh: &str) -> Option<&'static str> {
@@ -37,7 +38,8 @@ pub fn get(lang: Lang, zh: &str) -> Option<&'static str> {
     static AR: Table = LazyLock::new(|| ar::STRINGS.iter().copied().collect());
     static FR: Table = LazyLock::new(|| fr::STRINGS.iter().copied().collect());
     static TR: Table = LazyLock::new(|| tr::STRINGS.iter().copied().collect());
-    match lang { Lang::ZhTw => &ZH_TW, Lang::Ja => &JA, Lang::Ko => &KO, Lang::Fr => &FR, Lang::Es => &ES, Lang::Ar => &AR, Lang::Tr => &TR, Lang::Zh | Lang::En => return None }.get(zh).copied()
+    static VI: Table = LazyLock::new(|| vi::STRINGS.iter().copied().collect());
+    match lang { Lang::ZhTw => &ZH_TW, Lang::Ja => &JA, Lang::Ko => &KO, Lang::Fr => &FR, Lang::Es => &ES, Lang::Ar => &AR, Lang::Tr => &TR, Lang::Vi => &VI, Lang::Zh | Lang::En => return None }.get(zh).copied()
 }
 
 /// `text` was formatted from the Chinese `template`: read its values back
