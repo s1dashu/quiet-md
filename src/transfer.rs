@@ -6,7 +6,7 @@
 use fdl_core::vfs::{PathExt as _, KindExt as _};
 use crate::app::Workspace;
 use crate::settings::display_title;
-use crate::model::{Block, BlockKind, Document, RichText};
+use crate::model::{Block, BlockKind, Document};
 use crate::printing::{self, Job};
 use crate::design::{Button, Dialog, scrim};
 use crate::ui::{TipExt, ToastKind};
@@ -28,10 +28,17 @@ pub(crate) enum ImportKind { Markdown, Folder, SiYuan, DocxXml, Csv }
 /// 导入文件夹 refuses folders with more documents than this.
 pub(crate) const IMPORT_FOLDER_LIMIT: usize = 2000;
 /// Bigger files are not documents.
-const IMPORT_FILE_LIMIT: u64 = 32 * 1024 * 1024;
+pub(crate) const IMPORT_FILE_LIMIT: u64 = 32 * 1024 * 1024;
 
 /// What to do with a folder 导入文件夹 brought in (a drop puts it in its slot).
 pub(crate) type AfterImport = Box<dyn FnOnce(&mut Workspace, &str)>;
+
+#[derive(Clone)]
+enum FolderRoot {
+    Selected(Option<String>),
+    #[cfg(target_family = "wasm")]
+    Contents,
+}
 
 /// The 从其他应用导入… panel while open: where its imports go (`import_items`' parent), and the
 /// folders of other apps found on this computer (None while still looking).
@@ -92,7 +99,10 @@ pub(crate) fn scan_folder(dir: &Path, depth: usize) -> Option<Scanned> {
     Some(t)
 }
 
-fn importable(p: &Path) -> bool { crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml")) }
+pub(crate) fn importable(p: &Path) -> bool {
+    if cfg!(target_family = "wasm") { return fdl_core::browser_import::Kind::of(p).is_some(); }
+    crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))
+}
 
 /// Kept only in iCloud (or another File Provider): 优化存储 took the file or
 /// folder off this Mac (#352) and reading it would start a download, which
@@ -139,6 +149,7 @@ impl Drop for NoCloudDownloads {
 /// A Markdown file as a new Markdown document inside `parent`; `root`: the
 /// folder being imported, where `![[picture.png]]` embeds are also looked up.
 pub(crate) fn import_markdown(store: &mut crate::store::Store, path: &Path, root: Option<&Path>, parent: Option<&str>) -> anyhow::Result<String> {
+    let root = if cfg!(target_family = "wasm") { root.or_else(|| path.parent()) } else { root };
     let (doc, front) = read_markdown(path, root, &crate::store::Store::assets_in(store.top_dir()))?;
     store.create_markdown_in(&doc, &front, parent)
 }
@@ -146,6 +157,14 @@ pub(crate) fn import_markdown(store: &mut crate::store::Store, path: &Path, root
 /// `import_markdown`'s document and front matter, its pictures copied into
 /// `assets` (the importing library's: not whichever is in front meanwhile).
 fn read_markdown(path: &Path, root: Option<&Path>, assets: &Path) -> anyhow::Result<(Document, String)> {
+    let (mut doc, front) = parse_markdown_file(path, root)?;
+    // A browser picker only grants access to this temporary selection.
+    crate::editor::image::localize_images_under(assets, &mut doc.blocks, root.filter(|_| cfg!(target_family = "wasm")));
+    if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
+    Ok((doc, front))
+}
+
+fn parse_markdown_file(path: &Path, root: Option<&Path>) -> anyhow::Result<(Document, String)> {
     let bytes = crate::store::read_bounded(path, IMPORT_FILE_LIMIT)?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
@@ -155,9 +174,15 @@ fn read_markdown(path: &Path, root: Option<&Path>, assets: &Path) -> anyhow::Res
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim().to_string();
     let mut doc = crate::markdown::parse_file(text, &stem, path.parent());
     if let Some(dir) = path.parent() { crate::markdown::wiki_images(&mut doc.blocks, dir, root); assets_above(&mut doc.blocks, dir, root); }
-    crate::editor::image::localize_images_in(assets, &mut doc.blocks);
-    if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
     Ok((doc, crate::markdown::front_matter(text).0.to_string()))
+}
+
+#[cfg(target_family = "wasm")]
+pub(crate) fn staged_markdown(path: &Path, root: &Path) -> anyhow::Result<Document> {
+    if crate::local_files::is_markdown_path(path) {
+        return parse_markdown_file(path, Some(root)).map(|(doc, _)| doc);
+    }
+    Ok(parse_markdown_page(path, Some(root))?)
 }
 
 /// Pictures at `assets/…` that are not beside the file: 思源 exports a
@@ -181,10 +206,11 @@ fn assets_above(blocks: &mut [Block], dir: &Path, root: Option<&Path>) {
 /// One scanned folder as a library folder under `parent`; its id. Needs no
 /// window, so 欢迎页 can import on a background thread before the main window.
 pub(crate) fn import_tree(store: &mut crate::store::Store, t: &Scanned, parent: Option<&str>, failed: &mut usize) -> Option<String> {
-    tree(store, t, &t.dir, parent, failed)
+    tree(store, t, &t.dir, parent, failed, &mut crate::store::Store::import_into)
 }
 
-fn tree(store: &mut crate::store::Store, t: &Scanned, root: &Path, parent: Option<&str>, failed: &mut usize) -> Option<String> {
+fn tree(store: &mut crate::store::Store, t: &Scanned, root: &Path, parent: Option<&str>, failed: &mut usize,
+    docxxml: &mut impl FnMut(&mut crate::store::Store, &Path, Option<&str>) -> anyhow::Result<String>) -> Option<String> {
     let id = match store.create_folder(&t.name, parent) {
         Ok(id) => id,
         Err(_) => { *failed += t.files; return None; }
@@ -194,15 +220,23 @@ fn tree(store: &mut crate::store::Store, t: &Scanned, root: &Path, parent: Optio
     if parent.is_some() { let _ = store.set_parent(&id, parent); }
     // Made when the folder was, else when the first file in it was.
     if let Some(made) = fdl_core::vfs::made_time(&t.dir).or_else(|| first_made(t)) { let _ = store.update_meta(&id, |m| m.created = made); }
-    for sub in &t.dirs { tree(store, sub, root, Some(&id), failed); }
+    tree_contents(store, t, Some(root), Some(&id), failed, docxxml);
+    Some(id)
+}
+
+fn tree_contents(store: &mut crate::store::Store, t: &Scanned, root: Option<&Path>, parent: Option<&str>, failed: &mut usize,
+    docxxml: &mut impl FnMut(&mut crate::store::Store, &Path, Option<&str>) -> anyhow::Result<String>) {
+    for sub in &t.dirs { tree(store, sub, root.unwrap_or(&sub.dir), parent, failed, docxxml); }
     for p in &t.docs {
         let made = if crate::local_files::is_markdown_path(p) {
-            let read = { let _local = NoCloudDownloads::new(); read_markdown(p, Some(root), &crate::store::Store::assets_in(store.top_dir())) };
-            read.and_then(|(doc, front)| store.create_markdown_in(&doc, &front, Some(&id)))
-        } else { store.import_into(p, Some(&id)) };
+            let read = { let _local = NoCloudDownloads::new(); read_markdown(p, Some(root.unwrap_or(&t.dir)), &crate::store::Store::assets_in(store.top_dir())) };
+            read.and_then(|(doc, front)| store.create_markdown_in(&doc, &front, parent))
+        } else if cfg!(target_family = "wasm") && fdl_core::browser_import::Kind::of(p) == Some(fdl_core::browser_import::Kind::Markdown) {
+            markdown_document_under(p, &crate::store::Store::assets_in(store.top_dir()), Some(root.unwrap_or(&t.dir)))
+                .map_err(anyhow::Error::from).and_then(|doc| store.create_from_in(&doc, parent))
+        } else { docxxml(store, p, parent) };
         match made { Ok(doc) => keep_times(store, &doc, p), Err(_) => *failed += 1 }
     }
-    Some(id)
 }
 
 /// One file (导入, a drop) as a new document in folder `parent`, with the file's times.
@@ -377,24 +411,28 @@ fn resolve_images(blocks: &mut [Block], base: &Path) {
 /// A Markdown / TXT file as a page: titled after the file, its leading
 /// `# 标题` dropped when it repeats the name; its pictures copied into `assets`.
 pub fn markdown_document(path: &Path, assets: &Path) -> std::io::Result<Document> {
+    let root = if cfg!(target_family = "wasm") { path.parent() } else { None };
+    markdown_document_under(path, assets, root)
+}
+
+fn markdown_document_under(path: &Path, assets: &Path, root: Option<&Path>) -> std::io::Result<Document> {
+    let mut doc = parse_markdown_page(path, root)?;
+    crate::editor::image::localize_images_under(assets, &mut doc.blocks, root);
+    if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
+    Ok(doc)
+}
+
+fn parse_markdown_page(path: &Path, root: Option<&Path>) -> std::io::Result<Document> {
     let bytes = fdl_core::vfs::read(path)?;
     let text = String::from_utf8_lossy(&bytes);
-    let text = text.trim_start_matches('\u{feff}');
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim().to_string();
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim();
     let off = crate::paste::Off { file: true, ..Default::default() };
-    let mut blocks = crate::paste::markdown_to_blocks(text, off);
-    if blocks.first().is_some_and(|b| matches!(b.kind, BlockKind::Heading { level: 1, .. }) && b.text.text.trim() == stem) {
-        blocks.remove(0);
-    }
+    let mut doc = crate::markdown::import_page(&text, stem, off);
     if let Some(dir) = path.parent() {
-        resolve_images(&mut blocks, dir);
-        crate::markdown::wiki_images(&mut blocks, dir, None);
+        resolve_images(&mut doc.blocks, dir);
+        crate::markdown::wiki_images(&mut doc.blocks, dir, root);
     }
-    crate::editor::image::localize_images_in(assets, &mut blocks);
-    if blocks.is_empty() {
-        blocks.push(Block::text(""));
-    }
-    Ok(Document { title: RichText::plain(stem), icon: None, cover: None, blocks })
+    Ok(doc)
 }
 
 impl Workspace {
@@ -537,31 +575,91 @@ impl Workspace {
         self.close_menus();
         if self.still_loading(cx) { return }
         cx.notify();
-        let paths = open_paths(cx);
+        #[cfg(target_family = "wasm")]
+        self.open_web_import(Some(".md,.markdown,.mdown,.mark,.txt,.xml"), None, window, cx);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let paths = open_paths(cx);
+            cx.spawn_in(window, async move |this, cx| {
+                let Some(paths) = paths.await else { return };
+                let _ = this.update_in(cx, |w, window, cx| w.import_paths(&paths, None, true, window, cx));
+            }).detach();
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn open_web_import(&self, accept: Option<&str>, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::web::file_import;
+        let files = file_import::select(accept);
+        let folder = accept.is_none();
         cx.spawn_in(window, async move |this, cx| {
-            let Some(paths) = paths.await else { return };
-            let _ = this.update_in(cx, |w, window, cx| w.import_paths(&paths, None, true, window, cx));
-        })
-        .detach();
+            if folder {
+                let staged = file_import::stage_folder(files).await;
+                let _ = this.update_in(cx, |w, window, cx| match staged {
+                    Ok(Some((staging, dir))) => w.import_folder_with_source(&dir, FolderRoot::Selected(None), parent, true, None, Some(staging), window, cx),
+                    Ok(None) => {}
+                    Err(_) => w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx),
+                });
+            } else {
+                let staged = file_import::stage_documents(files).await;
+                let _ = this.update_in(cx, |w, window, cx| match staged {
+                    Ok(Some((staging, paths))) => w.import_paths_with_source(&paths, parent, true, Some(staging), window, cx),
+                    Ok(None) => {}
+                    Err(_) => w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx),
+                });
+            }
+        }).detach();
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn import_web_drop(&self, files: wasm_bindgen_futures::JsFuture, parent: String, pending: std::rc::Rc<std::cell::Cell<bool>>, window: &mut Window, cx: &mut Context<Self>) {
+        let top = self.store.top_of(&parent);
+        cx.spawn_in(window, async move |this, cx| {
+            let staged = crate::web::file_import::stage_drop(files).await;
+            pending.set(false);
+            let _ = this.update_in(cx, |w, window, cx| {
+                if top.is_none() || w.store.top_of(&parent) != top { return; }
+                match staged {
+                    Ok(Some((staging, dir))) => w.import_folder_with_source(&dir, FolderRoot::Contents, Some(parent), false, None, Some(staging), window, cx),
+                    Ok(None) => {}
+                    Err(_) => w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx),
+                }
+            });
+        }).detach();
     }
 
     /// Import files into `parent` (a folder; None: the top of 我的文档); with
     /// `open`, the last one opens (a drop on a list stays on the list).
     pub(crate) fn import_paths(&mut self, paths: &[PathBuf], parent: Option<String>, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.import_paths_with_source(paths, parent, open, #[cfg(target_family = "wasm")] None, window, cx);
+    }
+
+    fn import_paths_with_source(&mut self, paths: &[PathBuf], parent: Option<String>, open: bool,
+        #[cfg(target_family = "wasm")] staging: Option<std::sync::Arc<crate::web::file_import::Staging>>,
+        window: &mut Window, cx: &mut Context<Self>) {
         if self.store.file_task_busy() || self.file_history.busy { return; }
         // Behind a rename or move on its way: the folder it goes into may be the one moving.
-        let (later, into) = (paths.to_vec(), parent.clone());
-        if self.after_tree_writes(move |w, window, cx| w.import_paths(&later, into, open, window, cx)) { return; }
-        let (again, retry) = (paths.to_vec(), parent.clone());
-        if !self.save_before(cx, move |w, window, cx| w.import_paths(&again, retry.clone(), open, window, cx)) {
+        if self.tree_writes_pending() {
+            let (later, into) = (paths.to_vec(), parent);
+            self.after_tree_writes(move |w, window, cx| {
+                w.import_paths_with_source(&later, into, open, #[cfg(target_family = "wasm")] staging, window, cx);
+            });
             return;
         }
+        let (again, retry) = (paths.to_vec(), parent.clone());
+        #[cfg(target_family = "wasm")]
+        let retry_staging = staging.clone();
+        if !self.save_before(cx, move |w, window, cx| {
+            w.import_paths_with_source(&again, retry, open, #[cfg(target_family = "wasm")] retry_staging, window, cx);
+        }) { return; }
         let Some((key, mut writer)) = self.store.tree_writer(parent.as_deref()) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_folder().to_string(), cx) };
         let Some(task_guard) = self.store.begin_file_task() else { return };
         let place = self.place_name(parent.as_deref());
         let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let paths = paths.to_vec();
         let task = cx.background_executor().spawn(async move {
+            #[cfg(target_family = "wasm")]
+            let _staging = staging;
             let journal = writer.track_file_changes();
             let mut last = None;
             let mut failed = false;
@@ -592,6 +690,19 @@ impl Workspace {
     /// The header's 导入 menu (主页, a folder's page): what it imports goes
     /// into the folder shown, or the top of 我的文档.
     pub(crate) fn open_import_kind(&mut self, kind: ImportKind, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(target_family = "wasm")]
+        {
+            self.close_menus();
+            cx.notify();
+            let accept = match kind {
+                ImportKind::Markdown => Some(".md,.markdown,.mdown,.mark,.txt"),
+                ImportKind::DocxXml => Some(".xml"),
+                ImportKind::Folder => None,
+                ImportKind::SiYuan | ImportKind::Csv => return,
+            };
+            self.open_web_import(accept, parent, window, cx);
+        }
+        #[cfg(not(target_family = "wasm"))]
         self.open_import_kind_asking(kind, parent, true, window, cx)
     }
 
@@ -768,6 +879,7 @@ impl Workspace {
             // The two that read like 打开: the line under each says it copies.
             item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown).description(crate::settings::tr("复制到这里，原文件不变", "Copied here; the originals stay as they are")),
             item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder).description(crate::settings::tr("复制到这里，原文件夹不变", "Copied here; the folder stays as it is")),
+            #[cfg(not(target_family = "wasm"))]
             {
                 let parent = parent.clone();
                 crate::design::MenuItem::new("import-apps").icon("import").label(crate::settings::tr("从其他应用导入…", "Import from Another App…"))
@@ -836,17 +948,28 @@ impl Workspace {
     /// iCloud folder, called Documents, comes in under the app's name.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn import_folder_as(&mut self, dir: &Path, name: Option<String>, parent: Option<String>, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
+        self.import_folder_with_source(dir, FolderRoot::Selected(name), parent, open, then, #[cfg(target_family = "wasm")] None, window, cx);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn import_folder_with_source(&mut self, dir: &Path, root: FolderRoot, parent: Option<String>, open: bool, then: Option<AfterImport>,
+        #[cfg(target_family = "wasm")] staging: Option<std::sync::Arc<crate::web::file_import::Staging>>,
+        window: &mut Window, cx: &mut Context<Self>) {
         if self.store.file_task_busy() || self.file_history.busy { return; }
         if self.tree_writes_pending() {
-            let (later, named, into) = (dir.to_path_buf(), name.clone(), parent.clone());
-            self.after_tree_writes(move |w, window, cx| w.import_folder_as(&later, named, into, open, then, window, cx));
+            let (later, named, into) = (dir.to_path_buf(), root.clone(), parent.clone());
+            self.after_tree_writes(move |w, window, cx| {
+                w.import_folder_with_source(&later, named, into, open, then, #[cfg(target_family = "wasm")] staging, window, cx);
+            });
             return;
         }
         let held = std::rc::Rc::new(std::cell::Cell::new(then));
-        let (again, named, retry, later) = (dir.to_path_buf(), name.clone(), parent.clone(), held.clone());
-        if !self.save_before(cx, move |w, window, cx| w.import_folder_as(&again, named.clone(), retry.clone(), open, later.take(), window, cx)) {
-            return;
-        }
+        let (again, named, retry, later) = (dir.to_path_buf(), root.clone(), parent.clone(), held.clone());
+        #[cfg(target_family = "wasm")]
+        let retry_staging = staging.clone();
+        if !self.save_before(cx, move |w, window, cx| {
+            w.import_folder_with_source(&again, named, retry, open, later.take(), #[cfg(target_family = "wasm")] retry_staging, window, cx);
+        }) { return; }
         let then = held.take();
         // Scanning and writing hundreds of files takes seconds (an fsync each),
         // so it runs on its own store off the window's thread; the library
@@ -856,18 +979,33 @@ impl Workspace {
         let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let dir = dir.to_path_buf();
         let task = cx.background_executor().spawn(async move {
+            #[cfg(target_family = "wasm")]
+            let _staging = staging;
             match scan_folder(&dir, 0) {
                 None => Imported::Empty { cloud: 0 },
                 Some(tree) if tree.files == 0 => Imported::Empty { cloud: tree.cloud },
                 Some(tree) if tree.files > IMPORT_FOLDER_LIMIT => Imported::TooMany(tree.files),
                 Some(mut tree) => {
-            if let Some(n) = name { tree.name = n; }
+            if let FolderRoot::Selected(Some(n)) = &root { tree.name.clone_from(n); }
             let journal = writer.track_file_changes();
             let mut failed = 0;
             // One write for the whole folder: each file is written where it
             // goes and the index once at the end (120 notes took 7 s one by one).
             // Without the batch each file is still written on its own.
             let batch = writer.begin_batch().is_ok();
+            #[cfg(target_family = "wasm")]
+            let top = if let Some(staging) = &_staging {
+                let mut copied = std::collections::BTreeMap::new();
+                let mut docxxml = |store: &mut crate::store::Store, path: &Path, parent: Option<&str>| staging.import_docxxml(store, path, parent, &mut copied);
+                match root {
+                    FolderRoot::Selected(_) => self::tree(&mut writer, &tree, &tree.dir, parent.as_deref(), &mut failed, &mut docxxml),
+                    FolderRoot::Contents => {
+                        tree_contents(&mut writer, &tree, None, parent.as_deref(), &mut failed, &mut docxxml);
+                        None
+                    }
+                }
+            } else { import_tree(&mut writer, &tree, parent.as_deref(), &mut failed) };
+            #[cfg(not(target_family = "wasm"))]
             let top = import_tree(&mut writer, &tree, parent.as_deref(), &mut failed);
             let saved = if batch { writer.end_batch() } else { Ok(()) };
             let changes = journal.take();
@@ -1071,6 +1209,18 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{BlockKind, markdown_document, percent_decode};
+
+    #[test]
+    fn a_page_stays_editable_when_its_only_image_is_missing() {
+        let dir = fdl_core::vfs::temp_dir().join(format!("quiet-import-empty-{}", uuid::Uuid::new_v4()));
+        fdl_core::vfs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Empty.txt");
+        fdl_core::vfs::write(&path, "![Missing](missing.png)").unwrap();
+        let doc = markdown_document(&path, &dir.join("assets")).unwrap();
+        fdl_core::vfs::remove_dir_all(&dir).unwrap();
+        assert!(matches!(doc.blocks.as_slice(), [block] if block.text.text.is_empty() && matches!(block.kind, BlockKind::Text)));
+    }
+
 
     #[test]
     fn importing_many_small_notes_preserves_the_tree() {
