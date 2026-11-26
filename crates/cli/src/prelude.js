@@ -47,6 +47,8 @@ class Doc {
   rename(title) { this._call("rename", { title }); }
   moveTo(folder) { this._call("mv", { folder: folder ?? "/" }); }
   trash() { this._call("trash"); }
+  pin(on = true) { this._call(on ? "pin" : "unpin"); }
+  duplicate(title) { this._call("duplicate", { title }); }
   links() { return this._call("links"); }
   table(o = {}) { return this._call("table", { ...__t(o), view: o.view, where: o.where, any: o.any, sort: o.sort, group: o.group, fields: o.fields, stats: o.stats, as: o.as, limit: o.limit, offset: o.offset }); }
   addRows(rows, o = {}) { return this._call("table_add", { rows, at: __anchor(o.at), table: o.table }).added; }

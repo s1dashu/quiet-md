@@ -23,13 +23,14 @@
 5. **不和应用抢。**
    - 写入走引擎同一套 `Store`：文档库写锁、原子写、版本历史快照、链接改写。
    - 应用开着时，能自动接收外部改动的就接收。接收不了的，冲突要能看见，不能静默覆盖。
+6. **GUI 能做的，CLI 都能做**（用户 2026-11-26 定）。用户在应用里能做的每个操作，CLI 都要能做同样的动作，功能才算闭环：管理侧栏里的文件夹、在应用里打开并定位到某一块，也算在内。新增 GUI 操作时同时想好对应的 CLI 命令；暂时没有的，记在下面「GUI 操作 → CLI 命令」表里。
 
 ## 现状
 
-- **文档库在哪：** 和应用一样，是这台电脑上应用打开的全部顶层文件夹，也就是主页（唯一的根）下的文件夹，见 [workspaces.md](workspaces.md)。CLI 用 core 的 `Home::entries()` 读同一份 `folders.json`（设了 `QUIET_MD_HOME` 就只有那一个文件夹，测试用 `QUIET_MD_FOLDERS` 指向临时的列表），顺序也一样；不写 `folders.json`。每个顶层文件夹用 `Store::open_for_tools` 打开：文件夹不在了就标为不可用，不会新建；崩溃留下的副本留给应用恢复。
+- **文档库在哪：** 和应用一样，是这台电脑上应用打开的全部顶层文件夹，也就是主页（唯一的根）下的文件夹，见 [workspaces.md](workspaces.md)。CLI 用 core 的 `Home::entries()` 读同一份 `folders.json`（设了 `QUIET_MD_HOME` 就只有那一个文件夹，测试用 `QUIET_MD_FOLDERS` 指向临时的列表），顺序也一样；只有 `quiet folders add|remove` 写它（见下面「和应用联动」）。每个顶层文件夹用 `Store::open_for_tools` 打开：文件夹不在了就标为不可用，不会新建；崩溃留下的副本留给应用恢复。
 - **路径从主页算起**（用户 2026-11-24 定：只有主页是根，顶层文件夹就是普通文件夹，所以没有专门挑顶层文件夹的参数）：
   - 路径第一段是顶层文件夹名（不分大小写），如 `Quiet.md/工作/周报`；也接受磁盘上的绝对路径。CLI 输出的所有路径都是这种从主页算起的路径。
-  - `quiet ls` 不带参数列出主页下的顶层文件夹：名字、磁盘位置、key、文档数，或打不开的原因（`--json` 里 `top: true`）。`quiet ls -r` 列出全部。原来的 `quiet roots` / `quiet folders` 不再需要。
+  - `quiet ls` 不带参数列出主页下的顶层文件夹：名字、磁盘位置、key、文档数，或打不开的原因（`--json` 里 `top: true`）。`quiet ls -r` 列出全部。增删顶层文件夹用 `quiet folders add|remove`。
   - 两个顶层文件夹重名：第一段报 `ambiguous`，列出两边的磁盘路径和 key；用 key 当第一段就能指定。
   - 只有一个文档的路径或标题，可以不带顶层文件夹；多个文档同名报 `ambiguous`，列出各自从主页算起的路径。按 id 直接定位（id 跨文件夹唯一，W14）。
   - 新建、建文件夹、导入的落点：`--in` 指的文件夹，否则第一个能打开的顶层文件夹（和应用一致）；输出的路径写明落在哪里。`--in` 的第一段不是顶层文件夹名时，按文件夹路径或名字在所有顶层文件夹里找，唯一才用。
@@ -52,6 +53,7 @@
 - **数据表：** `table`（按视图、条件、排序、分组读，统计，导出 csv/md），`table add|update|delete|import`，字段 `table field …`，视图 `table view …`，多表 `table new|rename|remove`。见下面「数据表」一节。
 - **画板：** `board`，以及 `board add|rm`（Excalidraw 骨架；箭头写两端 id 就能自动连线）。
 - **撤销和导入：** `history`、`restore`、`trash`、`untrash`、`import`。
+- **和应用联动：** `folders`（列出、`add`、`remove` 顶层文件夹）、`open`（在应用里打开文档并定位到块，或打开文件夹页、回收站），`new --open`。见下一节。
 - **脚本：**
   - `quiet run`：沙箱，60 秒超时，512MB 内存。整个脚本是一次事务。
   - 脚本的 `lib` API 和命令一一对应。
@@ -75,11 +77,98 @@
 | `library.rs` | 版本历史、回收站、导入 |
 | `js.rs`、`prelude.js` | 脚本 |
 | `mcp.rs` | MCP 服务 |
+| `app_control.rs` | 和应用联动：`folders`、`open` |
 | `help.rs` | 每个命令的帮助 |
 | 仓库根 `skills/quiet-md/` | 配套 skill；`references/guide.md` 即 `quiet guide` 的指南，编进二进制 |
 | `usage.rs` | 匿名用量统计 |
 
 测试在 `crates/cli/tests/cli.rs`，数据表的在 `crates/cli/tests/tables.rs`。
+
+## 和应用联动：folders 与 open
+
+用户 2026-11-26：「CLI 要能在 Quiet 里添加文件夹，能做路径操作，能打开文档并定位到某个位置。」
+
+**`quiet folders`**（`app_control.rs`）
+- 不带参数列出顶层文件夹：名字、磁盘路径、key，新建默认落到的那个标 `default`，打不开的写原因。
+- `add PATH`：等同侧栏的「添加文件夹」，用 core 同一份 `Home::check` / `Home::add` 写 `folders.json`：原位打开、不复制，在里面建 `.quiet/`。不能已经打开、不能在已打开的文件夹里、不能包含已打开的文件夹（错误码 `already_open` / `inside_open` / `holds_open`）。应用遇到代码项目或文件很多的文件夹会先问（`shown::survey`），CLI 报 `confirm`，加 `--force` 才添加。CLI 另外拒绝磁盘根、主目录和系统文件夹（`home::too_broad`，错误码 `too_broad`）；应用的「添加文件夹」目前没有这条，要不要也加，待定。
+- `remove NAME|PATH|KEY`：等同「从侧栏移除」，只改列表，磁盘上的文件和 `.quiet/` 原样保留。
+- 两者都支持 `--dry-run`。设了 `QUIET_MD_HOME`（列表固定）时报 `fixed`。
+- **应用跟着变：** `local_folders::follow_folder_list` 每 2 秒在后台读一次 `folders.json`，和内存里的列表按 key 比较（`Home::changed_elsewhere`）。多出来的按文件里的 key 打开（`Home::adopt`，不重写列表）；少了的，每个窗口先放下里面打开的文档（未保存的先存，没存完就等下一轮），再从列表移除。新加的按「添加文件夹」同样的方式在后台列出。应用自己写的列表和内存一致，不会触发。选文件轮询而不是 URL 通知：应用没开时 CLI 照样能改，下次启动读到；应用开着时不依赖系统转发。
+- 已知限制：CLI 和应用在同一个 2 秒窗口里各自改列表，后写的一方会覆盖先写的一方（应用没有合并文件里的改动）。
+
+**`quiet open`**
+- `quiet open DOC[#REF]`：CLI 先在磁盘上解析文档和块（REF 和 `read` 的一样：`#3~k7f2`、`#2.1`、标题文字），把块换成带指纹的位置 ref，拼成 `quietmd://open?top=<key>&doc=<id>&block=%233~k7f2`，交给系统打开（macOS `open`，Windows `rundll32 url.dll,FileProtocolHandler`（`start` 是 cmd 内建命令，链接里的 `&` 会被当成命令分隔符），Linux `xdg-open`）；应用没开就会被启动。`--dry-run` 只打印链接。
+- `quiet open --folder FOLDER`：`quietmd://open?top=<key>&folder=<id>`，打开文件夹页；只给顶层文件夹时打开它自己的页（`quiet open 工作` 不是文档时也按文件夹处理）。`quiet open --trash`：`quietmd://open?view=trash`。`quiet new … --open` 写完后打开新文档。
+- `--library DIR` 时，那个文件夹要在应用的列表里（按路径找应用用的 key），否则报 `not_open`。
+- 测试设 `QUIET_MD_OPEN_LOG=<文件>`：链接追加写进这个文件，不交给系统（各平台一样）。
+- **链接格式和安全**（`fdl_core::app_url`）：只有 `open` 一种动作，只做导航，不写、不执行任何东西。参数只认 `top`、`doc`、`block`、`folder`、`view`，每个最多一次；`top`、`doc`、`folder` 只能是 id 字符（字母数字和 `._:-`，最长 200）；`block` 必须是 ref 格式；`view` 只认 `trash`；链接最长 2048。有任何一项不对，整条拒绝，应用提示「无法打开链接」。找不到文档或文件夹（被移走、文件夹不在侧栏）给出提示，不崩。
+- **应用端**（`local_files.rs`）：macOS 的 `on_open_urls`，Windows / Linux 的命令行参数，都进 `Incoming`；等窗口列完文件夹再处理链接（`Workspace::open_link`）。文档按 id 找（跨文件夹唯一），`try_open` 打开后用 `block_ref::locate` 找块：位置上的块指纹对得上就用它，否则用全文唯一同指纹的块（块被挪过），再找不到就打开文档并提示「找不到那个块」。找到的块滚到可见（`scroll_to_block`）并进入块选中（`select_block`），和反向链接跳转同一套。块的 ref 规则从 CLI 挪进了 core 的 `block_ref.rs`，两边共用。
+- **注册 scheme：**
+  - macOS：`scripts/release.sh` 和 `scripts/preview.sh` 生成的 Info.plist 都加了 `CFBundleURLTypes`（`quietmd`）。预览版和正式版都声明同一个 scheme，两者同时装着时由系统挑一个（一般是最近注册的）。
+  - Windows：`packaging/windows/quiet-md.iss` 在 `HKA\Software\Classes\quietmd` 下注册 `URL Protocol`，命令是 `"quiet_md.exe" "%1"`，卸载时删除。验证：装好后在 PowerShell 跑 `Start-Process 'quietmd://open?view=trash'`，或 `quiet open --trash`，应用应打开回收站；`reg query HKCU\Software\Classes\quietmd\shell\open\command`（全局安装时是 HKLM）能看到命令。
+  - Linux：`.desktop` 的 `MimeType` 加 `x-scheme-handler/quietmd`，`Exec` 改成 `%U`（文件以 `file://` 链接传入，`Incoming::from_args` 也接受）。验证：装好 .desktop 后 `xdg-mime query default x-scheme-handler/quietmd` 应返回 `com.s1dashu.quietmd.desktop`（没有就 `xdg-mime default com.s1dashu.quietmd.desktop x-scheme-handler/quietmd`），再 `xdg-open 'quietmd://open?view=trash'`。AppImage 要由 appimaged 之类的工具把 .desktop 装进系统才会注册。
+  - 应用没有单实例：Windows 和 Linux 上，应用开着时再打开链接会另起一个进程（macOS 由系统交给正在运行的那个）。做单实例转发之前，这两个平台上的 `quiet open` 会多开一个窗口。
+
+## GUI 操作 → CLI 命令
+
+按原则 6 维护：「已有」「本次补上」（2026-11-27，cli-app-control）、「缺」（小：调一个现成的 `Store` 方法就行；大：要先挪代码或另做设计）、「只属于界面」（窗口、视图和外观状态，CLI 不做）。
+
+| 区域 | GUI 操作 | CLI |
+| --- | --- | --- |
+| 侧栏 | 浏览树、展开 | 已有 `quiet ls [F] [-r]`（按路径排，不按侧栏的手动顺序） |
+| 侧栏 | 添加文件夹…（⌘⇧O）、从其他应用导入 › Obsidian 原位打开 | 本次补上 `quiet folders add PATH [--force]` |
+| 侧栏 | 从侧栏移除 | 本次补上 `quiet folders remove NAME\|PATH\|KEY` |
+| 侧栏 | 列出顶层文件夹 | 本次补上 `quiet folders`（`quiet ls` 也列） |
+| 侧栏 | 重命名顶层文件夹 | 缺（小：`Home::rename`） |
+| 侧栏 | 拖拽移动文档 | 已有 `quiet mv DOC FOLDER`（同一个顶层文件夹内） |
+| 侧栏 | 拖拽重排（手动排序） | 缺（小：`Store::move_in_tree`；`ls` 也要改成按 `Meta::place` 排） |
+| 侧栏 | 从访达拖文件进来 | 已有 `quiet import FILE… --in F` |
+| 侧栏 / 文档菜单 | 添加到「置顶」/ 从「置顶」移除 | 本次补上 `quiet pin\|unpin DOC` |
+| 文档菜单 | 创建副本 | 本次补上 `quiet duplicate DOC [TITLE]`（文档；文件夹见下） |
+| 文档菜单 | 打开、定位到块；从搜索结果或反向链接跳到某块 | 本次补上 `quiet open DOC[#REF]`（滚到可见并选中） |
+| 文档菜单 | 在新窗口中打开 | 缺（小：`Target` 加「新窗口」） |
+| 文档菜单 | 移动到 | 已有 `quiet mv` |
+| 文档菜单 | 重命名、删除（进回收站） | 已有 `quiet rename`、`quiet rm` |
+| 文档菜单 | 复制为 Markdown（⌘⇧C） | 已有 `quiet read DOC[#REF] --as md` |
+| 文档菜单 | 下载 › Markdown（带图片） | 缺（小：`markdown::export` 加复制图片，照 transfer.rs） |
+| 文档菜单 | 下载 › PDF、打印 | 缺（大：`html.rs`、`printing` 在界面 crate，依赖 WebView） |
+| 文档菜单 | 文档信息（字数、创建时间、位置） | 部分：`outline` 有大小和 rev，`ls` 有修改时间；缺字数和磁盘路径（小） |
+| 文档菜单 | 版本历史：看、比较、恢复 | 已有 `quiet history`、`quiet restore` |
+| 版本历史 | 保存当前版本、给版本命名、另存副本、删除版本 | 缺（小：`save_version_now`、`set_version_label`、`version_document`、`delete_version`） |
+| 文档菜单 | 查找和替换 | 部分：`blocks --grep` 加 `set`/`replace`，或 `quiet run`；缺整篇替换命令（中） |
+| 文档菜单 | 页宽、阅读/编辑模式、打字机、段落聚焦、专注、置顶窗口、显示引用列表、快捷键 | 只属于界面（引用列表的内容 `quiet links` 能看到） |
+| 文档 | 文档图标、封面 | 缺（小：`Document.icon` / `cover`，封面图片经 `import_attachment`） |
+| 文档 | 编辑正文：插入、转换、移动块、待办 | 已有 `insert`/`replace`/`delete`/`move`/`set` |
+| 文档 | 对齐、颜色等格式 | 缺（中：要设计参数） |
+| 新建菜单 | 文档、Markdown、数据表、画板 | 已有 `quiet new T [--kind md\|table\|board]` |
+| 新建菜单 | 文件夹 | 已有 `quiet mkdir N --in F` |
+| 新建菜单 | 在某文件夹里新建并打开 | 本次补上 `quiet new T --in F --open` |
+| 新建菜单 | 新建子文档 | 缺（小：`Store::create_child`，可做 `--child-of DOC`） |
+| 新建菜单 | 快速笔记窗口（⌘⇧N） | 只属于界面（内容可以 `quiet new` 到快速笔记文件夹） |
+| 文件夹页 | 打开文件夹页、主页上的顶层文件夹 | 本次补上 `quiet open --folder F` |
+| 文件夹页 | 文件夹重命名、移动到、删除 | 缺（小：`Store::rename` / `set_parent` / `delete` 都支持文件夹，CLI 的 `find_entry` 只找文档） |
+| 文件夹页 | 文件夹创建副本 | 缺（小：`Store::duplicate` 支持文件夹，同上） |
+| 文件夹页 | 批量管理：创建副本、移动到、删除 | 部分：`quiet run` 里逐个做；文件夹同上 |
+| 文件夹页 | 宫格/列表、排序方式、文件夹优先 | 只属于界面 |
+| 文件夹页 / 侧栏 | 在访达中显示 | 只属于界面（路径 `quiet folders`、`ls -r` 能看到） |
+| 搜索 | 搜索（⌘J） | 已有 `quiet find` |
+| 导入 | 导入 Markdown / DocxXML / CSV | 已有 `quiet import` |
+| 导入 | 导入文件夹、Obsidian 导入副本、Typora、思源 | 缺（大：`transfer.rs` 的导入在界面 crate，先挪进 core） |
+| 导入 | 打开 Markdown 文件…（⌘O，原位编辑） | 缺（中：`Store::open_local`，`Target` 加文件路径） |
+| 回收站 | 打开回收站 | 本次补上 `quiet open --trash` |
+| 回收站 | 列出、恢复 | 已有 `quiet trash`、`quiet untrash` |
+| 回收站 | 彻底删除、清空回收站 | 缺（小：`Store::purge` / `purge_many`；不可恢复，要定 `--force` 之类的确认方式） |
+| 回收站 | 自动删除天数 | 缺（小：`Settings::set_trash_days`） |
+| 设置 › 文档库 | 文件夹列表 | 本次补上 `quiet folders` |
+| 设置 › 文档库 | 快速笔记存到哪个文件夹、每篇保留的版本数、清理未使用的资源 | 缺（小；`quiet check` 只列出未使用资源） |
+| 设置 › 通用 | 匿名使用统计 | 已有 `quiet telemetry` |
+| 设置 › 通用 / 外观 / 快捷键 / 关于 | 语言、主题、字体、动画、快捷键、检查更新… | 只属于界面 |
+| 设置 › 连接 Agent | 安装 skill 和命令行工具 | 不需要（这是装 CLI 本身） |
+| 文件操作撤销 | ⌘Z / ⌘⇧Z 撤销移动、删除 | 缺（大：依赖窗口里的撤销栈；CLI 用 `--dry-run` 和版本历史） |
+| 数据表 | 行、字段、视图、筛选排序分组、统计、导入导出 | 已有 `quiet table …`；缺复制记录、字段、视图（小） |
+| 画板 | 列出、加、删元素 | 已有 `quiet board`；缺对齐、图层、复制、导出 SVG（中） |
+
+`quiet call open`（返回文档信息，脚本里的 `lib.doc` 用它）和 `quiet open`（在应用里打开）同名不同义，`quiet open` 不经过 `Session::call`，脚本和 MCP 里也没有它：在应用里开窗口不该在沙箱脚本里发生。
 
 ## 分发
 

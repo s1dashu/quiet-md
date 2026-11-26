@@ -86,5 +86,7 @@ quiet --version
 quiet ls
 ```
 
-`quiet ls` lists the folders Quiet.md has open. Then tell the user it is
-installed, and that a new session picks up the skill.
+`quiet ls` lists the folders Quiet.md has open. If it says there are none,
+the user can name the folder their notes are in and `quiet folders add PATH`
+puts it in Quiet.md's sidebar. Then tell the user it is installed, and that a
+new session picks up the skill.

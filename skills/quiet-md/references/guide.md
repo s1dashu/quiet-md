@@ -65,6 +65,14 @@ quiet set DOC#REF [--text TEXT] [--done|--undone] [--kind text|h1..h6|bullet|ord
 quiet rename DOC TITLE
 quiet mv DOC FOLDER          (within the document's top folder; its name alone: its top)
 quiet rm DOC                 to the trash (kept 30 days)
+quiet duplicate DOC [TITLE]  a copy beside it ("<title> 副本")
+quiet pin|unpin DOC          the sidebar's 置顶 list
+
+quiet folders                the folders the app's sidebar lists (name, path, key, default)
+quiet folders add PATH [--force]     open a folder there, where it is (nothing copied)
+quiet folders remove NAME|PATH|KEY   off the sidebar; its files stay
+quiet open DOC[#REF]         show it in the app, scrolled to that block and selected (launches the app)
+quiet open --folder FOLDER | --trash   a folder's page, or the trash;  quiet new … --open: open what it made
 
 quiet table DOC[#REF] [--table T] [--view V] [--where 'FIELD OP VALUE']… [--any] [--sort F[:desc]]… [--group F]…
                  [--fields A,B] [--stats [sum,…]] [--as json|csv|md] [--limit N] [--offset N]
@@ -166,6 +174,19 @@ text inside a shape is its label, listed with it. Place new shapes beside
 the current bounds.
 A new board: `quiet new 架构图 --kind board`.
 
+## The app
+
+`quiet folders add` / `remove` change the sidebar's list as 添加文件夹 / 从侧栏移除
+do; a running app follows within a couple of seconds. A folder that is a code
+project or holds a great many files fails with `confirm` (the app asks first):
+ask the user, then pass `--force`. A disk's top, the home folder or a system
+folder is refused (`too_broad`).
+
+`quiet open` hands the app a `quietmd://` link, which only navigates: use it
+to show the user what you wrote (`quiet open 周报#风险` after an insert there).
+It changes nothing in the library. `--dry-run` prints the link without
+opening it.
+
 ## Script API
 
 Write the script to a file and run `quiet run script.js`; short ones go in
@@ -190,7 +211,7 @@ Top-level `await` and `return` work; a returned value is printed. `help()` and
 - `doc.append(md)`, `doc.prepend(md)`
 - `doc.replace(ref, md, {section})`, `doc.remove(ref, {section})`, `doc.move(ref, where, {section})`
 - `doc.setText(ref, text)` (inline Markdown), `doc.setDone(ref, done = true)`, `doc.setKind(ref, kind)`
-- `doc.rename(title)`, `doc.moveTo(folder)`, `doc.trash()` — applied when the script ends
+- `doc.rename(title)`, `doc.moveTo(folder)`, `doc.trash()`, `doc.duplicate(title?)`, `doc.pin(on = true)` — applied when the script ends
 - `doc.links()` → `{out: [{to, broken, text}], back: [{from, title, text}]}` (out: as edited in this script; back: as on disk)
 - `doc.table({at, table, view, where, any, sort, group, fields, stats, as, limit, offset})` → `{fields, schema, views, tables, total, rows: [{_id, field: text}], groups?, stats?, text?}` (every value is a string: `Number(r.评分)` to compare; `where`: `"状态 = 在读"`, `{field, op, value}` or a list; `sort`/`group`: `"F:desc"` or a list; `as: "csv"|"md"` gives `text`)
 - `doc.addRows([{field: value}], {at, table})` → `["r13", …]`; `doc.updateRow(row, {field: value})`; `doc.updateRows([{_id, field: value}])`; `doc.deleteRows(rows)`

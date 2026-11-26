@@ -84,6 +84,16 @@ impl SharedStore {
         Ok(())
     }
     pub fn retry_folder(&self, key: &str) { self.0.borrow_mut().ws.retry(key) }
+    /// `folders.json` as it is now against the list here: top-level folders another program
+    /// (the `quiet` CLI) added there, and the keys of those it removed (`Home::changed_elsewhere`).
+    pub fn changed_elsewhere(&self, now: &[fdl_core::home::TopFolderEntry]) -> (Vec<fdl_core::home::TopFolderEntry>, Vec<String>) { self.0.borrow().ws.changed_elsewhere(now) }
+    /// Top-level folders another program added to the list, opened here; their keys.
+    pub fn adopt_folders(&self, added: Vec<fdl_core::home::TopFolderEntry>) -> Vec<String> {
+        let keys = added.iter().map(|e| e.key.clone()).collect();
+        for e in added { self.0.borrow_mut().ws.adopt(e); }
+        self.folders_changed();
+        keys
+    }
     /// The top-level folders the window shows: those open (one gone from the disk is not shown).
     pub fn shown_tops(&self) -> Vec<(String, String, PathBuf, Option<String>)> { self.top_folders().into_iter().filter(|r| r.3.is_none()).collect() }
     /// Each top-level folder against the disk: one whose folder is gone (no `.quiet/format.json`

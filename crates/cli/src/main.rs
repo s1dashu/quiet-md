@@ -4,6 +4,7 @@
 //! compact text, `--json` for JSON; errors go to stderr with a code and a
 //! hint, and the exit status says which kind.
 
+mod app_control;
 mod blocks;
 mod boards;
 mod fail;
@@ -38,7 +39,7 @@ pub struct Args {
     flags: Vec<String>,
 }
 
-const FLAGS: &[&str] = &["force", "json", "dry-run", "section", "no-heading", "recursive", "done", "undone", "markdown", "start", "end", "help", "version", "replace", "full", "any", "create-fields", "two-way", "single", "stats"];
+const FLAGS: &[&str] = &["force", "json", "dry-run", "section", "no-heading", "recursive", "done", "undone", "markdown", "start", "end", "help", "version", "replace", "full", "any", "create-fields", "two-way", "single", "stats", "open", "trash"];
 
 pub fn parse(raw: Vec<String>) -> R<Args> {
     let a = parse_as(raw.clone(), false)?;
@@ -112,7 +113,7 @@ fn cells(a: &Args) -> R<Option<Value>> {
     Ok(Some(Value::Object(o)))
 }
 
-const WRITES: &[&str] = &["insert", "replace", "remove", "move", "set", "create", "mkdir", "rename", "mv", "trash", "restore", "untrash", "import", "table_add", "table_update", "table_delete",
+const WRITES: &[&str] = &["insert", "replace", "remove", "move", "set", "create", "mkdir", "rename", "mv", "trash", "pin", "unpin", "duplicate", "restore", "untrash", "import", "table_add", "table_update", "table_delete",
     "table_field_add", "table_field_change", "table_field_delete", "table_view_add", "table_view_set", "table_view_rename", "table_view_delete", "table_new", "table_rename", "table_remove", "table_import", "board_add", "board_remove"];
 
 /// `--where` (repeatable), `--any`, `--view`: which rows of a 数据表.
@@ -309,6 +310,8 @@ fn to_calls(cmd: &str, a: &mut Args, input: &mut Input) -> R<(Vec<(String, Value
         ("rename", _) => { with_doc(&mut v, false)?; v["title"] = json!(a.nth(1, "the new title")?); "rename" }
         ("mv", _) => { with_doc(&mut v, false)?; v["folder"] = json!(a.nth(1, "a folder (/ for the top)")?); "mv" }
         ("rm", _) => { with_doc(&mut v, false)?; "trash" }
+        ("pin" | "unpin", _) => { with_doc(&mut v, false)?; if cmd == "pin" { "pin" } else { "unpin" } }
+        ("duplicate" | "cp", _) => { with_doc(&mut v, false)?; put(&mut v, "title", a.pos.get(1).cloned()); "duplicate" }
         ("call", _) => {
             let op = a.nth(0, "an operation")?.to_string();
             let args: Value = match a.pos.get(1).map(String::as_str) { Some("-") => serde_json::from_str(&input.text()?), Some(s) => serde_json::from_str(s), None => Ok(json!({})) }.map_err(|e| fail("bad_args", format!("JSON: {e}")))?;
@@ -350,11 +353,14 @@ pub fn execute(raw: Vec<String>, mut input: Input, out: &mut String) -> R<()> {
         "version" => { *out += &format!("quiet {}\n", env!("CARGO_PKG_VERSION")); return Ok(()); }
         "telemetry" => { *out += &usage::command(a.pos.first().map(String::as_str))?; return Ok(()); }
         _ if a.has("help") => { *out += &help::of(Some(&cmd))?; return Ok(()); }
+        // The sidebar's list, which may be empty: no library to open first.
+        "folders" => return app_control::folders(&a, out),
         _ => {}
     }
     let json_out = a.has("json");
     let dry = a.has("dry-run");
     let mut s = Session::open(a.get("library"))?;
+    if cmd == "open" { return app_control::open(&mut s, &a, out); }
     if cmd == "run" {
         let code = match (a.get("code"), a.pos.first().map(String::as_str)) {
             (Some(c), _) => c.to_string(),
@@ -388,5 +394,12 @@ pub fn execute(raw: Vec<String>, mut input: Input, out: &mut String) -> R<()> {
         } else { *out += &output::report(&report, dry); }
     }
     if json_out { *out += &format!("{v}\n"); }
+    // `new … --open`: written, then shown in Quiet.md, as 新建 there opens what it made.
+    if cmd == "new" && a.has("open") && !dry && let Some(path) = v.get("path").and_then(Value::as_str) {
+        let mut s = Session::open(a.get("library"))?;
+        let mut how = parse(vec![path.to_string()])?;
+        how.flags.extend(a.flags.iter().filter(|f| *f == "json").cloned());
+        app_control::open(&mut s, &how, out)?;
+    }
     Ok(())
 }

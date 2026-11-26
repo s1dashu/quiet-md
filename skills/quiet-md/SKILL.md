@@ -44,6 +44,8 @@ quiet insert DOC --end-of HEADING --md '…'   add to a section (or --after REF,
 quiet replace DOC#REF --section --md '…'     rewrite a block or a heading's section
 quiet set DOC#REF --text '…' | --done  change one block
 quiet run script.js                    a JavaScript script against `lib`: many steps, one transaction
+quiet folders add PATH                 put a folder in the app's sidebar (where it is); folders remove NAME
+quiet open DOC#REF                     show the user a document in the app, at that block
 ```
 
 Paths start at a top folder's name (`Quiet.md/工作/周报`, extension optional);

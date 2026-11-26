@@ -18,6 +18,7 @@
 //!   windows <n> (that many windows are open; else the run ends with exit code 3) |
 //!   caret (logs `caret <y> of <height> at <top>`: the caret line's middle on the page, the page's top in the window) |
 //!   showing <title> (the document or folder page in front has that title; else the run ends with exit code 3) |
+//!   url <quietmd://…> | url @<file> (a link handed over as `quiet open` hands one, or the one in that file; logs the block selected after it) |
 //!   origin board | origin window (the points of the mouse and file steps after it count from the open
 //!   画板's top-left corner, or again from the window's; no board open ends the run with exit code 3)
 //!   filedrag x y <path>[|<path>...] / filedrop x y / fileleave (files dragged in from the Finder)
@@ -220,6 +221,23 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     }
                     eprintln!("devtools: {cmd}: wanted {}, {} open", rest.trim(), all.len());
                     std::process::exit(3);
+                }
+                // `url <quietmd://…>`: a link handed over as the system hands one (`quiet open`);
+                // logs the block selected afterwards, if any.
+                "url" => {
+                    // `url @file`: the link another process wrote there meanwhile.
+                    let link = match rest.trim().strip_prefix('@') { Some(f) => std::fs::read_to_string(f).unwrap_or_default().trim().to_string(), None => rest.trim().to_string() };
+                    let picked = handle.update(cx, |root, window, cx| {
+                        let ws = root.downcast::<crate::app::Workspace>().ok()?;
+                        ws.update(cx, |w, cx| {
+                            w.open_link(&link, window, cx);
+                            let ed = w.editor.as_ref()?.read(cx);
+                            let id = *ed.core.block_sel_ids().first()?;
+                            fdl_core::block_ref::items(&ed.core.doc).into_iter().find(|it| it.block.id == id).map(|it| fdl_core::block_ref::text_of(it.block))
+                        })
+                    }).ok().flatten();
+                    eprintln!("devtools: url selected {picked:?}");
+                    continue
                 }
                 // `showing <title>`: the document (or folder page) in front has that title; else stop as `row` does.
                 "showing" => {

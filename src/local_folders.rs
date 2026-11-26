@@ -115,12 +115,12 @@ impl Workspace {
         }
     }
 
-    /// 从侧栏移除: the top-level folder leaves the sidebar; its folder stays as it is.
-    pub(crate) fn remove_folder(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// What this window shows from top-level folder `key` closes, the open document saved
+    /// first; false while that save waits (`then` runs once it is done).
+    fn leave_folder(&mut self, key: &str, cx: &mut Context<Self>, then: impl FnOnce(&mut Self, &mut Window, &mut Context<Self>) + 'static) -> bool {
         let inside = |w: &Self, id: &Option<String>| id.as_deref().is_some_and(|id| w.store.top_of(id).as_deref() == Some(key));
         if inside(self, &self.current) {
-            let retry = key.to_string();
-            if !self.save_before(cx, move |w, window, cx| w.remove_folder(&retry, window, cx)) { return; }
+            if !self.save_before(cx, then) { return false; }
             self.current = None;
             self.editor = None;
             self.editor_sub = None;
@@ -130,10 +130,26 @@ impl Workspace {
             self.folder_current = None;
             if self.view == View::Folder { self.view = View::Default; }
         }
+        cx.notify();
+        true
+    }
+
+    /// 从侧栏移除: the top-level folder leaves the sidebar; its folder stays as it is.
+    pub(crate) fn remove_folder(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let retry = key.to_string();
+        if !self.leave_folder(key, cx, move |w, window, cx| w.remove_folder(&retry, window, cx)) { return; }
         let _ = window;
         if let Err(e) = self.store.remove_folder(key) { self.show_toast_kind(ToastKind::Error, &crate::settings::diagnostic(&e.to_string()), cx); }
         cx.defer(crate::settings::top_switched);
         self.entries.set(self.store.list());
+        self.trash = self.store.list_trash();
+        self.sort();
+        cx.notify();
+    }
+
+    /// The rows again after top-level folders came or went outside this window.
+    fn folders_relisted(&mut self, entries: Vec<crate::store::Entry>, cx: &mut Context<Self>) {
+        self.entries.set(entries);
         self.trash = self.store.list_trash();
         self.sort();
         cx.notify();
@@ -272,6 +288,47 @@ impl Workspace {
         self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default()
     }
 
+}
+
+/// The sidebar follows `folders.json`: a top-level folder another program (`quiet folders
+/// add` / `remove`) put on the list or took off it comes into every window or leaves it
+/// within a couple of seconds, as if added or removed here. The list is read off the main
+/// thread; a test run's fixed list (`QUIET_MD_HOME`) follows nothing.
+pub(crate) fn follow_folder_list(cx: &mut App) {
+    if cfg!(target_family = "wasm") { return }
+    cx.spawn(async move |cx| loop {
+        cx.background_executor().timer(std::time::Duration::from_secs(2)).await;
+        let Some(now) = cx.background_executor().spawn(async { fdl_core::home::Home::listed_now() }).await else { continue };
+        cx.update(|cx| {
+            let mut store = cx.global::<crate::shared_store::SharedStore>().clone();
+            if store.file_task_busy() || store.loading() { return }
+            let (added, removed) = store.changed_elsewhere(&now);
+            if added.is_empty() && removed.is_empty() { return }
+            let windows: Vec<WindowHandle<Workspace>> = cx.windows().into_iter().filter_map(|w| w.downcast::<Workspace>()).collect();
+            crate::logging::write(&format!("folders.json changed elsewhere: {} added, {} removed", added.len(), removed.len()));
+            // Added first: taking one off writes the list, which must still hold them.
+            let added = store.adopt_folders(added);
+            let mut gone = false;
+            for k in &removed {
+                // Every window lets go of what it shows from there (saved first; the next look retries meanwhile).
+                let left: Vec<bool> = windows.iter().map(|h| h.update(cx, |w, _, cx| w.leave_folder(k, cx, |_, _, _| {})).unwrap_or(true)).collect();
+                if !left.iter().all(|l| *l) { crate::logging::write(&format!("folders.json: {k} waits for a window ({left:?})")); continue }
+                if let Err(e) = store.remove_folder(k) { crate::logging::write(&format!("folders.json: could not remove {k}: {e:#}")); }
+                gone = true;
+            }
+            if gone {
+                let entries = store.list();
+                for h in &windows { let _ = h.update(cx, |w, _, cx| w.folders_relisted(entries.clone(), cx)); }
+            }
+            // Listed as a folder added here is: at once when quick, else every window takes it when done.
+            for k in added {
+                if let Some(entries) = crate::loading::begin_added(&mut store, &k, cx) {
+                    for h in &windows { let _ = h.update(cx, |w, _, cx| w.folders_relisted(entries.clone(), cx)); }
+                }
+            }
+            crate::settings::top_switched(cx);
+        });
+    }).detach();
 }
 
 #[cfg(test)]

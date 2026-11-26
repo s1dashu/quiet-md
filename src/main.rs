@@ -207,6 +207,7 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
         }
     }
     incoming.deliver(cx);
+    local_folders::follow_folder_list(cx);
     took
 }
 

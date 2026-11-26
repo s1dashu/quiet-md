@@ -239,6 +239,29 @@ impl Home {
         self.add(dir)
     }
 
+    /// The list as `folders.json` holds it now (another program, the `quiet` CLI, may have
+    /// changed it); None when it is not there or does not read.
+    pub fn listed_now() -> Option<Vec<TopFolderEntry>> { Self::read_list(&Self::list_file()) }
+
+    /// What list `now` (`listed_now`) has that this one doesn't, and the other way round:
+    /// the top-level folders added elsewhere, and the keys of those removed. Nothing for a
+    /// test run's fixed list. By key: a folder renamed elsewhere is not a new one.
+    pub fn changed_elsewhere(&self, now: &[TopFolderEntry]) -> (Vec<TopFolderEntry>, Vec<String>) {
+        if self.fixed { return (vec![], vec![]); }
+        let added = now.iter().filter(|e| self.folder(&e.key).is_none()).cloned().collect();
+        let removed = self.folders.iter().filter(|r| !now.iter().any(|e| e.key == r.key)).map(|r| r.key.clone()).collect();
+        (added, removed)
+    }
+
+    /// Top-level folder `e`, added to the list by another program, opened here under its key
+    /// (one that does not open is listed as such, as at launch). The list is not written:
+    /// it already says so.
+    pub fn adopt(&mut self, e: TopFolderEntry) {
+        if self.folder(&e.key).is_some() { return; }
+        let store = Store::open_top_folder_as(&e.path, &e.key);
+        self.push(e.key, e.path, store);
+    }
+
     /// Off the sidebar; the folder and its `.quiet/` stay as they are.
     pub fn remove(&mut self, key: &str) -> Result<()> {
         self.folders.retain(|r| r.key != key);
@@ -384,6 +407,17 @@ impl Home {
 }
 
 fn new_key() -> String { uuid::Uuid::new_v4().to_string() }
+
+/// A folder too broad to open as a top-level folder from the command line: a disk's top,
+/// the home folder, or one the system keeps (its programs, settings and libraries).
+pub fn too_broad(dir: &Path) -> bool {
+    let dir = canonical(dir);
+    if dir.parent().is_none() || dirs::home_dir().is_some_and(|h| canonical(&h) == dir) { return true; }
+    let system: &[&str] = if cfg!(windows) { &[r"C:\Windows", r"C:\Program Files", r"C:\Program Files (x86)", r"C:\ProgramData"] }
+        else { &["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/opt", "/dev", "/proc", "/sys", "/boot", "/tmp"] };
+    system.iter().any(|s| { let s = canonical(Path::new(s)); dir == s })
+        || dirs::home_dir().is_some_and(|h| [h.join("Library"), h.join("AppData")].iter().any(|l| dir == canonical(l)))
+}
 
 /// Whether folder `path` is the library's location `legacy`, the default folder.
 fn follows_default(path: &Path, legacy: &Path) -> bool { path == legacy || canonical(path) == canonical(legacy) }
@@ -582,6 +616,39 @@ mod tests {
         crate::vfs::write(&old, r#"{"v":1,"roots":[{"key":"k1","path":"/tmp/a"}]}"#).unwrap();
         let v = Home::read_list(&old).unwrap();
         assert_eq!((v.len(), v[0].key.as_str()), (1, "k1"));
+    }
+
+    /// The `quiet` CLI added one top-level folder to `folders.json` and removed another: the app's
+    /// list sees both, opens the new one under the key written there, and writes nothing.
+    #[test]
+    fn a_list_changed_elsewhere_is_taken_in() {
+        let (a, b, c) = (dir("ea"), dir("eb"), dir("ec"));
+        // Fixed while it is built (nothing written to this computer's list), then following it.
+        let mut app = Home { fixed: true, ..Default::default() };
+        let ka = app.add(&a).unwrap();
+        let kb = app.add(&b).unwrap();
+        app.fixed = false;
+        let mut now: Vec<TopFolderEntry> = app.folders.iter().filter(|r| r.key != kb).map(|r| TopFolderEntry { key: r.key.clone(), path: r.path.clone(), bookmark: None, added: 0 }).collect();
+        now.push(TopFolderEntry { key: "from-cli".into(), path: c.clone(), bookmark: None, added: 0 });
+        let (added, removed) = app.changed_elsewhere(&now);
+        assert_eq!((added.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), removed), (vec!["from-cli"], vec![kb.clone()]));
+        for e in added { app.adopt(e); }
+        assert!(app.store("from-cli").is_some() && c.join(".quiet/format.json").fs_is_file());
+        app.fixed = true;
+        app.remove(&kb).unwrap();
+        // A test run's fixed list follows nothing.
+        assert_eq!(app.changed_elsewhere(&[]).1.len(), 0);
+        app.fixed = false;
+        let (added, removed) = app.changed_elsewhere(&now);
+        assert!(added.is_empty() && removed.is_empty(), "taken in: nothing left to do");
+        assert!(app.folder(&ka).is_some());
+    }
+
+    #[test]
+    fn broad_folders_are_too_broad() {
+        assert!(too_broad(Path::new("/")));
+        if let Some(h) = dirs::home_dir() { assert!(too_broad(&h) && !too_broad(&h.join("Notes"))); }
+        if cfg!(unix) { assert!(too_broad(Path::new("/usr")) && too_broad(Path::new("/etc/")) && !too_broad(&dir("narrow"))); }
     }
 
     #[test]

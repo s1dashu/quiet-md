@@ -299,7 +299,7 @@ fn imports_files_but_not_from_scripts() {
 #[test]
 fn every_command_has_help() {
     let lib = library(&[]);
-    for c in ["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set", "rename", "mv", "rm", "table", "board", "history", "restore", "trash", "untrash", "import", "run", "call", "mcp", "guide", "telemetry"] {
+    for c in ["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set", "rename", "mv", "rm", "table", "board", "history", "restore", "trash", "untrash", "import", "run", "call", "mcp", "guide", "telemetry", "folders", "open", "duplicate", "pin"] {
         let out = ok(&lib, &["help", c]);
         assert!(out.starts_with(&format!("quiet {c}")), "{c}: {out}");
     }
@@ -735,4 +735,101 @@ fn wiki_links_look_in_their_own_folder_first() {
     assert!(err.contains("error[ambiguous]") && err.contains("Attic/A/Box.xml") && err.contains("Attic/B/Box.xml") && !err.contains("Home/Box"), "{err}");
     // From Work, Box is only elsewhere, in two top-level folders.
     assert!(String::from_utf8_lossy(&folders_run(&file, &["insert", "Notes", "--md", "[[Box]]"]).stderr).contains("other top-level folders match"));
+}
+
+/// `quiet folders`: the sidebar's list in `folders.json`, written by the same code as the app's
+/// 添加文件夹 / 从侧栏移除, with its checks.
+#[test]
+fn folders_add_list_and_remove() {
+    let (_, file) = top_folders(&[("Work", &[("Plan", PLAN)])]);
+    let base = file.parent().unwrap().to_path_buf();
+    let notes = base.join("Notes");
+    std::fs::create_dir_all(notes.join("sub")).unwrap();
+    std::fs::write(notes.join("a.md"), "# A\n").unwrap();
+    let list = folders_json(&file, &["folders"]);
+    assert_eq!(list["folders"].as_array().unwrap().len(), 1);
+    assert_eq!(list["folders"][0]["default"], true);
+    // Dry run writes nothing.
+    folders_ok(&file, &["folders", "add", notes.to_str().unwrap(), "--dry-run"]);
+    assert!(!notes.join(".quiet").exists());
+    let added = folders_json(&file, &["folders", "add", notes.to_str().unwrap()]);
+    assert_eq!(added["added"]["name"], "Notes");
+    assert!(notes.join(".quiet").is_dir(), "opened where it is");
+    let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(written["folders"].as_array().unwrap().len(), 2);
+    assert!(folders_ok(&file, &["ls", "Notes"]).contains("a.md"), "its documents are listed at once");
+    // The app's checks: open already, inside one that is, holding one, not there, too broad.
+    let err = |args: &[&str]| { let o = folders_run(&file, args); assert!(!o.status.success(), "{args:?}"); String::from_utf8_lossy(&o.stderr).into_owned() };
+    assert!(err(&["folders", "add", notes.to_str().unwrap()]).starts_with("error[already_open]"));
+    assert!(err(&["folders", "add", notes.join("sub").to_str().unwrap()]).starts_with("error[inside_open]"));
+    assert!(err(&["folders", "add", base.to_str().unwrap()]).starts_with("error[holds_open]"));
+    assert!(err(&["folders", "add", base.join("nope").to_str().unwrap()]).starts_with("error[not_found]"));
+    assert!(err(&["folders", "add", "/"]).starts_with("error[too_broad]"));
+    // A code project asks first; --force adds it.
+    let code = base.join("code");
+    std::fs::create_dir_all(&code).unwrap();
+    std::fs::write(code.join("Cargo.toml"), "[package]\n").unwrap();
+    assert!(err(&["folders", "add", code.to_str().unwrap()]).starts_with("error[confirm]"));
+    folders_ok(&file, &["folders", "add", code.to_str().unwrap(), "--force"]);
+    // Removed by name, path or key: off the list, every file where it was.
+    folders_ok(&file, &["folders", "remove", "notes"]);
+    folders_ok(&file, &["folders", "rm", code.to_str().unwrap()]);
+    assert!(err(&["folders", "remove", "Notes"]).starts_with("error[not_found]"));
+    let left = folders_json(&file, &["folders"]);
+    assert_eq!(left["folders"].as_array().unwrap().len(), 1);
+    assert_eq!(left["folders"][0]["name"], "Work");
+    assert!(notes.join("a.md").is_file() && notes.join(".quiet").is_dir() && code.join("Cargo.toml").is_file());
+}
+
+/// `quiet open`: the link handed to the system names the document, its block (pinned), a
+/// folder or the trash; `new --open` opens what it made.
+#[test]
+fn open_hands_over_a_link() {
+    let (_, file) = top_folders(&[("Work", &[("Plan", PLAN)])]);
+    let caught = file.with_file_name("links.txt");
+    let run = |args: &[&str]| Command::new(env!("CARGO_BIN_EXE_quiet")).env("QUIET_NO_TELEMETRY", "1").env_remove("QUIET_MD_HOME").env("QUIET_MD_FOLDERS", &file).env("QUIET_MD_OPEN_LOG", &caught).args(args).output().unwrap();
+    let ok = |args: &[&str]| { let o = run(args); assert!(o.status.success(), "{args:?}: {}", String::from_utf8_lossy(&o.stderr)); serde_json::from_slice::<serde_json::Value>(&o.stdout).unwrap() };
+    let parse = |v: &serde_json::Value| fdl_core::app_url::Target::parse(v["url"].as_str().unwrap()).unwrap();
+    let to_doc = ok(&["--json", "open", "Work/Plan#Tasks", "--dry-run"]);
+    assert_eq!(to_doc["launched"], false);
+    let fdl_core::app_url::Target::Doc { top, block, .. } = parse(&to_doc) else { panic!("{to_doc}") };
+    assert_eq!((top.as_deref(), block.as_deref().map(|b| b.split('~').next().unwrap())), (Some("k0"), Some("#3")));
+    assert!(!caught.exists(), "a dry run hands nothing over");
+    let launched = ok(&["--json", "open", "Plan#3"]);
+    assert_eq!(launched["launched"], true);
+    assert_eq!(std::fs::read_to_string(&caught).unwrap().trim(), launched["url"].as_str().unwrap());
+    assert_eq!(parse(&ok(&["--json", "open", "Work", "--dry-run"])), fdl_core::app_url::Target::Folder { top: "k0".into(), folder: None });
+    assert_eq!(parse(&ok(&["--json", "open", "--trash", "--dry-run"])), fdl_core::app_url::Target::Trash);
+    // Clear refusals.
+    for (args, code) in [(&["open", "Nope"][..], "not_found"), (&["open", "Plan#no such heading"][..], "bad_ref"), (&["open"][..], "usage")] {
+        let o = run(args);
+        assert!(String::from_utf8_lossy(&o.stderr).starts_with(&format!("error[{code}]")), "{args:?}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    // `new --open`: written, then opened.
+    let o = run(&["new", "Fresh", "--in", "Work", "--open"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let links = std::fs::read_to_string(&caught).unwrap();
+    assert_eq!(links.lines().count(), 2);
+    assert!(matches!(fdl_core::app_url::Target::parse(links.lines().last().unwrap()), Ok(fdl_core::app_url::Target::Doc { .. })));
+}
+
+/// 置顶 and 创建副本, as the document's menu does them.
+#[test]
+fn pins_and_duplicates() {
+    let lib = library(&[("Plan", PLAN)]);
+    let entry = |lib: &Path, title: &str| json(lib, &["ls"]).as_array().unwrap().iter().find(|e| e["title"] == title).cloned().unwrap_or_default();
+    ok(&lib, &["pin", "Plan", "--dry-run"]);
+    assert_ne!(entry(&lib, "Plan")["pinned"], true, "a dry run writes nothing");
+    ok(&lib, &["pin", "Plan"]);
+    assert_eq!(entry(&lib, "Plan")["pinned"], true);
+    ok(&lib, &["unpin", "Plan"]);
+    assert_ne!(entry(&lib, "Plan")["pinned"], true);
+    assert!(ok(&lib, &["duplicate", "Plan"]).contains("duplicated"));
+    assert!(ok(&lib, &["read", "Plan 副本"]).contains("Ship the CLI."), "the copy holds the same text");
+    ok(&lib, &["duplicate", "Plan", "Template"]);
+    assert!(entry(&lib, "Template").is_object());
+    let o = script(&lib, "const d = lib.doc('Plan'); d.pin(); d.duplicate('Copy 2');", &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(entry(&lib, "Plan")["pinned"], true);
+    assert!(entry(&lib, "Copy 2").is_object());
 }

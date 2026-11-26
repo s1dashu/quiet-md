@@ -13,47 +13,9 @@ use serde_json::{Value, json};
 
 use crate::fail::{R, fail};
 
-pub struct Item<'a> {
-    pub path: Vec<usize>,
-    pub block: &'a Block,
-}
-
-/// Every block in document order, children after their parent.
-pub fn items(doc: &Document) -> Vec<Item<'_>> {
-    fn walk<'a>(list: &'a [Block], at: &mut Vec<usize>, out: &mut Vec<Item<'a>>) {
-        for (i, b) in list.iter().enumerate() {
-            at.push(i);
-            out.push(Item { path: at.clone(), block: b });
-            walk(&b.children, at, out);
-            at.pop();
-        }
-    }
-    let mut out = vec![];
-    walk(&doc.blocks, &mut vec![], &mut out);
-    out
-}
-
-pub fn ref_of(path: &[usize]) -> String {
-    format!("#{}", path.iter().map(|i| (i + 1).to_string()).collect::<Vec<_>>().join("."))
-}
+pub use fdl_core::block_ref::{Item, fingerprint, items, kind_name, pin, pin_of, text_of};
 
 pub fn id_of(id: BlockId) -> String { format!("b{}", id.0) }
-
-/// Four base-32 characters from the block's kind and its own text, inline
-/// objects (mentions, equations) included.
-pub fn fingerprint(b: &Block) -> String {
-    let inline: String = b.text.runs.iter().filter_map(|r| r.marks.inline.as_ref()).map(|i| i.xml.as_str()).collect();
-    let d = sha1_smol::Sha1::from(format!("{}\0{}\0{inline}", kind_name(&b.kind), text_of(b))).digest().bytes();
-    const A: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
-    let n = u32::from_be_bytes([d[0], d[1], d[2], d[3]]);
-    (0..4).map(|i| A[((n >> (i * 5)) & 31) as usize] as char).collect()
-}
-
-/// The self-checking ref of a listed block: `#3.1~k7f2`.
-pub fn pin(it: &Item) -> String { format!("{}~{}", ref_of(&it.path), fingerprint(it.block)) }
-
-/// The self-checking ref of the block `id`, if it is in the document.
-pub fn pin_of(doc: &Document, id: BlockId) -> Option<String> { items(doc).iter().find(|it| it.block.id == id).map(pin) }
 
 pub fn path_of(doc: &Document, id: BlockId) -> Option<Vec<usize>> {
     items(doc).into_iter().find(|it| it.block.id == id).map(|it| it.path)
@@ -61,30 +23,6 @@ pub fn path_of(doc: &Document, id: BlockId) -> Option<Vec<usize>> {
 
 pub fn find(doc: &Document, id: BlockId) -> Option<&Block> {
     items(doc).into_iter().find(|it| it.block.id == id).map(|it| it.block)
-}
-
-pub fn kind_name(k: &BlockKind) -> String {
-    match k {
-        BlockKind::Text => "text".into(),
-        BlockKind::Heading { level, .. } => format!("h{level}"),
-        BlockKind::Bullet => "bullet".into(),
-        BlockKind::Ordered { .. } => "ordered".into(),
-        BlockKind::Todo { .. } => "todo".into(),
-        BlockKind::Code { .. } => "code".into(),
-        BlockKind::Quote => "quote".into(),
-        BlockKind::Callout { .. } => "callout".into(),
-        BlockKind::Divider => "divider".into(),
-        BlockKind::Image { .. } => "image".into(),
-        BlockKind::Table(_) => "table".into(),
-        BlockKind::Grid => "grid".into(),
-        BlockKind::Column { .. } => "column".into(),
-        BlockKind::SubPageList => "subpages".into(),
-        BlockKind::Countdown(_) => "countdown".into(),
-        BlockKind::File(_) => "file".into(),
-        BlockKind::Board(_) => "board".into(),
-        BlockKind::DataTable(_) => "datatable".into(),
-        BlockKind::Raw { tag, .. } => format!("raw:{tag}"),
-    }
 }
 
 /// What `set --kind` and `setKind` turn a text block into.
@@ -99,31 +37,6 @@ pub fn parse_kind(s: &str) -> Option<BlockKind> {
         h if h.len() == 2 && h.starts_with('h') => match h[1..].parse::<u8>() { Ok(l @ 1..=9) => BlockKind::Heading { level: l, seq_auto: false }, _ => return None },
         _ => return None,
     })
-}
-
-/// A block's text as a reader sees it; a table as its rows, cells joined by ` | `.
-pub fn text_of(b: &Block) -> String {
-    match &b.kind {
-        BlockKind::Table(t) => t.rows.iter().map(|row| row.iter().filter(|c| !c.is_covered()).map(|c| c.blocks.iter().map(|b| shown(&b.text)).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ")).collect::<Vec<_>>().join("\n"),
-        BlockKind::Image { caption, src, .. } => caption.clone().unwrap_or_else(|| src.clone()),
-        BlockKind::File(f) => f.name.clone(),
-        BlockKind::Board(bd) => bd.plain_text(),
-        BlockKind::DataTable(t) => t.src.clone(),
-        _ => shown(&b.text),
-    }
-}
-
-/// Text as the page shows it: a mention as the title of what it points at.
-fn shown(t: &RichText) -> String {
-    if !t.text.contains('\u{fffc}') { return t.text.clone(); }
-    let mut out = String::new();
-    for (r, m) in t.spans() {
-        match m.inline.as_ref().and_then(|i| i.doc_link()) {
-            Some(l) => out.push_str(&l.title),
-            None => { let mut one = RichText::default(); one.push(&t.text[r], m.clone()); out.push_str(&one.plain_text()); }
-        }
-    }
-    out
 }
 
 /// `[[target]]` links (a Markdown file's links to other pages): target and the line.

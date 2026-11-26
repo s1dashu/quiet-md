@@ -91,6 +91,40 @@ impl Workspace {
         cx.notify();
     }
 
+    /// A `quietmd://` link another program handed over (`quiet open`): what it names is
+    /// shown here, or a toast says why not. Links only navigate (`fdl_core::app_url`).
+    pub(crate) fn open_link(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        use fdl_core::app_url::Target;
+        crate::logging::write(&format!("link {url}"));
+        let missing = |w: &mut Self, msg: &str, cx: &mut Context<Self>| { w.show_toast_kind(ToastKind::Error, msg, cx); cx.notify(); };
+        match Target::parse(url) {
+            Err(e) => missing(self, &crate::localized_format!("无法打开链接：{}", "Could not open the link: {}", e), cx),
+            Ok(Target::Doc { doc, block, .. }) => {
+                // By id, which is unique across the top-level folders (W14).
+                if !self.entries.iter().any(|e| e.id == doc && e.meta.folder.is_none()) { return missing(self, tr("找不到这篇文档：它可能已被移走或删除，或者所在的文件夹不在侧栏里", "Document not found: it may have been moved or deleted, or its folder isn't in the sidebar"), cx) }
+                if !self.try_open(&doc, window, cx) { return }
+                let Some(block) = block else { return };
+                let found = self.editor.clone().and_then(|ed| ed.update(cx, |e, cx| {
+                    let id = fdl_core::block_ref::locate(&e.core.doc, &block)?;
+                    e.scroll_to_block(id, cx);
+                    e.core.select_block(id);
+                    Some(())
+                }));
+                if found.is_none() { missing(self, tr("已打开文档，但找不到那个块：文档可能已经改过", "Opened the document, but the block wasn't found: the document may have changed"), cx) }
+            }
+            Ok(Target::Folder { top, folder }) => {
+                if !self.store.shown_tops().iter().any(|r| r.0 == top) { return missing(self, tr("找不到这个文件夹：它不在侧栏里", "Folder not found: it isn't in the sidebar"), cx) }
+                let id = match folder {
+                    Some(id) if self.entries.iter().any(|e| e.id == id && e.meta.folder.is_some() && e.top == top) => id,
+                    Some(_) => return missing(self, tr("找不到这个文件夹：它可能已被移走或删除", "Folder not found: it may have been moved or deleted"), cx),
+                    None => crate::shared_store::top_row(&top),
+                };
+                self.open_folder(&id, window, cx);
+            }
+            Ok(Target::Trash) => self.show_view(crate::app::View::Trash, cx),
+        }
+    }
+
     /// A relative link (`[周报](../工作/周报.md)`, `[报告](附件/报告.pdf)`,
     /// `[[page]]`): a document of the library, or a Markdown file, opens
     /// here; any other file opens in its app, and a folder, or a file that
@@ -145,6 +179,9 @@ impl Workspace {
 
 }
 
+/// A `quietmd://` link (`fdl_core::app_url`), as the system hands it over.
+fn is_link(s: &str) -> bool { s.get(..fdl_core::app_url::SCHEME.len() + 3).is_some_and(|p| p.eq_ignore_ascii_case(&format!("{}://", fdl_core::app_url::SCHEME))) }
+
 /// Opening it would run something (an app, a script, an installer): a link
 /// in a note someone sent must not, so it only shows in the Finder.
 pub(crate) fn runs_program(p: &std::path::Path) -> bool {
@@ -156,35 +193,46 @@ pub(crate) fn runs_program(p: &std::path::Path) -> bool {
 }
 
 /// Files the system asked us to open (Finder's Open With, a double-click,
-/// the command line), waiting for a main window.
+/// the command line), and `quietmd://` links (`quiet open`), waiting for a main window.
 #[derive(Clone, Default)]
-pub struct Incoming(std::rc::Rc<std::cell::RefCell<Vec<PathBuf>>>);
+pub struct Incoming(std::rc::Rc<std::cell::RefCell<(Vec<PathBuf>, Vec<String>)>>);
 
 impl Incoming {
-    /// Markdown files and folders named on the command line (Windows and Linux "Open with").
+    /// Markdown files, folders and links named on the command line (Windows and Linux
+    /// "Open with", and a link the system starts the app with there; the Linux desktop
+    /// entry's `%U` hands files over as `file://` links).
     pub fn from_args() -> Self {
         let me = Self::default();
-        me.0.borrow_mut().extend(std::env::args_os().skip(1).map(PathBuf::from).filter(|p| (is_markdown_path(p) && p.fs_is_file()) || p.fs_is_dir()));
+        let (links, paths): (Vec<String>, Vec<String>) = std::env::args_os().skip(1).filter_map(|a| a.into_string().ok()).partition(|a| is_link(a) || a.starts_with("file://"));
+        me.push_urls(links);
+        me.0.borrow_mut().0.extend(paths.into_iter().map(PathBuf::from).filter(|p| (is_markdown_path(p) && p.fs_is_file()) || p.fs_is_dir()));
         me
     }
 
     pub fn push_urls(&self, urls: Vec<String>) {
-        let paths = urls.iter().filter_map(|u| u.strip_prefix("file://")).map(|p| PathBuf::from(crate::markdown::percent_decode(p.trim_end_matches('/'))));
-        self.0.borrow_mut().extend(paths.filter(|p| is_markdown_path(p) || p.fs_is_dir()));
+        let (links, files): (Vec<String>, Vec<String>) = urls.into_iter().partition(|u| is_link(u));
+        let paths = files.iter().filter_map(|u| u.strip_prefix("file://")).map(|p| PathBuf::from(crate::markdown::percent_decode(p.trim_end_matches('/'))));
+        let mut q = self.0.borrow_mut();
+        q.0.extend(paths.filter(|p| is_markdown_path(p) || p.fs_is_dir()));
+        q.1.extend(links);
     }
 
-    /// Hand waiting files to the front main window, now and whenever more arrive.
+    /// Hand waiting files and links to the front main window, now and whenever more arrive.
+    /// A link waits until the window has listed its folders: what it names may be in one.
     pub fn deliver(self, cx: &mut App) {
         cx.spawn(async move |cx| loop {
-            if !self.0.borrow().is_empty() {
+            let waiting = { let q = self.0.borrow(); !q.0.is_empty() || !q.1.is_empty() };
+            if waiting {
                 cx.update(|cx| {
                     let target = cx.active_window().and_then(|w| w.downcast::<Workspace>())
                         .or_else(|| cx.windows().into_iter().find_map(|w| w.downcast::<Workspace>()));
                     let Some(target) = target else { return };
-                    let paths = std::mem::take(&mut *self.0.borrow_mut());
+                    let paths = std::mem::take(&mut self.0.borrow_mut().0);
                     let _ = target.update(cx, |w, window, cx| {
                         window.activate_window();
-                        w.open_paths(&paths, window, cx);
+                        if !paths.is_empty() { w.open_paths(&paths, window, cx); }
+                        if w.store.loading() { return }
+                        for link in std::mem::take(&mut self.0.borrow_mut().1) { w.open_link(&link, window, cx); }
                     });
                 });
             }
@@ -200,6 +248,15 @@ mod tests {
     fn programs_only_show() {
         for p in ["a/报告.pdf", "幻灯片.PPTX", "页.html", "表.xlsx"] { assert!(!super::runs_program(std::path::Path::new(p)), "{p}"); }
         for p in ["安装.pkg", "x.command", "run.SH", "a.app", "setup.exe", "无扩展名"] { assert!(super::runs_program(std::path::Path::new(p)), "{p}"); }
+    }
+
+    /// What `open_link` says, by its Chinese key.
+    #[test]
+    fn every_language_says_why_a_link_did_not_open() {
+        const TEXTS: [&str; 5] = ["无法打开链接：{}", "找不到这篇文档：它可能已被移走或删除，或者所在的文件夹不在侧栏里", "已打开文档，但找不到那个块：文档可能已经改过", "找不到这个文件夹：它不在侧栏里", "找不到这个文件夹：它可能已被移走或删除"];
+        for l in crate::settings::Lang::ALL.into_iter().filter(|l| !matches!(l, crate::settings::Lang::Zh | crate::settings::Lang::En)) {
+            for k in TEXTS { assert!(crate::l10n::get(l, k).is_some(), "{l:?}: {k}"); }
+        }
     }
 
     /// Only Markdown is edited where it is; the list is `shown::LIBRARY_FILES`.

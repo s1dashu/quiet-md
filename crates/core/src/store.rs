@@ -1264,8 +1264,8 @@ impl Store {
     /// rather than starting an empty library where the old one was.
     pub fn remember_dir(root: PathBuf) -> Result<()> {
         let file = Self::location_file();
-        // Test runs (`QUIET_MD_HOME`) never move the real library.
-        if std::env::var_os("QUIET_MD_HOME").is_some() {}
+        // Test runs (`QUIET_MD_HOME`, or a list of their own in `QUIET_MD_FOLDERS`) never move the real library.
+        if std::env::var_os("QUIET_MD_HOME").is_some() || std::env::var_os("QUIET_MD_FOLDERS").is_some() {}
         else if Self::needs_no_pointer(&root, &Self::documents()) { let _ = crate::vfs::remove_file(&file); }
         else {
             crate::vfs::create_dir_all(file.parent().unwrap())?;

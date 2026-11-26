@@ -69,6 +69,10 @@ pub(crate) enum Pending {
     Rename { id: String, title: String },
     Move { id: String, folder: Option<String> },
     Trash { id: String },
+    /// 添加到「置顶」/ 从「置顶」移除: the index only, the file stays.
+    Pin { id: String, on: bool },
+    /// 创建副本: beside it, under `title`.
+    Duplicate { id: String, title: String },
     Untrash { top: String, id: String, title: String },
     Import { top: String, path: PathBuf, folder: Option<String> },
     RestoreTable { id: String, version: String },
@@ -116,7 +120,7 @@ fn folders_named<'a>(list: &'a [Entry], s: &str) -> Vec<&'a Entry> {
 
 /// A top-level folder's library as it is: one whose folder is gone is an error, never
 /// made anew, and copies a crash left stay for the app to restore and report.
-fn open_top(e: &TopFolderEntry) -> anyhow::Result<Store> {
+pub(crate) fn open_top(e: &TopFolderEntry) -> anyhow::Result<Store> {
     anyhow::ensure!(e.path.is_dir(), "the folder is not there");
     anyhow::ensure!(!Store::flat_at(&e.path), "it still has the old layout: open it in Quiet.md once");
     Store::open_for_tools_as(e.path.clone(), &e.key)
@@ -152,7 +156,7 @@ impl Session {
             None => Home::open_with(Home::entries().0, true, open_top),
         };
         if ws.folders.is_empty() {
-            return Err(fail("no_library", "Quiet.md has no folders open on this computer")).map_err(|f| f.hint("add a folder in Quiet.md (the + beside the sidebar's folders), or pass --library DIR"));
+            return Err(fail("no_library", "Quiet.md has no folders open on this computer")).map_err(|f| f.hint("`quiet folders add PATH` adds the folder your notes are in (as 添加文件夹 in Quiet.md does), or pass --library DIR"));
         }
         let mut s = Session { ws, entries: vec![], all: vec![], docs: vec![], tables: vec![], pending: vec![], assets: vec![], sandbox: false, alone: library.is_some() };
         s.refresh();
@@ -450,7 +454,7 @@ impl Session {
     /// A command line's `DOC#REF`: the whole of it if a document is called
     /// that, else split at the `#` (from the right) after which the rest
     /// names a document; `ref_is_after`: insert's ref is where to insert.
-    fn split_doc(&self, a: &Value) -> R<Value> {
+    pub(crate) fn split_doc(&self, a: &Value) -> R<Value> {
         let mut a = a.clone();
         let spec = need(&a, "doc")?.to_string();
         let o = a.as_object_mut().unwrap();
@@ -500,6 +504,20 @@ impl Session {
                 Ok(json!({ "path": self.docs[i].path, "to": arg(a, "folder").unwrap_or("/") }))
             }
             "trash" => { let i = self.doc_arg(a)?; let id = self.saved_id(i)?; self.pending.push(Pending::Trash { id }); Ok(json!({ "path": self.docs[i].path, "trash": true })) }
+            "pin" | "unpin" => {
+                let i = self.doc_arg(a)?;
+                let id = self.saved_id(i)?;
+                self.pending.push(Pending::Pin { id, on: op == "pin" });
+                Ok(json!({ "path": self.docs[i].path, "pinned": op == "pin" }))
+            }
+            "duplicate" => {
+                let i = self.doc_arg(a)?;
+                let id = self.saved_id(i)?;
+                // As the app names it: "<标题> 副本".
+                let title = arg(a, "title").map(str::to_string).unwrap_or_else(|| format!("{} 副本", self.docs[i].title));
+                self.pending.push(Pending::Duplicate { id, title: title.clone() });
+                Ok(json!({ "path": self.docs[i].path, "duplicate": title }))
+            }
             "links" => self.links(a),
             "table" => self.table(a),
             "check" => self.check(),
@@ -995,6 +1013,18 @@ impl Session {
                     self.refresh();
                     report.push(json!({ "path": from, "action": "moved to trash" }));
                 }
+                Pending::Pin { id, on } => {
+                    let path = self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default();
+                    self.lib_of(&id)?.set_pinned(&id, on).map_err(|e| fail("io", format!("{e:#}")))?;
+                    self.refresh();
+                    report.push(json!({ "path": path, "action": if on { "pinned" } else { "unpinned" } }));
+                }
+                Pending::Duplicate { id, title } => {
+                    let from = self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default();
+                    let made = self.lib_of(&id)?.duplicate(&id, &title).map_err(|e| fail("io", format!("{e:#}")))?;
+                    self.refresh();
+                    report.push(json!({ "path": self.entry_by_id(&made).map(|e| self.label(e)).unwrap_or(title), "action": "duplicated", "source": from }));
+                }
                 Pending::Untrash { top, id, title } => {
                     self.lib(&top)?.restore(&id).map_err(|e| fail("not_found", format!("{title}: {e:#}")))?;
                     self.refresh();
@@ -1037,6 +1067,8 @@ impl Session {
             Pending::Move { id, folder } => json!({ "path": rel(id), "action": "would move", "to": self.entry_by_id(id).map(|e| self.home_path(&e.top, &self.folder_rel(folder.as_deref()))).unwrap_or_default() }),
             Pending::Trash { id } => json!({ "path": rel(id), "action": "would move to trash" }),
             Pending::Untrash { title, .. } => json!({ "path": title, "action": "would restore from trash" }),
+            Pending::Pin { id, on } => json!({ "path": rel(id), "action": if *on { "would pin" } else { "would unpin" } }),
+            Pending::Duplicate { id, title } => json!({ "path": rel(id), "action": "would duplicate", "to": title }),
             Pending::Import { top, path, folder } => json!({ "path": path.display().to_string(), "action": "would import", "to": self.home_path(top, folder.as_deref().unwrap_or("")) }),
             Pending::RestoreTable { id, version } => json!({ "path": rel(id), "action": "would restore version", "to": version }),
         })

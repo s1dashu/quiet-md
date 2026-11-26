@@ -2,6 +2,8 @@
 //! reading and writing, the editing core with undo, the library on disk,
 //! and Markdown / HTML import plus Markdown export.
 
+pub mod app_url;
+pub mod block_ref;
 pub mod board;
 pub mod changes;
 pub mod clip_html;

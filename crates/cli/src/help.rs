@@ -14,7 +14,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet links DOC                        mentions out of and into DOC
   quiet check                            broken links, unreadable files, unused assets
 
-  quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table]
+  quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table] [--open]
   quiet mkdir NAME [--in FOLDER]
   quiet insert DOC [--after|--before|--into|--end-of REF | --start | --end] --md TEXT|-
   quiet replace DOC#REF [--section] --md TEXT|-
@@ -22,6 +22,8 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet move DOC#REF --after|--before|--into REF [--section]
   quiet set DOC#REF [--text TEXT] [--done|--undone] [--kind K]
   quiet rename DOC TITLE | quiet mv DOC FOLDER | quiet rm DOC
+  quiet duplicate DOC [TITLE]            a copy beside it (\"TITLE 副本\")
+  quiet pin|unpin DOC                    the sidebar's 置顶 list
 
   quiet table DOC[#REF] [--view V] [--where 'F OP V']…   a 数据表's rows, filtered
   quiet table add|update|delete|import …  rows;  table field|view|new|rename|remove … its shape
@@ -30,6 +32,9 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet restore DOC VERSION              put a document back as it was
   quiet trash | quiet untrash NAME       the trash, and bringing a document back
   quiet import FILE… [--in FOLDER]       Markdown, DocxXML, CSV, .excalidraw
+
+  quiet folders [add PATH | remove NAME] the folders Quiet.md's sidebar lists
+  quiet open DOC[#REF] | --folder F | --trash   show it in Quiet.md, at that block
 
   quiet run [FILE|-] [-e CODE]           a JavaScript script, as one transaction
   quiet call OP [JSON]                   any operation by name (what run's lib calls)
@@ -100,7 +105,9 @@ that mention DOC."),
 
 The whole library: files that do not parse, mentions of documents that are
 gone, empty documents, pictures and files no document uses."),
-    (&["new"], "quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table] [--fields A,B,… | --csv TEXT|-]
+    (&["new"], "quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table] [--fields A,B,… | --csv TEXT|-] [--open]
+
+--open shows it in Quiet.md once written, as 新建 there does (`quiet open`).
 
 A new document (DocxXML; --kind md or --markdown for a .md file), its body
 from Markdown; an empty board; or a 数据表 with the columns --fields names,
@@ -270,6 +277,45 @@ document as \"doc\" and a block as \"at\".
 An MCP server on stdin/stdout with two tools: `quiet` (a command line) and
 `quiet_run` (a script). For agents that speak MCP but have no shell. E.g. in
 an MCP client's settings: {\"command\": \"quiet\", \"args\": [\"mcp\"]}"),
+    (&["folders"], "quiet folders [ls] | quiet folders add PATH [--force] | quiet folders remove NAME|PATH|KEY
+
+The top-level folders Quiet.md's sidebar lists on this computer (主页), as
+添加文件夹 / 从侧栏移除 in the app keep them: each line is name, path on disk,
+key, and `default` for the one new things go to. `add` opens a folder where it
+is (nothing is copied; a hidden .quiet folder is made in it); it must exist,
+not be open already, not be inside one that is open, not hold one, and not be
+a disk's top, the home folder or a system folder. A code project or a folder
+with a great many files asks first, as the app does: --force adds it anyway.
+`remove` takes it off the sidebar; its files stay as they are. A running
+Quiet.md shows the change within a few seconds. --dry-run checks, writes nothing.
+
+  quiet folders add ~/Documents/Notes
+  quiet folders remove Notes"),
+    (&["open"], "quiet open DOC[#REF] [--dry-run] | quiet open --folder FOLDER | quiet open --trash
+
+Shows the document in Quiet.md, scrolled to the block REF names and with that
+block selected (REF as `quiet read` takes it: #3~k7f2, #2.1 or a heading's
+text), a folder's page (a top-level folder's name opens its own), or the
+trash (after `quiet rm`, say). `quiet new … --open` opens what it made. Quiet.md
+is launched if it isn't running. It goes through a quietmd:// link, which only
+navigates: it prints the link; --dry-run prints it without opening it. With
+--library DIR, that folder must be open in Quiet.md (`quiet folders add`).
+
+  quiet open 工作/周报#风险
+  quiet open --folder 工作/项目"),
+    (&["duplicate", "cp"], "quiet duplicate DOC [TITLE]
+
+创建副本: a copy of the document (a 画板, a 数据表, a folder's 正文 too) beside
+it, titled TITLE or \"<title> 副本\" as the app names it. Links inside the
+copy still point where they pointed.
+
+  quiet duplicate 工作/周报 \"周报 模板\""),
+    (&["pin", "unpin"], "quiet pin DOC | quiet unpin DOC
+
+添加到「置顶」/ 从「置顶」移除: the document shows in the sidebar's 置顶
+list (`ls --json` says `pinned`). The file itself is not touched.
+
+  quiet pin 工作/周报"),
     (&["telemetry"], "quiet telemetry [on|off|status]
 
 quiet counts how often its commands run: per day, how many ran and failed and

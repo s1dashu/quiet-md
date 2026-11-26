@@ -79,6 +79,11 @@ Root: HKA; Subkey: "Software\Classes\Applications\quiet_md.exe\SupportedTypes"; 
 Root: HKA; Subkey: "Software\Classes\Directory\shell\QuietMd"; ValueType: string; ValueName: ""; ValueData: "Open with Quiet.md"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Directory\shell\QuietMd"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\quiet_md.exe,0"
 Root: HKA; Subkey: "Software\Classes\Directory\shell\QuietMd\command"; ValueType: string; ValueName: ""; ValueData: """{app}\quiet_md.exe"" ""%1"""
+; quietmd:// links (`quiet open`): they only navigate, see crates/core/src/app_url.rs.
+Root: HKA; Subkey: "Software\Classes\quietmd"; ValueType: string; ValueName: ""; ValueData: "URL:Quiet.md link"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\quietmd"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\quietmd\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\quiet_md.exe,0"
+Root: HKA; Subkey: "Software\Classes\quietmd\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\quiet_md.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\quiet_md.exe"; Description: "Launch Quiet.md"; Flags: nowait postinstall skipifsilent

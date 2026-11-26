@@ -72,6 +72,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>LSHandlerRank</key><string>Alternate</string>
     <key>LSItemContentTypes</key><array><string>public.folder</string></array>
   </dict></array>
+<key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>com.s1dashu.quietmd.open</string>
+    <key>CFBundleURLSchemes</key><array><string>quietmd</string></array>
+  </dict></array>
 </dict></plist>
 PLIST
 plutil -lint "$app/Contents/Info.plist"
