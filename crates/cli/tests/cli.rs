@@ -530,10 +530,10 @@ fn finished_days_are_sent_and_forgotten() {
     assert!(left["days"].get("2020-01-01").is_none() && left["days"].get("2999-01-01").is_some());
 }
 
-/// Two top-level folders, as the app keeps them: folders `Work` and `Home` and a
+/// Two top-level folders, as the app keeps them: folders `Work` and `Personal` and a
 /// `folders.json` of their own (`QUIET_MD_FOLDERS`, so this computer's list is untouched).
-fn two_folders(work: &[(&str, &str)], home: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
-    let (mut dirs, file) = top_folders(&[("Work", work), ("Home", home)]);
+fn two_folders(work: &[(&str, &str)], personal: &[(&str, &str)]) -> (PathBuf, PathBuf, PathBuf) {
+    let (mut dirs, file) = top_folders(&[("Work", work), ("Personal", personal)]);
     (dirs.remove(0), dirs.remove(0), file)
 }
 
@@ -575,41 +575,41 @@ fn folders_json(file: &Path, args: &[&str]) -> serde_json::Value {
 }
 
 #[test]
-fn paths_start_at_home() {
-    let (work, home, file) = two_folders(&[("Plan", PLAN), ("Budget", "Rent and food.")], &[("Plan", "# Garden\nPlant the tomatoes."), ("Recipes", "Bread: flour, water, salt.")]);
-    // `ls` on 主页: the top-level folders; their paths are where every path starts.
+fn paths_start_at_the_top_folders() {
+    let (work, personal, file) = two_folders(&[("Plan", PLAN), ("Budget", "Rent and food.")], &[("Plan", "# Garden\nPlant the tomatoes."), ("Recipes", "Bread: flour, water, salt.")]);
+    // `ls` alone: the top-level folders; their paths are where every path starts.
     let tops = folders_json(&file, &["ls"]);
     let names: Vec<&str> = tops.as_array().unwrap().iter().map(|e| e["path"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Work", "Home"]);
+    assert_eq!(names, ["Work", "Personal"]);
     assert!(tops.as_array().unwrap().iter().all(|e| e["top"] == true && e["documents"] == 2));
     let all = folders_json(&file, &["ls", "-r"]);
     let docs: Vec<&str> = all.as_array().unwrap().iter().filter(|e| e["kind"] != "folder").map(|e| e["path"].as_str().unwrap()).collect();
-    assert_eq!(docs, ["Home/Plan.xml", "Home/Recipes.xml", "Work/Budget.xml", "Work/Plan.xml"]);
+    assert_eq!(docs, ["Personal/Plan.xml", "Personal/Recipes.xml", "Work/Budget.xml", "Work/Plan.xml"]);
     assert!(folders_ok(&file, &["ls", "Work"]).contains("Work/Budget.xml"));
     let found = folders_json(&file, &["find", "flour"]);
-    assert_eq!((found["total"].as_u64(), found["results"][0]["path"].as_str()), (Some(1), Some("Home/Recipes.xml")));
-    // The same title in both: ambiguous, each by its path from 主页; the path says which.
+    assert_eq!((found["total"].as_u64(), found["results"][0]["path"].as_str()), (Some(1), Some("Personal/Recipes.xml")));
+    // The same title in both: ambiguous, each by its full path; the path says which.
     let o = folders_run(&file, &["read", "Plan"]);
     assert_eq!(o.status.code(), Some(3));
     let err = String::from_utf8_lossy(&o.stderr);
-    assert!(err.contains("error[ambiguous]") && err.contains("Work/Plan.xml") && err.contains("Home/Plan.xml") && err.contains("主页"), "{err}");
-    assert!(folders_ok(&file, &["read", "home/Plan"]).contains("Plant the tomatoes"), "the folder's name in any case");
+    assert!(err.contains("error[ambiguous]") && err.contains("Work/Plan.xml") && err.contains("Personal/Plan.xml") && err.contains("full path"), "{err}");
+    assert!(folders_ok(&file, &["read", "personal/Plan"]).contains("Plant the tomatoes"), "the folder's name in any case");
     assert!(folders_ok(&file, &["read", "Work/Plan.xml"]).contains("Ship the CLI"));
     assert!(folders_ok(&file, &["read", work.join("Plan.xml").to_str().unwrap()]).contains("Ship the CLI"), "a path on disk");
     assert!(folders_ok(&file, &["read", "Budget"]).contains("Rent"), "a title only one document has needs no folder");
     // By id, in whichever top-level folder it is; edits land in that folder's file.
-    let id = all.as_array().unwrap().iter().find(|e| e["path"] == "Home/Plan.xml").unwrap()["id"].as_str().unwrap().to_string();
+    let id = all.as_array().unwrap().iter().find(|e| e["path"] == "Personal/Plan.xml").unwrap()["id"].as_str().unwrap().to_string();
     folders_ok(&file, &["insert", &id, "--md", "Water daily."]);
-    assert!(std::fs::read_to_string(home.join("Plan.xml")).unwrap().contains("Water daily."));
+    assert!(std::fs::read_to_string(personal.join("Plan.xml")).unwrap().contains("Water daily."));
     assert!(!std::fs::read_to_string(work.join("Plan.xml")).unwrap().contains("Water daily."));
-    // A folder of 主页 lists what is in it; a name no folder has is not_found.
+    // A top-level folder lists what is in it; a name no folder has is not_found.
     let only = folders_json(&file, &["ls", "Work"]);
     assert!(only.as_array().unwrap().iter().all(|e| e["path"].as_str().unwrap().starts_with("Work/")) && only.as_array().unwrap().len() == 2);
     let o = folders_run(&file, &["ls", "Attic"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("error[not_found]"));
     // --library: that folder on its own, paths starting in it.
-    let lib = ok(&home, &["ls"]);
-    assert!(lib.contains("Recipes.xml") && !lib.contains("Home/") && !lib.contains("Budget"), "{lib}");
+    let lib = ok(&personal, &["ls"]);
+    assert!(lib.contains("Recipes.xml") && !lib.contains("Personal/") && !lib.contains("Budget"), "{lib}");
 }
 
 #[test]
@@ -632,54 +632,54 @@ fn two_folders_of_one_name_are_told_apart_by_key() {
 
 #[test]
 fn new_documents_land_in_one_folder() {
-    let (work, home, file) = two_folders(&[("Plan", PLAN)], &[("Recipes", "Bread.")]);
+    let (work, personal, file) = two_folders(&[("Plan", PLAN)], &[("Recipes", "Bread.")]);
     // Nothing said: the first top-level folder, and the path says so.
     let out = folders_ok(&file, &["new", "Inbox", "--md", "first"]);
     assert!(out.contains("created Work/Inbox.xml"), "{out}");
-    assert!(work.join("Inbox.xml").is_file() && !home.join("Inbox.xml").exists());
-    assert!(folders_ok(&file, &["new", "Shopping", "--in", "Home"]).contains("created Home/Shopping.xml"));
-    assert!(home.join("Shopping.xml").is_file());
-    // Into a folder: by its path from 主页, or by a name only one folder has.
-    folders_ok(&file, &["mkdir", "Kitchen", "--in", "Home"]);
-    let out = folders_ok(&file, &["new", "Soup", "--in", "Home/Kitchen"]);
-    assert!(out.contains("Home/Kitchen/Soup.xml") && home.join("Kitchen/Soup.xml").is_file(), "{out}");
-    assert!(folders_ok(&file, &["new", "Stew", "--in", "Kitchen"]).contains("Home/Kitchen/Stew.xml"));
+    assert!(work.join("Inbox.xml").is_file() && !personal.join("Inbox.xml").exists());
+    assert!(folders_ok(&file, &["new", "Shopping", "--in", "Personal"]).contains("created Personal/Shopping.xml"));
+    assert!(personal.join("Shopping.xml").is_file());
+    // Into a folder: by its full path, or by a name only one folder has.
+    folders_ok(&file, &["mkdir", "Kitchen", "--in", "Personal"]);
+    let out = folders_ok(&file, &["new", "Soup", "--in", "Personal/Kitchen"]);
+    assert!(out.contains("Personal/Kitchen/Soup.xml") && personal.join("Kitchen/Soup.xml").is_file(), "{out}");
+    assert!(folders_ok(&file, &["new", "Stew", "--in", "Kitchen"]).contains("Personal/Kitchen/Stew.xml"));
     // A folder that is not there is not_found, whichever top-level folder is named.
     let o = folders_run(&file, &["new", "Pie", "--in", "Work/Kitchen"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("error[not_found]"));
     assert!(!work.join("Kitchen").exists());
     let made = folders_json(&file, &["new", "Notes", "--dry-run"]);
     assert_eq!(made["path"], "Work/Notes.xml");
-    // No moving between top-level folders yet; nor onto 主页 itself.
-    let o = folders_run(&file, &["mv", "Work/Plan", "Home/Kitchen"]);
+    // No moving between top-level folders yet; nor out beside the top-level folders.
+    let o = folders_run(&file, &["mv", "Work/Plan", "Personal/Kitchen"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("error[cross_folder]"), "{}", String::from_utf8_lossy(&o.stderr));
     let o = folders_run(&file, &["mv", "Work/Plan", "/"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("error[bad_args]"));
     assert!(work.join("Plan.xml").is_file());
-    // Each top-level folder's own 回收站: trashed in Home, back in Home.
-    folders_ok(&file, &["rm", "Home/Shopping"]);
+    // Each top-level folder's own 回收站: trashed in Personal, back in Personal.
+    folders_ok(&file, &["rm", "Personal/Shopping"]);
     let trash = folders_json(&file, &["trash"]);
-    assert_eq!(trash["items"][0]["folder"], "Home");
+    assert_eq!(trash["items"][0]["folder"], "Personal");
     folders_ok(&file, &["untrash", "Shopping"]);
-    assert!(home.join("Shopping.xml").is_file());
+    assert!(personal.join("Shopping.xml").is_file());
 }
 
 #[test]
 fn a_missing_folder_is_listed_and_the_rest_work() {
-    let (work, home, file) = two_folders(&[("Plan", PLAN)], &[("Recipes", "Bread.")]);
+    let (work, personal, file) = two_folders(&[("Plan", PLAN)], &[("Recipes", "Bread.")]);
     std::fs::remove_dir_all(&work).unwrap();
     let list_json = folders_json(&file, &["ls"]);
     let list = list_json.as_array().unwrap();
     assert_eq!(list.len(), 2);
     assert_eq!((list[0]["path"].as_str(), list[0]["available"].as_bool()), (Some("Work"), Some(false)));
     assert!(list[0]["error"].as_str().unwrap().contains("not there"));
-    assert_eq!((list[1]["path"].as_str(), list[1]["documents"].as_u64(), list[1]["default"].as_bool()), (Some("Home"), Some(1), Some(true)));
+    assert_eq!((list[1]["path"].as_str(), list[1]["documents"].as_u64(), list[1]["default"].as_bool()), (Some("Personal"), Some(1), Some(true)));
     let text = folders_ok(&file, &["ls"]);
-    assert!(text.contains("unavailable") && text.contains(&home.display().to_string()), "{text}");
+    assert!(text.contains("unavailable") && text.contains(&personal.display().to_string()), "{text}");
     assert!(folders_ok(&file, &["read", "Recipes"]).contains("Bread."));
     // New documents go to the first top-level folder that opens.
     folders_ok(&file, &["new", "Later"]);
-    assert!(home.join("Later.xml").is_file() && !work.exists(), "a missing top-level folder is never made anew");
+    assert!(personal.join("Later.xml").is_file() && !work.exists(), "a missing top-level folder is never made anew");
     let o = folders_run(&file, &["ls", "Work"]);
     assert!(String::from_utf8_lossy(&o.stderr).contains("error[unavailable]"));
     // No top-level folders at all.
@@ -692,7 +692,7 @@ fn a_missing_folder_is_listed_and_the_rest_work() {
 fn wiki_links_look_in_their_own_folder_first() {
     let (dirs, file) = top_folders(&[
         ("Work", &[("Plan", "Ship it."), ("Notes", "Today.")]),
-        ("Home", &[("Plan", "Plant tomatoes."), ("Garden", "Beds."), ("Recipes", "Bread.")]),
+        ("Personal", &[("Plan", "Plant tomatoes."), ("Garden", "Beds."), ("Recipes", "Bread.")]),
         ("Attic", &[("Recipes", "Old ones.")]),
     ]);
     let links = |doc: &str| -> Vec<String> {
@@ -703,36 +703,36 @@ fn wiki_links_look_in_their_own_folder_first() {
     assert_eq!(links("Notes"), ["Work/Plan.xml"]);
     // Only in another top-level folder: that one.
     folders_ok(&file, &["insert", "Work/Notes", "--md", "And [[Garden]]."]);
-    assert_eq!(links("Notes"), ["Work/Plan.xml", "Home/Garden.xml"]);
-    // A path from 主页 names exactly one.
+    assert_eq!(links("Notes"), ["Work/Plan.xml", "Personal/Garden.xml"]);
+    // A full path names exactly one.
     folders_ok(&file, &["insert", "Notes", "--md", "Also [[Attic/Recipes]]."]);
-    assert_eq!(links("Notes"), ["Work/Plan.xml", "Home/Garden.xml", "Attic/Recipes.xml"]);
+    assert_eq!(links("Notes"), ["Work/Plan.xml", "Personal/Garden.xml", "Attic/Recipes.xml"]);
     // In two other top-level folders: ambiguous, both by path and id, nothing written.
     let before = std::fs::read_to_string(dirs[0].join("Notes.xml")).unwrap();
     let o = folders_run(&file, &["insert", "Notes", "--md", "Bake from [[Recipes]]."]);
     assert_eq!(o.status.code(), Some(3));
     let err = String::from_utf8_lossy(&o.stderr);
     let ids: Vec<String> = folders_json(&file, &["ls", "-r"]).as_array().unwrap().iter().filter(|e| e["path"].as_str().unwrap().ends_with("/Recipes.xml")).map(|e| e["id"].as_str().unwrap().to_string()).collect();
-    assert!(err.contains("error[ambiguous]") && err.contains("Home/Recipes.xml (id ") && err.contains("Attic/Recipes.xml (id ") && ids.iter().all(|id| err.contains(id.as_str())) && err.contains("[["), "{err}");
+    assert!(err.contains("error[ambiguous]") && err.contains("Personal/Recipes.xml (id ") && err.contains("Attic/Recipes.xml (id ") && ids.iter().all(|id| err.contains(id.as_str())) && err.contains("[["), "{err}");
     assert_eq!(std::fs::read_to_string(dirs[0].join("Notes.xml")).unwrap(), before);
     // An id names a document in any top-level folder.
-    let home_plan = folders_json(&file, &["ls", "Home"]).as_array().unwrap().iter().find(|e| e["path"] == "Home/Plan.xml").unwrap()["id"].as_str().unwrap().to_string();
-    folders_ok(&file, &["insert", "Notes", "--md", &format!("The other [[{home_plan}]].")]);
-    // Read out and written back, the mentions point where they did: Home's
+    let personal_plan = folders_json(&file, &["ls", "Personal"]).as_array().unwrap().iter().find(|e| e["path"] == "Personal/Plan.xml").unwrap()["id"].as_str().unwrap().to_string();
+    folders_ok(&file, &["insert", "Notes", "--md", &format!("The other [[{personal_plan}]].")]);
+    // Read out and written back, the mentions point where they did: Personal's
     // Plan by id (`[[Plan]]` would be Work's), Garden by its path.
     let md = folders_json(&file, &["read", "Work/Notes"])["text"].as_str().unwrap().to_string();
-    assert!(md.contains("[[Plan]]") && md.contains("[[Garden]]") && md.contains(&format!("[[{home_plan}]]")), "{md}");
+    assert!(md.contains("[[Plan]]") && md.contains("[[Garden]]") && md.contains(&format!("[[{personal_plan}]]")), "{md}");
     // A new document's links look in the top-level folder it lands in.
     folders_ok(&file, &["new", "Copy", "--md", &md]);
     assert_eq!(links("Copy"), links("Notes"));
     folders_ok(&file, &["new", "Shelf", "--in", "Attic", "--md", "[[Recipes]] and [[Garden]]"]);
-    assert_eq!(links("Shelf"), ["Attic/Recipes.xml", "Home/Garden.xml"]);
+    assert_eq!(links("Shelf"), ["Attic/Recipes.xml", "Personal/Garden.xml"]);
     // Several in its own top-level folder: ambiguous as before, even with one elsewhere.
     for f in ["A", "B"] { folders_ok(&file, &["mkdir", f, "--in", "Attic"]); folders_ok(&file, &["new", "Box", "--in", &format!("Attic/{f}")]); }
-    folders_ok(&file, &["new", "Box", "--in", "Home"]);
+    folders_ok(&file, &["new", "Box", "--in", "Personal"]);
     let o = folders_run(&file, &["insert", "Shelf", "--md", "[[Box]]"]);
     let err = String::from_utf8_lossy(&o.stderr);
-    assert!(err.contains("error[ambiguous]") && err.contains("Attic/A/Box.xml") && err.contains("Attic/B/Box.xml") && !err.contains("Home/Box"), "{err}");
+    assert!(err.contains("error[ambiguous]") && err.contains("Attic/A/Box.xml") && err.contains("Attic/B/Box.xml") && !err.contains("Personal/Box"), "{err}");
     // From Work, Box is only elsewhere, in two top-level folders.
     assert!(String::from_utf8_lossy(&folders_run(&file, &["insert", "Notes", "--md", "[[Box]]"]).stderr).contains("other top-level folders match"));
 }

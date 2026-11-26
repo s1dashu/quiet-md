@@ -16,7 +16,7 @@ main.rs — window
   └─ app.rs — Workspace (window root view)
        ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
        ├─ meta.rs — FORMAT 5/6: metadata, deletions and hand order split by device, merged field by field [core]
-       ├─ sidebar / home / search / trash / tree / docmenu / docinfo / modes
+       ├─ sidebar / folder_page / search / trash / tree / docmenu / docinfo / modes
        └─ editor::Editor (view.rs) — open document
             └─ editor::Core (core.rs) — document, selection and undo stack [core]
 ```
@@ -30,7 +30,7 @@ main.rs — window
 | Editing engine | `editor/core.rs`, `editor/table_ops.rs` | Typing, deletion, merging, indentation, conversion, dragging, tables, folding, inline objects and undo. Lives in `fdl_core` for unit testing and fuzzing without GPUI. |
 | Editor view | `editor/view.rs` and other `editor/*` modules | Translates keyboard and pointer events into Core calls and handles overlays, menus and block interactions. |
 | Rendering | `editor/render.rs`, `editor/text.rs` | Reads blocks and creates GPUI elements. `text.rs` draws rich text. |
-| Application | `app.rs` and other top-level modules | Sidebar, home, search, trash, document tree, import, export and printing. Uses `Store` for disk I/O. |
+| Application | `app.rs` and other top-level modules | Sidebar, folder pages, search, trash, document tree, import, export and printing. Uses `Store` for disk I/O. |
 
 ## Editing flow
 
@@ -88,7 +88,7 @@ This approach copies the entire document at each history step. A historical benc
 ## Memory and caches
 
 - A shared cache protects document images visible in any window. Above 64 MiB of offscreen decoded images it evicts the least recently used first. Other offscreen entries expire after 30 seconds. A sweep every two seconds also cleans the GPU atlas. Up to two decodes run concurrently and stale queued requests are skipped. Original images retain full resolution and animated images keep their decoding and playback behavior.
-- Images with explicit dimensions start loading when actually painted in the visible region. Images clipped out of home cards avoid early decoding. Home caches up to 128 recently used document previews.
+- Images with explicit dimensions start loading when actually painted in the visible region. Images clipped out of folder page cards avoid early decoding. Folder pages cache up to 128 recently used document previews.
 - The parse cache, window lists and file history share full-text search strings via `Arc<str>`. After a successful save when switching documents, the app releases the old document's full XML conflict-detection baseline if no other window uses it. Reopening reestablishes the baseline.
 - Metal and DirectX allocate intermediate path textures on demand and reclaim them on subsequent frames without paths. Apple GPUs use on-chip memory for multisampling at the same antialiasing sample count.
 
@@ -103,7 +103,7 @@ This approach copies the entire document at each history step. A historical benc
 | `store.rs` | Library I/O, index recovery, trash, settings and `image_path` |
 | `shown.rs` | What a folder shows: the files it lists (`LIBRARY_FILES`, checked by content for `.xml` and `.sqlite`), the folders the scan does not go into (`skips_dir`), the `.gitignore` subset (`Ignore`) and the look before 添加文件夹 (`survey`). See FORMAT.md, "What a folder shows" |
 | `across.rs` | A page or folder moved into another top-level folder (`Store::move_across`): files renamed or copied over, ids and index fields kept, pictures copied into the target's `.assets/`, mentions across the edge written by id; see the last section |
-| `home.rs` | `Home`, the one root: the top-level folders on 主页 (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
+| `top_folders.rs` | `TopFolders`: the top-level folders the sidebar lists (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
 | `clip_html.rs` | Copied blocks as HTML for other apps, and Windows' CF_HTML envelope (written on copy, unwrapped on paste) |
@@ -138,13 +138,13 @@ Whiteboard and history modules in core:
 | `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only), `--self-test` and core module re-exports |
 | `guides.rs` | Seeds an empty library with the bundled Getting Started guides once |
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
-| `entries.rs` | `Entries`, the window's pages and folders: read as a slice, changed only through `set` / `edit` / `take`, which move its `generation`; the sidebar's rows and Home's cards are rebuilt when it moves |
-| `shared_store.rs` | The `Home` the windows share: each call goes to the top-level folder a document is in; each folder, one or many, shows as a row of the sidebar tree and a card on Home (`top_row`) |
+| `entries.rs` | `Entries`, the window's pages and folders: read as a slice, changed only through `set` / `edit` / `take`, which move its `generation`; the sidebar's rows and the folder page's cards are rebuilt when it moves |
+| `shared_store.rs` | The `TopFolders` the windows share: each call goes to the top-level folder a document is in; each folder, one or many, shows as a row of the sidebar tree and a card on a folder page (`top_row`) |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
 | `clipboard.rs` | System clipboard HTML (macOS `public.html`, Windows CF_HTML, Linux `text/html`), our copies' clipboard item, and the simulated clipboard in script mode |
 | `tree_writes.rs` | Sidebar drops, renames and a file name following its title: shown at once, written off the window's thread, one at a time and by id (see the last section) |
 | `sidebar.rs` / `tree.rs` | Sidebar and document tree, including child pages (a folder's own document, see FORMAT.md and core's `subdocs.rs`) and Move to |
-| `home.rs` / `trash.rs` | Home and trash |
+| `folder_page.rs` (with `folder_header.rs`, `thumb_style.rs`, `thumb_text.rs`) / `folder_card.rs` / `trash.rs` | A folder's page (header, cards or list, thumbnails), its folder cards and dragging into them, and the trash |
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
 | `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, `shadow_*`, type scale and note panel dimensions |
@@ -189,7 +189,7 @@ User titles, body text, attachment names and saved button labels are user conten
 
 ## Undo for folders and file operations
 
-Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `home_folder.rs` implement folder pages, dragging and animation.
+Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation.
 
 Create, duplicate, rename, move, delete and restore operations have their own undo history. Under the write lock, the store records successful file operations so changes from other instances stay outside the current operation. After an asynchronous drop or rename reaches disk, the actual record replaces the preview record. Undo checks file state and hierarchy and reads current content from disk, leaving older body snapshots out of file-operation undo. When a management action changes a title, it adjusts caret boundaries in the editor and its history snapshots.
 

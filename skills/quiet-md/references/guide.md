@@ -100,17 +100,17 @@ moves and show as backlinks) are written `[[path or title]]`, e.g.
 becomes one too. `[[…]]` looks in the document's own top folder first (a
 new document's: the one it lands in), then in the others; a name only one
 other document has is that one, and several are `ambiguous` (the error lists
-them by path and id: write the id, `[[id]]`, or the path from 主页).
+them by path and id: write the id, `[[id]]`, or the full path).
 Reading as Markdown writes mentions back as `[[path]]`, or as `[[id]]` when
 the path would find another document from here, so copied sections keep
 their links.
 **Where the library is.** Every folder the user has open in Quiet.md on
-this computer: the top folders on its 主页 (Home). Paths start there: the
+this computer: its top folders. Paths start with one of them: the
 first part is the top folder's name (any case), e.g. `Quiet.md/工作/周报`;
 `quiet ls` lists the top folders, where each is on disk, and why one is
 unavailable. Every path the CLI prints is such a path. A path or title only
 one document has works without the top folder; one that several have is
-`ambiguous`, listing them by path: pass the path from 主页, or the id from
+`ambiguous`, listing them by path: pass the full path, or the id from
 `ls --json`. Two top folders of one name: the error lists them with their
 keys; a key works as the first part instead of the name. New documents,
 folders and imports go into the `--in` folder, else the first top folder,

@@ -3,9 +3,9 @@
 //! hover fills, white cards and pills, native menus.
 
 use crate::app::{RowMenu, Workspace};
-#[path = "home_preview_style.rs"]
+#[path = "thumb_style.rs"]
 mod bs;
-#[path = "home_text.rs"]
+#[path = "thumb_text.rs"]
 mod text_preview;
 #[path = "folder_header.rs"]
 pub(crate) mod header;
@@ -43,11 +43,11 @@ impl Col {
         }
     }
     /// The order this column sorts by.
-    fn sort(self) -> Option<HomeSort> {
+    fn sort(self) -> Option<PageSort> {
         match self {
-            Col::Modified => Some(HomeSort::Modified),
-            Col::Created => Some(HomeSort::Created),
-            Col::Visited => Some(HomeSort::Visited),
+            Col::Modified => Some(PageSort::Modified),
+            Col::Created => Some(PageSort::Created),
+            Col::Visited => Some(PageSort::Visited),
         }
     }
 }
@@ -169,7 +169,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
     out
 }
 
-/// Home cards decode pictures at this share of the size they are drawn:
+/// Folder page cards decode pictures at this share of the size they are drawn:
 /// a card is small and glanced at, so a softer picture costs nothing.
 const THUMB: f32 = 0.75;
 
@@ -344,12 +344,12 @@ impl SortDir {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum HomeSort { Manual, Visited, Modified, Created, Title }
-impl HomeSort {
+pub(crate) enum PageSort { Manual, Visited, Modified, Created, Title }
+impl PageSort {
     fn key(self) -> &'static str { match self { Self::Manual => "manual", Self::Visited => "visited", Self::Modified => "modified", Self::Created => "created", Self::Title => "title" } }
     fn of(key: &str) -> Self { match key { "manual" => Self::Manual, "modified" => Self::Modified, "created" => Self::Created, "title" => Self::Title, _ => Self::Visited } }
 }
-impl HomeSort {
+impl PageSort {
     fn label(self) -> &'static str {
         match self {
             Self::Manual => crate::settings::tr("手动排序", "Manual order"),
@@ -365,7 +365,7 @@ impl HomeSort {
     fn directional(self) -> bool { self != Self::Manual }
 }
 
-pub struct Home {
+pub struct FolderPage {
     pub grid: bool,
     folder_grid_scroll: UniformListScrollHandle,
     folder_list_scroll: ScrollHandle,
@@ -373,7 +373,7 @@ pub struct Home {
     list_scrollbar: Rc<crate::design::ScrollBar>,
     /// The 搜索 dialog's results (`search.rs`).
     pub(crate) search_scrollbar: Rc<crate::design::ScrollBar>,
-    sort: HomeSort,
+    sort: PageSort,
     sort_dir: SortDir,
     folders_first: bool,
     /// The header's 显示 menu (view and sort) is open.
@@ -381,8 +381,8 @@ pub struct Home {
     thumbs: RefCell<HashMap<String, (u64, Thumb, web_time::Instant)>>,
     /// Last-frame bounds of the controls the popovers hang from.
     anchors: Rc<RefCell<HashMap<&'static str, Bounds<Pixels>>>>,
-    /// Folder cards and dragging into them (`home_folder.rs`).
-    pub(crate) folders: crate::home_folder::HomeFolders,
+    /// Folder cards and dragging into them (`folder_card.rs`).
+    pub(crate) folders: crate::folder_card::FolderCards,
     /// The level last shown, kept while the entries (`Level::key`: their
     /// `generation`) and the order stay as they were:
     /// copying and sorting a folder of 3,000 notes took most of a frame.
@@ -394,9 +394,9 @@ pub struct Home {
 
 struct Level { key: u64, parent: Option<String>, order: Order, entries: Rc<Vec<Entry>> }
 
-impl Default for Home {
+impl Default for FolderPage {
     fn default() -> Self {
-        Home {
+        FolderPage {
             grid: true,
             folder_grid_scroll: Default::default(),
             folder_list_scroll: Default::default(),
@@ -405,7 +405,7 @@ impl Default for Home {
             list_scrollbar: Rc::new(crate::design::ScrollBar::corners(0., crate::design::scroll::WINDOW_R)),
             search_scrollbar: Default::default(),
             // Manual: the sidebar's order (`Meta::place`), so both lists read the same.
-            sort: HomeSort::Manual,
+            sort: PageSort::Manual,
             sort_dir: SortDir::Desc,
             folders_first: false,
             view_menu: false,
@@ -418,7 +418,7 @@ impl Default for Home {
     }
 }
 
-impl Home {
+impl FolderPage {
     /// The page list's current order, for anything else that lists pages
     /// (the sidebar's tree).
     pub(crate) fn order(&self) -> Order {
@@ -449,10 +449,10 @@ impl Home {
     /// The column drawn as sorted; 标题 and 手动排序 mark their own header.
     fn sort_col(&self) -> Option<Col> {
         match self.sort {
-            HomeSort::Visited => Some(Col::Visited),
-            HomeSort::Modified => Some(Col::Modified),
-            HomeSort::Created => Some(Col::Created),
-            HomeSort::Title | HomeSort::Manual => None,
+            PageSort::Visited => Some(Col::Visited),
+            PageSort::Modified => Some(Col::Modified),
+            PageSort::Created => Some(Col::Created),
+            PageSort::Title | PageSort::Manual => None,
         }
     }
 }
@@ -475,7 +475,7 @@ pub(crate) fn sort_entries(v: &mut [Entry], order: Order) {
 /// sidebar's tree so both lists always agree.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Order {
-    pub field: HomeSort,
+    pub field: PageSort,
     pub dir: SortDir,
     pub folders_first: bool,
 }
@@ -487,16 +487,16 @@ impl Order {
         if row(a) || row(b) {
             return row(b).cmp(&row(a)).then_with(|| (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id)));
         }
-        if self.field == HomeSort::Manual {
+        if self.field == PageSort::Manual {
             return (a.meta.place(), &a.id).cmp(&(b.meta.place(), &b.id));
         }
         let asc = |o: std::cmp::Ordering| if self.dir == SortDir::Asc { o } else { o.reverse() };
         let order = match self.field {
-            HomeSort::Title => asc(a.title.cmp(&b.title)),
-            HomeSort::Visited => asc(visited(a).cmp(&visited(b))),
-            HomeSort::Modified => asc(a.meta.modified.cmp(&b.meta.modified)),
-            HomeSort::Created => asc(a.meta.created.cmp(&b.meta.created)),
-            HomeSort::Manual => std::cmp::Ordering::Equal,
+            PageSort::Title => asc(a.title.cmp(&b.title)),
+            PageSort::Visited => asc(visited(a).cmp(&visited(b))),
+            PageSort::Modified => asc(a.meta.modified.cmp(&b.meta.modified)),
+            PageSort::Created => asc(a.meta.created.cmp(&b.meta.created)),
+            PageSort::Manual => std::cmp::Ordering::Equal,
         };
         let group = if self.folders_first { b.meta.folder.is_some().cmp(&a.meta.folder.is_some()) } else { std::cmp::Ordering::Equal };
         group.then(order).then_with(|| a.meta.place().cmp(&b.meta.place())).then_with(|| a.id.cmp(&b.id))
@@ -533,7 +533,7 @@ fn entry_icon(e: &Entry) -> AnyElement {
 
 impl Workspace {
     /// In 批量管理 a click checks or unchecks; otherwise it opens.
-    pub(crate) fn home_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn card_click(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.batch.is_none() { return self.open(id, window, cx) }
         if !self.in_batch_scope(id) { return }
         if !self.toggle_check(id) {
@@ -543,7 +543,7 @@ impl Workspace {
     }
 
     /// The row's / card's checkbox while 批量管理 is on.
-    pub(crate) fn home_check(&self, e: &Entry) -> Option<crate::design::Checkbox> {
+    pub(crate) fn card_check(&self, e: &Entry) -> Option<crate::design::Checkbox> {
         use crate::sidebar::{BATCH_LIMIT, Check, checkbox};
         let sel = self.batch.as_ref().filter(|_| self.in_batch_scope(&e.id))?;
         let on = sel.contains(&e.id);
@@ -553,8 +553,8 @@ impl Workspace {
     /// One level of the tree as a folder's page shows it.
     /// Cards show no body, links or reminders: the entries come without them (`tree::face`).
     pub(crate) fn level_entries(&self, parent: Option<&str>) -> Rc<Vec<Entry>> {
-        let (key, order) = (self.entries.generation(), self.home.order());
-        let mut level = self.home.level.borrow_mut();
+        let (key, order) = (self.entries.generation(), self.folder_page.order());
+        let mut level = self.folder_page.level.borrow_mut();
         if let Some(l) = level.as_ref().filter(|l| l.key == key && l.order == order && l.parent.as_deref() == parent) { return l.entries.clone(); }
         // A folder's 正文 is the folder's own card, not one inside it.
         let notes: std::collections::HashSet<&str> = self.entries.iter().filter_map(|e| e.note.as_deref()).collect();
@@ -576,12 +576,12 @@ impl Workspace {
         true
     }
 
-    pub(crate) fn manual_home_sort(&self) -> bool { self.home.sort == HomeSort::Manual }
+    pub(crate) fn manual_page_sort(&self) -> bool { self.folder_page.sort == PageSort::Manual }
 
     /// A list header: clicking it sorts by that column; clicking the sorted
     /// one flips the direction. Headers without an order are not clickable.
-    fn sort_head(&self, id: SharedString, label: &'static str, sorted: bool, on: Option<HomeSort>, cx: &mut Context<Self>) -> Stateful<Div> {
-        let dir = self.home.sort_dir;
+    fn sort_head(&self, id: SharedString, label: &'static str, sorted: bool, on: Option<PageSort>, cx: &mut Context<Self>) -> Stateful<Div> {
+        let dir = self.folder_page.sort_dir;
         div()
             .id(id)
             .relative()
@@ -603,25 +603,25 @@ impl Workspace {
     /// Pick a sort field. Picking the current one flips 升序 / 降序; picking
     /// 手动排序 freezes the order shown right now, so later edits cannot
     /// reshuffle it.
-    fn sort_by(&mut self, field: HomeSort, cx: &mut Context<Self>) {
-        if field == HomeSort::Manual {
-            if self.home.sort != HomeSort::Manual && !self.prepare_manual_order(cx) { return; }
-            self.home.sort = HomeSort::Manual;
-        } else if self.home.sort == field {
-            self.home.sort_dir = self.home.sort_dir.flip();
+    fn sort_by(&mut self, field: PageSort, cx: &mut Context<Self>) {
+        if field == PageSort::Manual {
+            if self.folder_page.sort != PageSort::Manual && !self.prepare_manual_order(cx) { return; }
+            self.folder_page.sort = PageSort::Manual;
+        } else if self.folder_page.sort == field {
+            self.folder_page.sort_dir = self.folder_page.sort_dir.flip();
         } else {
-            self.home.sort = field;
-            self.home.sort_dir = field.default_dir();
+            self.folder_page.sort = field;
+            self.folder_page.sort_dir = field.default_dir();
         }
-        self.save_home();
-        self.home.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
-        self.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
+        self.save_page_view();
+        self.folder_page.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.folder_page.folder_list_scroll.set_offset(point(px(0.), px(0.)));
         cx.notify();
     }
 
     /// Mix folders and documents unless the user explicitly groups folders first.
     fn sorted_entries(&self, mut v: Vec<Entry>) -> Vec<Entry> {
-        sort_entries(&mut v, self.home.order());
+        sort_entries(&mut v, self.folder_page.order());
         v
     }
 
@@ -634,13 +634,13 @@ impl Workspace {
         let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
         file_time.hash(&mut stamp);
         // and a page's embedded tables: a row changed there redraws the card
-        let cached_tables = self.home.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
+        let cached_tables = self.folder_page.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
         let mut page_stamp = stamp.clone();
         cached_tables.hash(&mut stamp);
         let base_stamp = stamp.finish();
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
-        if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
+        if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
             && !t.has_subpages && *m == base_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
@@ -656,7 +656,7 @@ impl Workspace {
         let mut children_stamp = full_stamp.clone();
         cached_tables.hash(&mut full_stamp);
         let full_stamp = full_stamp.finish();
-        if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
+        if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
         // The derived rows exist only in this preview tree and never enter the editor/store.
         fn subpages(blocks: &mut [crate::model::Block], entries: &[&Entry], budget: &mut usize) {
@@ -690,7 +690,7 @@ impl Workspace {
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }
-        let mut thumbs = self.home.thumbs.borrow_mut();
+        let mut thumbs = self.folder_page.thumbs.borrow_mut();
         // Keep recent previews warm without retaining every document ever visited.
         if thumbs.len() >= 128 && !thumbs.contains_key(&e.id) {
             let oldest = thumbs.iter().min_by_key(|(_, (_, _, used))| *used).map(|(id, _)| id.clone());
@@ -708,7 +708,7 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(crate) fn home_more(&self, e: &Entry, key: String, cx: &mut Context<Self>) -> crate::design::Button {
+    pub(crate) fn card_more(&self, e: &Entry, key: String, cx: &mut Context<Self>) -> crate::design::Button {
         let id = e.id.clone();
         let (rec, k2) = (self.more_bounds.clone(), key.clone());
         let open = self.row_menu.as_ref().is_some_and(|m| m.id == e.id && m.from.as_deref() == Some(key.as_str()));
@@ -729,30 +729,30 @@ impl Workspace {
 
     /// A newly opened folder page starts at its top.
     pub(crate) fn reset_folder_scroll(&self) {
-        self.home.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
-        self.home.folder_list_scroll.set_offset(point(px(0.), px(0.)));
+        self.folder_page.folder_grid_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        self.folder_page.folder_list_scroll.set_offset(point(px(0.), px(0.)));
     }
 
     /// The folder pages' view and sort order are remembered (`settings.json`).
-    /// Whether folder pages list by hand (手动排序) under these settings, as `load_home` reads them.
-    pub(crate) fn sorts_by_hand(s: &crate::store::Settings) -> bool { s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual) == HomeSort::Manual }
+    /// Whether folder pages list by hand (手动排序) under these settings, as `load_page_view` reads them.
+    pub(crate) fn sorts_by_hand(s: &crate::store::Settings) -> bool { s.page_sort.as_deref().map(PageSort::of).unwrap_or(PageSort::Manual) == PageSort::Manual }
 
-    pub(crate) fn load_home(&mut self) {
+    pub(crate) fn load_page_view(&mut self) {
         let s = self.store.settings();
-        self.home.grid = !s.home_list;
-        self.home.folders_first = s.home_folders_first;
-        self.home.sort = s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual);
+        self.folder_page.grid = !s.page_list;
+        self.folder_page.folders_first = s.page_folders_first;
+        self.folder_page.sort = s.page_sort.as_deref().map(PageSort::of).unwrap_or(PageSort::Manual);
         // Settings from before directions existed keep the order they used to show.
-        self.home.sort_dir = s.home_sort_dir.as_deref().map(SortDir::of).unwrap_or_else(|| self.home.sort.default_dir());
-        self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
+        self.folder_page.sort_dir = s.page_sort_dir.as_deref().map(SortDir::of).unwrap_or_else(|| self.folder_page.sort.default_dir());
+        self.store.set_place_by_hand(self.folder_page.sort == PageSort::Manual);
     }
 
-    fn save_home(&mut self) {
+    fn save_page_view(&mut self) {
         let mut s = self.store.settings();
-        s.home_folders_first = self.home.folders_first;
-        (s.home_list, s.home_sort) = (!self.home.grid, Some(self.home.sort.key().to_string()));
-        s.home_sort_dir = Some(self.home.sort_dir.key().to_string());
-        self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
+        s.page_folders_first = self.folder_page.folders_first;
+        (s.page_list, s.page_sort) = (!self.folder_page.grid, Some(self.folder_page.sort.key().to_string()));
+        s.page_sort_dir = Some(self.folder_page.sort_dir.key().to_string());
+        self.store.set_place_by_hand(self.folder_page.sort == PageSort::Manual);
         if let Err(e) = self.store.save_settings(&s) { eprintln!("无法保存文件夹视图：{e}"); }
     }
 
@@ -762,10 +762,10 @@ impl Workspace {
         div().flex_1().min_w_0().h_full().flex().flex_col().child(header).child(self.empty_main(cx)).into_any_element()
     }
 
-    pub(crate) fn render_home_list(&self, entries: &[Entry], cx: &mut Context<Self>) -> AnyElement {
-        let list_scroll = &self.home.folder_list_scroll;
+    pub(crate) fn render_page_list(&self, entries: &[Entry], cx: &mut Context<Self>) -> AnyElement {
+        let list_scroll = &self.folder_page.folder_list_scroll;
         let cols = COLS.to_vec();
-        let sort = self.home.sort_col();
+        let sort = self.folder_page.sort_col();
         // The title is sized at about three times a column.
         let title_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).min_w(px(200.));
         let col_cell = || div().flex_grow_1().flex_shrink_1().flex_basis(relative(0.)).max_w(px(240.)).min_w(px(120.));
@@ -773,7 +773,7 @@ impl Workspace {
         // sorted column in the text colour, semibold, with its arrow.
         // A row is lit while hovered or holding its menu; the lines touching it hide.
         let lit = |i: usize| entries.get(i).is_some_and(|e| {
-            self.home.list_hover.as_ref().is_some_and(|h| *h == format!("home-row-{}", e.id))
+            self.folder_page.list_hover.as_ref().is_some_and(|h| *h == format!("page-row-{}", e.id))
                 || self.row_menu.as_ref().is_some_and(|m| m.id == e.id)
         });
         // its top where the grid's first row starts, 64pt down the window
@@ -787,27 +787,27 @@ impl Workspace {
             .border_color(row_line(lit(0)))
             .child(
                 weight3(title_cell()).pl(px(20.)).child(
-                    self.sort_head(SharedString::from("home-col-title"), "标题", self.home.sort == HomeSort::Title, Some(HomeSort::Title), cx),
+                    self.sort_head(SharedString::from("page-col-title"), "标题", self.folder_page.sort == PageSort::Title, Some(PageSort::Title), cx),
                 ),
             );
         for c in &cols {
             let sorted = sort == Some(*c);
             header = header.child(
                 col_cell().pl(px(20.)).child(
-                    self.sort_head(SharedString::from(format!("home-col-{}", c.label())), c.label(), sorted, c.sort(), cx),
+                    self.sort_head(SharedString::from(format!("page-col-{}", c.label())), c.label(), sorted, c.sort(), cx),
                 ),
             );
         }
         header = header.child(div().w(px(60.)).flex_none());
-        let mut rows = div().id("home-rows").flex_1().min_h_0().overflow_y_scroll().track_scroll(list_scroll).px(px(24.)).pb(px(24.));
+        let mut rows = div().id("page-rows").flex_1().min_h_0().overflow_y_scroll().track_scroll(list_scroll).px(px(24.)).pb(px(24.));
         if entries.is_empty() {
             rows = rows.child(div().pt(px(72.)).child(empty_state("illus/empty-list.svg", crate::settings::text("当前列表暂无内容"))));
         }
         for (i, e) in entries.iter().enumerate() {
             let (id, id2) = (e.id.clone(), e.id.clone());
             let menu_on = self.row_menu.as_ref().is_some_and(|m| m.id == e.id);
-            let check = self.home_check(e);
-            let key = SharedString::from(format!("home-row-{}", e.id));
+            let check = self.card_check(e);
+            let key = SharedString::from(format!("page-row-{}", e.id));
             let mut row = div()
                 .id(key.clone())
                 .relative().children(crate::devtools::anchor_probe(format!("list:{}", display_title(&e.title))))
@@ -817,9 +817,9 @@ impl Workspace {
                 .when(i > 0, |d| d.border_t_1().border_color(row_line(lit(i - 1) || lit(i))))
                 .cursor_pointer()
                 .hover(row_hover)
-                .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.home.hover_row(&key, *on) { cx.notify() }))
+                .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.folder_page.hover_row(&key, *on) { cx.notify() }))
                 .when(menu_on, |d| d.bg(Theme::fill_hover()).rounded(px(ROW_RADIUS)))
-                .on_click(cx.listener(move |w, _, window, cx| w.home_click(&id, window, cx)))
+                .on_click(cx.listener(move |w, _, window, cx| w.card_click(&id, window, cx)))
                 .when(check.is_none(), |d| d.on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -841,15 +841,15 @@ impl Workspace {
             for c in &cols {
                 row = row.child(col_cell().pl(px(24.)).text_size(px(13.)).text_color(Theme::text_caption()).whitespace_nowrap().overflow_hidden().child(cell_text(e, *c)));
             }
-            row = row.child(div().w(px(60.)).flex_none().flex().justify_end().pr(px(12.)).when(self.batch.is_none(), |d| d.child(self.home_more(e, format!("home-more-{}", e.id), cx))));
+            row = row.child(div().w(px(60.)).flex_none().flex().justify_end().pr(px(12.)).when(self.batch.is_none(), |d| d.child(self.card_more(e, format!("page-more-{}", e.id), cx))));
             rows = rows.child(row);
         }
         div().flex_1().min_h_0().flex().flex_col().child(header.mx(px(24.)))
-            .child(div().relative().flex_1().min_h_0().flex().flex_col().child(rows).child(self.home.list_scrollbar.render(list_scroll))).into_any_element()
+            .child(div().relative().flex_1().min_h_0().flex().flex_col().child(rows).child(self.folder_page.list_scrollbar.render(list_scroll))).into_any_element()
     }
 
-    pub(crate) fn render_home_grid(&self, entries: &Rc<Vec<Entry>>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let grid_scroll = &self.home.folder_grid_scroll;
+    pub(crate) fn render_page_grid(&self, entries: &Rc<Vec<Entry>>, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let grid_scroll = &self.folder_page.folder_grid_scroll;
         let main_w = f32::from(window.viewport_size().width) - if self.sidebar_open { self.sidebar_w(window) } else { 0. };
         let avail = (main_w - 48.).max(1.);
         let entries = entries.clone();
@@ -863,9 +863,9 @@ impl Workspace {
         // taller by their tab so the pages line up beside them.
         let col_w = (avail - gap * (n - 1) as f32) / n as f32;
         let doc_h = col_w * (6. / 5.);
-        let card_h = if mixed { doc_h / (1. - crate::home_folder::TAB) } else { doc_h };
+        let card_h = if mixed { doc_h / (1. - crate::folder_card::TAB) } else { doc_h };
         let rows = entries.len().div_ceil(n);
-        let grid = uniform_list("home-grid-area", rows, cx.processor(move |workspace, range: std::ops::Range<usize>, window, cx| {
+        let grid = uniform_list("page-grid-area", rows, cx.processor(move |workspace, range: std::ops::Range<usize>, window, cx| {
             range.map(|row| {
                 let start = row * n;
                 let end = (start + n).min(entries.len());
@@ -875,8 +875,8 @@ impl Workspace {
                         // A folder with a 正文 is a document with child pages: a document's card (#357).
                         if e.meta.folder.is_some() && e.note.is_none() { workspace.render_folder_card(e, col_w, card_h, window, cx) }
                         else if mixed { div().w_full().min_w_0().h(px(card_h)).flex().flex_col().justify_end()
-                            .child(workspace.render_home_card(e, doc_h, cx)).into_any_element() }
-                        else { workspace.render_home_card(e, card_h, cx) }
+                            .child(workspace.render_doc_card(e, doc_h, cx)).into_any_element() }
+                        else { workspace.render_doc_card(e, card_h, cx) }
                     }))
             }).collect()
         }))
@@ -893,12 +893,12 @@ impl Workspace {
         .flex_1().min_h_0().pt(px(16.)).pb(px(32.)).track_scroll(grid_scroll);
         let scroll = grid_scroll.0.borrow().base_handle.clone();
         div().relative().flex_1().min_h_0().flex().flex_col()
-            .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_home_press(ev, cx)))
-            .child(grid).child(self.home.grid_scrollbar.render(&scroll)).into_any_element()
+            .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| w.track_card_press(ev, cx)))
+            .child(grid).child(self.folder_page.grid_scrollbar.render(&scroll)).into_any_element()
     }
 
     /// A document's first page in miniature: a card's face, and the papers
-    /// in a folder that show one (`home_folder.rs`). `pad`: its margin.
+    /// in a folder that show one (`folder_card.rs`). `pad`: its margin.
     pub(crate) fn thumb_page(&self, e: &Entry, pad: f32) -> Div {
         let thumb = self.thumb(e);
         self.thumb_page_with(e, &thumb, pad, 0.)
@@ -934,37 +934,37 @@ impl Workspace {
             }
     }
 
-    fn render_home_card(&self, e: &Entry, card_h: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn render_doc_card(&self, e: &Entry, card_h: f32, cx: &mut Context<Self>) -> AnyElement {
             const RING: f32 = 3.;
             let id = e.id.clone();
             let id2 = e.id.clone();
             let thumb = self.thumb(e);
             let radius = 32.;
             let menu_on = self.row_menu.as_ref().is_some_and(|m| m.id == e.id);
-            let check = self.home_check(e);
+            let check = self.card_check(e);
             // 批量管理: the title steps aside for the checkbox, which sits on its first line.
             let page = self.thumb_page_with(e, &thumb, 18., if check.is_some() { CHECK_ROOM } else { 0. });
             let arm = e.id.clone();
             // Carried away as a paper: its place stays as an empty slot of the
             // card's shape (no page, no cover), so nothing half-shows through.
-            if self.home_dragging(&e.id) {
-                return div().id(SharedString::from(format!("home-card-{}", e.id))).w_full().min_w_0().h(px(card_h)).relative()
-                    .child(self.record_home_card(&e.id))
+            if self.card_dragging(&e.id) {
+                return div().id(SharedString::from(format!("page-card-{}", e.id))).w_full().min_w_0().h(px(card_h)).relative()
+                    .child(self.record_card(&e.id))
                     .child(crate::ui::squircle_surface(radius, Theme::fill_hover()).size_full())
                     .into_any_element();
             }
                 div()
-                    .id(SharedString::from(format!("home-card-{}", e.id)))
-                    .when(check.is_none(), |d| d.on_mouse_down(MouseButton::Left, cx.listener(move |w, ev: &MouseDownEvent, _, cx| w.arm_home_drag(&arm, ev.position, cx))))
-                    .child(self.record_home_card(&e.id)).children(crate::devtools::anchor_probe(format!("card:{}", display_title(&e.title))))
-                    .w_full().min_w_0().h(px(card_h)).relative().group("home-card")
+                    .id(SharedString::from(format!("page-card-{}", e.id)))
+                    .when(check.is_none(), |d| d.on_mouse_down(MouseButton::Left, cx.listener(move |w, ev: &MouseDownEvent, _, cx| w.arm_card_drag(&arm, ev.position, cx))))
+                    .child(self.record_card(&e.id)).children(crate::devtools::anchor_probe(format!("card:{}", display_title(&e.title))))
+                    .w_full().min_w_0().h(px(card_h)).relative().group("page-card")
                     .flex_none()
-                    // A loose sheet on the home page: squircle corners, a 0.5pt
+                    // A loose sheet on a folder page: squircle corners, a 0.5pt
                     // hairline and the faintest lift; hover darkens the hairline.
                     .cursor_pointer()
                     // Inset as the folder card's shadow box is (6 a side, 10 from the top).
                     .child(div().absolute().left(px(6.)).right(px(6.)).top(px(10.)).bottom_0().rounded(px(radius * 0.6)).shadow(theme::shadow_sheet()))
-                    .on_click(cx.listener(move |w, _, window, cx| w.home_click(&id, window, cx)))
+                    .on_click(cx.listener(move |w, _, window, cx| w.card_click(&id, window, cx)))
                     .when(check.is_none(), |d| d.on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
@@ -976,20 +976,20 @@ impl Workspace {
                     .child(crate::ui::squircle_outline(radius, 0.5, Theme::line_sheet()))
                     // Hovered, or its menu open: a soft grey ring around the card.
                     .child(div().absolute().left(px(-RING)).right(px(-RING)).top(px(-RING)).bottom(px(-RING))
-                        .when(!menu_on, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))
+                        .when(!menu_on, |d| d.opacity(0.).group_hover("page-card", |s| s.opacity(1.)))
                         .child(crate::ui::squircle_outline(radius + RING, RING, Theme::ring_sheet())))
                     .when_some(check, |d, c| d.child(div().absolute().top(px(18.)).left(px(18.)).h(px(20.)).flex().items_center().child(c)))
                     .when(self.batch.is_none(), |d| d.child(
                         div().absolute().top(px(8.)).right(px(8.))
-                            .when(!menu_on, |d| d.opacity(0.).group_hover("home-card", |s| s.opacity(1.)))
-                            .child(self.home_more(e, format!("home-gmore-{}", e.id), cx).rounded_full().bg(Theme::bg_overlay())),
+                            .when(!menu_on, |d| d.opacity(0.).group_hover("page-card", |s| s.opacity(1.)))
+                            .child(self.card_more(e, format!("page-gmore-{}", e.id), cx).rounded_full().bg(Theme::bg_overlay())),
                     ))
             .into_any_element()
     }
 
     /// 显示设置 and the sort dropdown: the menu panel; the sort item is a
     /// native menu row.
-    pub(crate) fn render_home_menus(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn render_page_menus(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out = vec![];
         if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) {
             return out;
@@ -997,7 +997,7 @@ impl Workspace {
         let place = |pos: Point<Pixels>, corner: Anchor, menu: Popover| {
             deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element()
         };
-        if self.home.view_menu && let Some(b) = self.home.anchor("home-view") {
+        if self.folder_page.view_menu && let Some(b) = self.folder_page.anchor("page-view") {
             let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None);
             out.push(place(pos, corner, self.view_menu(cx)));
         }
@@ -1008,7 +1008,7 @@ impl Workspace {
 #[cfg(test)]
 mod sort_tests {
     // Not `use super::*`: it would bring in gpui's `test` attribute macro.
-    use super::{HomeSort, Order, SortDir, sort_entries};
+    use super::{PageSort, Order, SortDir, sort_entries};
     use crate::store::Entry;
 
     fn page(id: &str, title: &str, modified: u64, created: u64, order: u64, folder: bool) -> Entry {
@@ -1043,15 +1043,15 @@ mod sort_tests {
             page("b", "Apple", 10, 100, 2, false),
             page("c", "Cherry", 30, 300, 1, false),
         ];
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["c", "a", "b"]);
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Asc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Asc, folders_first: false });
         assert_eq!(ids(&v), ["b", "a", "c"]);
-        sort_entries(&mut v, Order { field: HomeSort::Created, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Created, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["c", "a", "b"]);
-        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Asc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Title, dir: SortDir::Asc, folders_first: false });
         assert_eq!(ids(&v), ["b", "a", "c"]);
-        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Title, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["c", "a", "b"]);
     }
 
@@ -1063,7 +1063,7 @@ mod sort_tests {
             // Never placed by hand: above the placed ones, newest first.
             page("c", "C", 50, 50, 0, false),
         ];
-        sort_entries(&mut v, Order { field: HomeSort::Manual, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Manual, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["c", "b", "a"]);
     }
 
@@ -1071,25 +1071,25 @@ mod sort_tests {
     fn equal_values_keep_the_hand_order() {
         // Same modification time: the hand order decides, in either direction.
         let mut v = vec![page("a", "A", 10, 10, 2, false), page("b", "B", 10, 10, 1, false)];
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["b", "a"]);
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Asc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Asc, folders_first: false });
         assert_eq!(ids(&v), ["b", "a"]);
         // Title has no eponymous column, but sorts the same way.
         let mut v = vec![page("a", "Same", 10, 10, 2, false), page("b", "Same", 20, 20, 1, false)];
-        sort_entries(&mut v, Order { field: HomeSort::Title, dir: SortDir::Asc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Title, dir: SortDir::Asc, folders_first: false });
         assert_eq!(ids(&v), ["b", "a"]);
     }
 
     #[test]
     fn folders_first_groups_only_when_asked() {
         let mut v = vec![page("d", "Doc", 30, 30, 2, false), page("f", "Folder", 20, 20, 3, true)];
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: false });
         assert_eq!(ids(&v), ["d", "f"]);
-        sort_entries(&mut v, Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: true });
+        sort_entries(&mut v, Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: true });
         assert_eq!(ids(&v), ["f", "d"]);
         // 手动排序 never groups: it is the order the sidebar shows.
-        sort_entries(&mut v, Order { field: HomeSort::Manual, dir: SortDir::Desc, folders_first: true });
+        sort_entries(&mut v, Order { field: PageSort::Manual, dir: SortDir::Desc, folders_first: true });
         assert_eq!(ids(&v), ["d", "f"]);
     }
 
@@ -1102,7 +1102,7 @@ mod sort_tests {
             e
         };
         let mut v = vec![row("b", "Alpha", 2), row("a", "Zulu", 1), page("x", "Middle", 5, 5, 0, false)];
-        for field in [HomeSort::Title, HomeSort::Modified, HomeSort::Manual] {
+        for field in [PageSort::Title, PageSort::Modified, PageSort::Manual] {
             for dir in [SortDir::Asc, SortDir::Desc] {
                 sort_entries(&mut v, Order { field, dir, folders_first: false });
                 assert_eq!(ids(&v), ["top:a", "top:b", "x"]);

@@ -63,7 +63,7 @@ pub fn list_line() -> Hsla {
 }
 
 /// The quiet list hover: a rounded fill that hides the row's own hairline
-/// at once (the one below follows `Home::list_hover`, see [`row_line`]).
+/// at once (the one below follows `FolderPage::list_hover`, see [`row_line`]).
 pub fn row_hover(s: StyleRefinement) -> StyleRefinement {
     s.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS))
 }

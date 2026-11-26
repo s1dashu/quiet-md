@@ -39,7 +39,7 @@ mod docmenu;
 mod editor;
 mod highlight;
 mod history;
-mod home;
+mod folder_page;
 mod html;
 mod input;
 mod logging;
@@ -72,7 +72,7 @@ mod loading;
 mod local_folders;
 mod sidebar_drag;
 mod sidebar_drop;
-mod home_folder;
+mod folder_card;
 mod folders;
 mod file_history;
 mod settings;
@@ -257,7 +257,7 @@ fn main() {
     // The top-level folders: a folders.json (even an empty one: every folder removed) or the
     // library builds before it used means this computer has been here
     // before, and can show 更新日志.
-    let existed = (!fixed && fdl_core::vfs::PathExt::fs_exists(fdl_core::home::Home::list_file().as_path())) || guides::seeded(&root).unwrap_or(false);
+    let existed = (!fixed && fdl_core::vfs::PathExt::fs_exists(fdl_core::top_folders::TopFolders::list_file().as_path())) || guides::seeded(&root).unwrap_or(false);
     // A first launch picks its folders on the first launch's pages.
     let onboard = onboarding::wanted(existed, scripted);
     // A test run's folder (`QUIET_MD_HOME`) is set up as before; the

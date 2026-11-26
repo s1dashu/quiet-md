@@ -115,7 +115,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("支持 ↑↓ 键选择、Enter 键打开", "↑↓ para seleccionar, Intro para abrir"),
     ("你在 {}打开过", "Abierto: {}"),
     ("我在 {}修改过", "Modificado: {}"),
-    ("主页", "Inicio"),
     ("置顶", "Fijados"),
     ("收藏", "Favoritos"),
     ("设置", "Ajustes"),

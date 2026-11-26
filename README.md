@@ -69,7 +69,7 @@ Boards are a whiteboard ported from Excalidraw: shapes, arrows that stay attache
 
 ### Organize in real folders
 
-Home shows each folder as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin notes to the sidebar, search every title and line with `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
+A folder's page shows each folder in it as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin notes to the sidebar, search every title and line with `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
 
 ### Bring your notes
 
@@ -77,7 +77,7 @@ Home shows each folder as a stack of its pages. Hold a note over a folder and it
   <img src="docs/images/readme-import.webp" width="100%" alt="The first-launch screen of Quiet.md, offering to open an Obsidian vault it found, where it is.">
 </p>
 
-On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto Home or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
+On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto a folder's page or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
 
 ### Work with agents
 
@@ -174,7 +174,7 @@ Thanks to everyone who has helped build Quiet.md. Issues and pull requests are w
 - **0.1.7** (Nov 6): safer multi-window saving, conflict recovery and disk writes; restricted export file access; Markdown exports keep inline attachments. Fixed Chinese input deletion with Weasel on Windows.
 - **0.1.6** (Nov 6): smoother window switching and typing, wider tables, regular saves during continuous typing, and Option+Space for global quick notes on macOS. Windows adds image paste, PDF export and printing, with corrected word deletion.
 - **0.1.5** (Nov 5): the app is now called Quiet.md; your library and notes stay where they were.
-  - Manage several documents at once from Home: duplicate, move or delete them together.
+  - Manage several documents at once from a folder's page: duplicate, move or delete them together.
   - Empty the Trash in one step; arrow keys move through the insert menu's icons; deleting every document no longer creates an empty one.
   - After an in-app update, the sidebar shows once what changed in the new version.
   - Windows: shortcuts and the built-in guide read Ctrl / Alt, and a failed launch explains itself and leaves a log.

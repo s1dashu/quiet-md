@@ -1,6 +1,6 @@
 //! `Workspace.entries`: every page and folder the window shows. Read as a
 //! slice; changed only through `set`, `edit` and `take`, each of which gives
-//! it a new `generation`. The sidebar's rows and Home's cards are rebuilt when `generation`
+//! it a new `generation`. The sidebar's rows and the folder page's cards are rebuilt when `generation`
 //! moves, instead of hashing every entry each frame to find out.
 use crate::store::Entry;
 use std::sync::atomic::{AtomicU64, Ordering};

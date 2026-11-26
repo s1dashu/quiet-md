@@ -31,7 +31,7 @@ pub struct Meta {
     /// A folder, by its name on disk.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
-    /// Its place at the top level; `root_order` on disk (the name from before 主页's top-level folders).
+    /// Its place at the top level; `root_order` on disk (the name from before there were several top-level folders).
     #[serde(default, rename = "root_order", skip_serializing_if = "Option::is_none")]
     pub top_order: Option<u64>,
     pub created: u64,
@@ -179,7 +179,7 @@ fn is_zero(n: &u64) -> bool {
 
 impl Meta {
     /// Where a page or folder sits among its siblings: the sidebar's order, the
-    /// numbers a drop writes and Home's manual order all use it. Those never
+    /// numbers a drop writes and a folder page's manual order all use it. Those never
     /// placed by hand come first, most recently changed first; then the placed
     /// ones in their order. Callers break remaining ties by id.
     pub fn place(&self) -> (bool, u64, std::cmp::Reverse<u64>) {
@@ -245,18 +245,18 @@ pub struct Settings {
     /// 隐藏引用列表's 不再提示.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub refs_hide_no_ask: bool,
-    /// 主页: list instead of grid, and the sort order ("visited" …).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub home_list: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home_sort: Option<String>,
-    /// 升序 / 降序 for `home_sort`; absent in settings from before it existed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub home_sort_dir: Option<String>,
-    #[serde(default)]
-    pub home_folders_first: bool,
-    #[serde(default)]
-    pub home_manual_initialized: bool,
+    /// Folder pages: list instead of grid, and the sort order ("visited" …); `home_*` on disk.
+    #[serde(default, rename = "home_list", skip_serializing_if = "std::ops::Not::not")]
+    pub page_list: bool,
+    #[serde(default, rename = "home_sort", skip_serializing_if = "Option::is_none")]
+    pub page_sort: Option<String>,
+    /// 升序 / 降序 for `page_sort`; absent in settings from before it existed.
+    #[serde(default, rename = "home_sort_dir", skip_serializing_if = "Option::is_none")]
+    pub page_sort_dir: Option<String>,
+    #[serde(default, rename = "home_folders_first")]
+    pub page_folders_first: bool,
+    #[serde(default, rename = "home_manual_initialized")]
+    pub manual_initialized: bool,
     /// Main window size, remembered like the quick note window's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_size: Option<[f32; 2]>,
@@ -330,7 +330,7 @@ pub struct Entry {
     /// A folder's 正文 (#357): the document of the folder's own name inside
     /// it (`方案/方案.xml`), shown as a document with child pages.
     pub note: Option<String>,
-    /// The top-level folder it is in (`home::TopFolder::key`); empty from a lone `Store`.
+    /// The top-level folder it is in (`top_folders::TopFolder::key`); empty from a lone `Store`.
     pub top: String,
 }
 
@@ -872,7 +872,7 @@ pub fn read_bounded(path: &std::path::Path, limit: u64) -> Result<Vec<u8>> {
 }
 
 /// A short stable name for a library folder, for data kept about it elsewhere:
-/// a lone `Store`'s (tests, `QUIET_MD_HOME`). A 主页 top-level folder's is its key in
+/// a lone `Store`'s (tests, `QUIET_MD_HOME`). A top-level folder's is its key in
 /// `folders.json` instead, which a rename leaves alone (`Store::open_at_as`).
 pub fn library_key(root: &Path) -> String {
     use std::hash::{Hash, Hasher};
@@ -928,7 +928,7 @@ fn ext_of(m: &Meta) -> &str {
 }
 
 impl Store {
-    /// The top-level folder being worked in (each top-level folder on 主页 is a library of its
+    /// The top-level folder being worked in (each top-level folder is a library of its
     /// own): the one holding the document in front, which pasted images go to
     /// and its 数据表 and 画板 files resolve against. Before any is chosen,
     /// the library builds before top-level folders used (`legacy_dir`).
@@ -1057,7 +1057,7 @@ impl Store {
     /// Top-level folder `root`'s themes folder.
     pub fn themes_dir_of(root: &Path) -> PathBuf { if Self::flat_at(root) { root.join("themes") } else { root.join(INTERNAL).join("themes") } }
 
-    /// The 应用级 part of `Settings` (sidebar width, home view, windows),
+    /// The 应用级 part of `Settings` (sidebar width, folder page view, windows),
     /// from `settings_dir`.
     pub fn app_settings() -> Settings { reread(&Self::settings_dir().join("settings.json")).unwrap_or_default() }
 
@@ -1328,7 +1328,7 @@ impl Store {
     /// The backup of the old layout, while there is one.
     pub fn backup_dir(root: &Path) -> Option<PathBuf> { Some(root.join(INTERNAL).join(migrate::BACKUP)).filter(|p| p.fs_is_dir()) }
 
-    /// A top-level folder on 主页, as it is: one that is not there (an
+    /// A top-level folder, as it is: one that is not there (an
     /// unplugged disk, renamed in the Finder) is an error, never made anew.
     /// A plain folder gets its `.quiet/`; an old layout is not moved.
     pub fn open_top_folder(root: &Path) -> Result<Self> { Self::open_top_folder_as(root, &library_key(root)) }
@@ -1377,7 +1377,7 @@ impl Store {
     /// Whether `id` is one of this library's documents or folders.
     pub fn has(&self, id: &str) -> bool { self.index.contains_key(id) }
 
-    /// Every id this library hands out, for 主页 to tell its folders apart.
+    /// Every id this library hands out, for `TopFolders` to tell its folders apart.
     pub fn ids(&self) -> impl Iterator<Item = &String> { self.index.keys() }
 
     /// New ids for entries whose ids another top-level folder already uses: a folder

@@ -39,7 +39,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet telemetry [on|off|status]        the anonymous daily usage counts
 
 Writes take --dry-run (show the diff, write nothing) and --expect-rev REV.
-Paths start at 主页 (Home): the first part is one of the folders Quiet.md
+Paths start with a top-level folder: the first part is one of the folders Quiet.md
 has open on this computer (`quiet ls` lists them), e.g. Quiet.md/工作/周报.
 DOC is such a path (extension optional), a path or title only one document
 has, or an id. REF is what outline/blocks print (#3~k7f2: position and
@@ -58,7 +58,7 @@ skill: npx skills add s1dashu/quiet-md.";
 const COMMANDS: &[(&[&str], &str)] = &[
     (&["ls"], "quiet ls [FOLDER] [-r] [--kind doc|md|board|table|folder]
 
-Lists a folder; with none, 主页: the folders Quiet.md has open, where each
+Lists a folder; with none, the top-level folders: those Quiet.md has open, where each
 is on disk and whether it opens (two of one name: use its key, which --json
 shows, as the first part of a path). -r goes into subfolders. Each line:
 path, [kind], last modified.
@@ -138,7 +138,7 @@ Changes one block in place: its text (inline Markdown), a todo's state, its kind
 The file follows the title. Mentions in other documents keep working."),
     (&["mv"], "quiet mv DOC FOLDER
 
-Into FOLDER, a path from 主页 within the document's own top folder (its name
+Into FOLDER, a full path within the document's own top folder (its name
 alone: its top). Links to it in other documents are rewritten; moving to
 another top folder is not supported yet."),
     (&["rm"], "quiet rm DOC

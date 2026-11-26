@@ -478,11 +478,11 @@ impl Onboarding {
         let new_top = (self.open.is_empty() && !fixed).then(|| self.root.clone());
         let existed = crate::guides::seeded(new_top.as_ref().unwrap_or(&home)).unwrap_or(false);
         if fixed && !self.scripted { let _ = crate::guides::initialize(&home); }
-        let mut ws = fdl_core::home::Home::load();
+        let mut tops = fdl_core::top_folders::TopFolders::load();
         let mut failed: Vec<String> = vec![];
         if let Some(root) = &new_top {
             let made = if self.scripted { Ok(()) } else { crate::guides::initialize(root) };
-            if let Err(e) = made.map_err(|e| e.to_string()).and_then(|_| ws.add(root).map(|_| ()).or_else(|e| match e { fdl_core::home::AddError::Open(_) => Ok(()), e => Err(e.to_string()) })) {
+            if let Err(e) = made.map_err(|e| e.to_string()).and_then(|_| tops.add(root).map(|_| ()).or_else(|e| match e { fdl_core::top_folders::AddError::Open(_) => Ok(()), e => Err(e.to_string()) })) {
                 self.error = Some(format!("{}{e}", tr("无法在这里创建文件夹：", "Couldn't create the folder here: ")));
                 return cx.notify();
             }
@@ -491,11 +491,11 @@ impl Onboarding {
         let siyuan: Vec<(PathBuf, Option<String>)> = self.imports().into_iter().filter(|(p, _)| fdl_core::siyuan::recognizes(p)).collect();
         let others: Vec<PathBuf> = self.open.iter().cloned().chain(if self.copy && new_top.is_some() { vec![] } else { self.imports().into_iter().map(|(p, _)| p).filter(|p| !siyuan.iter().any(|(s, _)| s == p)).collect() }).collect();
         for d in others {
-            if let Err(e) = ws.add(&d) && !matches!(e, fdl_core::home::AddError::Open(_) | fdl_core::home::AddError::Inside(_)) { failed.push(format!("{}：{e}", short_path(&d))); }
+            if let Err(e) = tops.add(&d) && !matches!(e, fdl_core::top_folders::AddError::Open(_) | fdl_core::top_folders::AddError::Inside(_)) { failed.push(format!("{}：{e}", short_path(&d))); }
         }
         PENDING.store(false, Ordering::Relaxed);
         let target = new_top.clone();
-        cx.set_global(crate::shared_store::SharedStore::with_workspace(ws));
+        cx.set_global(crate::shared_store::SharedStore::with_top_folders(tops));
         crate::settings::load();
         save_lang(self.lang);
         crate::settings::apply_appearance(&crate::settings::prefs().appearance);

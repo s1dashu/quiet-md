@@ -155,7 +155,6 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("支持 ↑↓ 键选择、Enter 键打开", "Seçmek için ↑↓, açmak için Enter"),
     ("你在 {}打开过", "Açıldı: {}"),
     ("我在 {}修改过", "Düzenlendi: {}"),
-    ("主页", "Ana Sayfa"),
     ("置顶", "Sabitlenenler"),
     ("收藏", "Favoriler"),
     ("设置", "Ayarlar"),

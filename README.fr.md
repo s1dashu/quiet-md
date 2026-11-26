@@ -69,7 +69,7 @@ Les tableaux sont un tableau blanc porté d'Excalidraw : formes, flèches qui re
 
 ### Ranger dans de vrais dossiers
 
-L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes dans la barre latérale, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
+La page d'un dossier montre chaque dossier qu'il contient comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes dans la barre latérale, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
 
 ### Apporter vos notes
 
@@ -77,7 +77,7 @@ L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note 
   <img src="docs/images/readme-import.webp" width="100%" alt="L'écran du premier lancement de Quiet.md, qui propose d'ouvrir sur place un coffre Obsidian trouvé sur l'ordinateur.">
 </p>
 
-Au premier lancement, Quiet.md cherche vos bibliothèques Obsidian, Logseq, iA Writer et Typora et les copie, sans toucher aux originaux. Les `[[liens wiki]]` d'Obsidian continuent de fonctionner : cliquez sur l'un d'eux pour ouvrir la note visée. Ensuite, glissez des fichiers et dossiers Markdown sur l'accueil ou directement dans un dossier de la barre latérale. Les notes repartent en Markdown ou en PDF, ou directement vers l'imprimante.
+Au premier lancement, Quiet.md cherche vos bibliothèques Obsidian, Logseq, iA Writer et Typora et les copie, sans toucher aux originaux. Les `[[liens wiki]]` d'Obsidian continuent de fonctionner : cliquez sur l'un d'eux pour ouvrir la note visée. Ensuite, glissez des fichiers et dossiers Markdown sur la page d'un dossier ou directement dans un dossier de la barre latérale. Les notes repartent en Markdown ou en PDF, ou directement vers l'imprimante.
 
 ### Et aussi
 
@@ -152,7 +152,7 @@ Merci à toutes les personnes qui ont contribué à construire Quiet.md. Issues 
 - **0.1.7** (6 nov) : enregistrement multi-fenêtres, récupération de conflits et écritures disque plus sûrs. Accès aux fichiers d'export restreint, et les exports Markdown conservent les pièces jointes en ligne. Correction de la suppression de caractères en saisie chinoise avec Weasel sous Windows.
 - **0.1.6** (6 nov) : bascule entre fenêtres et frappe plus fluides, tableaux plus larges, enregistrements réguliers pendant la saisie continue, et Option+Espace pour la note rapide globale sur macOS. Windows ajoute le collage d'images, l'export PDF et l'impression, avec une suppression de mots corrigée.
 - **0.1.5** (5 nov) : l'app s'appelle désormais Quiet.md. Votre bibliothèque et vos notes restent où elles étaient.
-  - Gérez plusieurs documents à la fois depuis l'accueil : dupliquer, déplacer ou supprimer ensemble.
+  - Gérez plusieurs documents à la fois depuis la page d'un dossier : dupliquer, déplacer ou supprimer ensemble.
   - Videz la Corbeille en une seule étape. Les flèches parcourent les icônes du menu d'insertion, et supprimer tous les documents ne crée plus de document vide.
   - Après une mise à jour depuis l'app, la barre latérale affiche une fois ce qui a changé dans la nouvelle version.
   - Windows : les raccourcis et le guide intégré affichent Ctrl / Alt, et un lancement raté s'explique et laisse un journal.

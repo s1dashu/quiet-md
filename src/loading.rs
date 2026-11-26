@@ -314,8 +314,8 @@ mod tests {
         let ext = outside.join("外部.md");
         std::fs::write(&ext, "# 外部\n").unwrap();
         let active = Store::active_dir();
-        let entry = fdl_core::home::TopFolderEntry { key: "k".into(), path: dir.clone(), bookmark: None, added: 0 };
-        let mut store = crate::shared_store::SharedStore::with_workspace(fdl_core::home::Home::open(vec![entry], true));
+        let entry = fdl_core::top_folders::TopFolderEntry { key: "k".into(), path: dir.clone(), bookmark: None, added: 0 };
+        let mut store = crate::shared_store::SharedStore::with_top_folders(fdl_core::top_folders::TopFolders::open(vec![entry], true));
         let mut writer = store.top_writer("k").unwrap();
         store.begin_loading();
         assert!(store.loading());

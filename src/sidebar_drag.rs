@@ -31,7 +31,7 @@ struct Row { entry: Rc<Entry>, depth: usize }
 /// expanded folders stay as they were: building them
 /// walks every entry, most of a frame in a vault of 15,000 notes.
 #[derive(Default)]
-struct RowCache { key: u64, order: Option<crate::home::Order>, expanded: HashSet<String>, rows: Vec<Row>, parents: HashSet<String> }
+struct RowCache { key: u64, order: Option<crate::folder_page::Order>, expanded: HashSet<String>, rows: Vec<Row>, parents: HashSet<String> }
 
 /// A row whose middle a drop goes into: a plain folder. A document, one with child pages (#357)
 /// too, only opens a slot before or after it (#418): dropping on a page reorders, never nests.
@@ -230,7 +230,7 @@ fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
 
 impl Workspace {
     fn drag_rows(&self) -> Vec<Row> {
-        let (key, order) = (self.entries.generation(), self.home.order());
+        let (key, order) = (self.entries.generation(), self.folder_page.order());
         let mut c = self.folder_drag.rows.borrow_mut();
         if c.key != key || c.order != Some(order) || c.expanded != self.expanded {
             c.rows = crate::tree::Tree::with_order(&self.entries, Some(order)).rows(|id| self.expanded.contains(id)).into_iter()
@@ -355,7 +355,7 @@ impl Workspace {
     pub(crate) fn end_folder_drag(&mut self, cancel: bool, cx: &mut Context<Self>) {
         let rows = self.drag_rows();
         // 自动排序 decides the order among siblings: a drop that only reorders them springs back.
-        let sorted = self.home.order().field != crate::home::HomeSort::Manual;
+        let sorted = self.folder_page.order().field != crate::folder_page::PageSort::Manual;
         let held = self.folder_drag.active.as_ref().and_then(|d| self.entries.iter().find(|e| e.id == d.id)).map(|e| e.meta.parent.clone());
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         if !d.started { self.folder_drag.active = None; cx.notify(); return; }

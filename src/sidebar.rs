@@ -151,7 +151,7 @@ impl Workspace {
         // Pinned docs are shortcuts: they stay in 我的文档 too.
         // 置顶 follows the same order as the lists below it. Only the pinned are
         // sorted: copying and sorting every entry each frame cost 3 ms in a big library.
-        let order = self.home.order();
+        let order = self.folder_page.order();
         let mut pinned: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.pinned).collect();
         pinned.sort_by(|a, b| order.cmp(a, b));
         if !pinned.is_empty() {
@@ -167,7 +167,7 @@ impl Workspace {
         // of the tree there; none, a way to open one.
         let tops = self.store.shown_tops();
         if tops.is_empty() {
-            list = list.child(self.empty_home(cx));
+            list = list.child(self.empty_sidebar(cx));
         } else {
             // No 我的文档 heading: the first folder's heading is the sidebar's first row, right under
             // the window's header where 我的文档's was. 批量操作's 已选 N 项 takes the top.

@@ -235,7 +235,7 @@ impl Style {
         // dark (`theme::lift`; 4.5:1 for the link, 3:1 for a marker and the checkbox edge)
         let min = match key { "a.color" => Some(4.5), "bullet.color" | "number.color" | "task.border" => Some(3.), _ => None };
         // the check mark sits on the checkbox's vivid fill, which keeps its lightness in the dark: it
-        // stays the colour the theme gives (white), not mirrored to near-black (the home cards draw it white)
+        // stays the colour the theme gives (white), not mirrored to near-black (the folder page cards draw it white)
         if key == "task.check" {
             return match self.values.get(key) {
                 Some(Val::C(c)) => Some(*c),

@@ -25,14 +25,14 @@ fn size(n: u64) -> String { if n >= 1000 { format!("{:.1}k", n as f64 / 1000.) }
 fn cell(v: &Value, k: &str) -> String { s(v, k).replace('|', "\\|").replace('\n', " ") }
 
 /// Compact text for people and agents alike; `--json` has every field.
-/// Paths start at 主页: the top-level folder's name first.
+/// Paths start with the top-level folder's name.
 pub fn text(op: &str, v: &Value) -> String {
     let mut o = String::new();
     match op {
         "ls" => for e in v.as_array().into_iter().flatten() {
             let mark = if e.get("pinned").is_some() { " pinned" } else { "" };
             if e.get("top").is_some() {
-                // A top-level folder on 主页: where it is on disk, and whether it opens.
+                // A top-level folder: where it is on disk, and whether it opens.
                 let state = match e.get("documents") { Some(n) => format!("{n} documents{}", if e.get("default").is_some() { ", new documents go here" } else { "" }), None => format!("unavailable: {}", s(e, "error")) };
                 o += &format!("{}/  ({state})  {}\n", s(e, "path"), s(e, "dir"));
             } else if s(e, "kind") == "folder" { o += &format!("{}/\n", s(e, "path")); } else { o += &format!("{}  [{}] {}{mark}\n", s(e, "path"), s(e, "kind"), s(e, "modified")); }
@@ -195,7 +195,7 @@ fn view_line(w: &Value) -> String {
     format!("{}\n", parts.join(" · "))
 }
 
-/// What a commit wrote (or, `dry`, would write), by paths from 主页.
+/// What a commit wrote (or, `dry`, would write), by full paths (the top-level folder first).
 pub fn report(r: &Value, dry: bool) -> String {
     let mut o = String::new();
     for c in r.as_array().into_iter().flatten() {

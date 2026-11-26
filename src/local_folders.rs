@@ -7,7 +7,7 @@ use crate::app::{RowMenu, View, Workspace};
 use crate::theme::Theme;
 use crate::settings::tr;
 use crate::ui::ToastKind;
-use fdl_core::home::{AddError, RenameError};
+use fdl_core::top_folders::{AddError, RenameError};
 use fdl_core::shown::Survey;
 use gpui::{prelude::FluentBuilder, *};
 use std::path::{Path, PathBuf};
@@ -201,7 +201,7 @@ impl Workspace {
         let (name, path, missing) = open.map(|r| (r.1, r.2, r.3.is_some())).unwrap_or_default();
         let (doc, folder, rename, k1, k2, k3, top_row) = (m.id.clone(), m.id.clone(), m.id.clone(), key.to_string(), key.to_string(), key.to_string(), m.id.clone());
         // from its page's header "…": 批量管理 over that page, as its header's own button did
-        let page = m.from.as_deref() == Some(crate::home::header::TB_MORE);
+        let page = m.from.as_deref() == Some(crate::folder_page::header::TB_MORE);
         let mut menu = crate::design::Popover::new("top-row-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.row_menu = None; cx.notify(); }));
         if missing {
@@ -223,7 +223,7 @@ impl Workspace {
                 .child(row("rr-batch", "batch", crate::settings::text("批量管理")).on_click(cx.listener(move |w, _, _, cx| {
                     w.row_menu = None;
                     w.batch = Some(vec![]);
-                    w.home.view_menu = false;
+                    w.folder_page.view_menu = false;
                     if page { w.batch_top = None } else { w.batch_top = Some(k3.clone()); w.expanded.insert(top_row.clone()); }
                     cx.notify();
                 })))
@@ -242,7 +242,7 @@ impl Workspace {
     }
 
     /// The sidebar with no top-level folder open: a way to open one (a new one is made in the open panel).
-    pub(crate) fn empty_home(&self, cx: &mut Context<Self>) -> Div {
+    pub(crate) fn empty_sidebar(&self, cx: &mut Context<Self>) -> Div {
         let button = |id: &'static str, label: &'static str| crate::design::MenuItem::new(id).label(label);
         div().flex().flex_col().gap(px(2.)).px(px(4.)).pt(px(12.))
             .child(div().px(px(8.)).pb(px(6.)).text_size(px(crate::theme::ui_font())).line_height(px(crate::theme::ui_font() + 7.)).text_color(Theme::text_caption())
@@ -261,7 +261,7 @@ impl Workspace {
 
     /// What the top of the tree is called where nothing names a top-level folder: the
     /// one top-level folder's folder name, else the top-level folder in front's.
-    pub(crate) fn home_name(&self) -> String {
+    pub(crate) fn front_top_name(&self) -> String {
         let tops = self.store.top_folders();
         let key = if tops.len() == 1 { Some(tops[0].0.clone()) } else { self.store.active_top() };
         key.and_then(|k| tops.into_iter().find(|r| r.0 == k)).map(|r| r.1).unwrap_or_else(|| tr("我的文档", "My documents").to_string())

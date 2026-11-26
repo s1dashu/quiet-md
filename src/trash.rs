@@ -112,7 +112,7 @@ impl Workspace {
         let open = self.trash_days_menu;
         let auto = Button::ghost("trash-days").no_drag().mr(px(4.)).selected(open)
             .label(crate::localized_count!(days, "{} 天后自动删除", "Delete after {} day", "Delete after {} days", days)).icon_end("chevron-down")
-            .relative().child(self.home.track("trash-days"))
+            .relative().child(self.folder_page.track("trash-days"))
             .on_mouse_down(MouseButton::Left, cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.trash_menu = None; w.trash_days_menu = !open; cx.notify(); }));
         let header = page_header(self, "回收站", 26., cx).child(auto).children(empty).child(
             crate::ui::header_icon("trash-search", "search")
@@ -137,7 +137,7 @@ impl Workspace {
         };
         // A row is lit while hovered or holding its menu; the lines touching it hide.
         let lit = |i: usize| self.trash.get(i).is_some_and(|t| {
-            self.home.list_hover.as_ref().is_some_and(|h| *h == format!("trash-row-{}", t.id))
+            self.folder_page.list_hover.as_ref().is_some_and(|h| *h == format!("trash-row-{}", t.id))
                 || self.trash_menu.as_ref().is_some_and(|(m, _, _)| *m == t.id)
         });
         let table_header = div()
@@ -183,7 +183,7 @@ impl Workspace {
                     .items_center()
                     .when(i > 0, |d| d.border_t_1().border_color(row_line(lit(i - 1) || lit(i))))
                     .hover(row_hover)
-                    .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.home.hover_row(&key, *on) { cx.notify() }))
+                    .on_hover(cx.listener(move |w, on: &bool, _, cx| if w.folder_page.hover_row(&key, *on) { cx.notify() }))
                     .when(menu_open, |d| d.bg(Theme::fill_hover()).rounded(px(ROW_RADIUS)))
                     .on_mouse_down(
                         MouseButton::Right,
@@ -258,7 +258,7 @@ impl Workspace {
 
     /// 自动删除's menu: the usual days, then 自定义 a day at a time (1–30).
     fn render_trash_days_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let b = self.view.eq(&crate::app::View::Trash).then(|| self.home.anchor("trash-days")).flatten()?;
+        let b = self.view.eq(&crate::app::View::Trash).then(|| self.folder_page.anchor("trash-days")).flatten()?;
         let days = self.store.trash_days();
         let set = |n: u64, close: bool| cx.listener(move |w: &mut Workspace, _: &ClickEvent, _: &mut Window, cx: &mut Context<Workspace>| {
             if w.store.set_trash_days(n).is_err() { w.show_toast(crate::settings::tr("设置保存失败", "Couldn’t save the setting"), cx); }

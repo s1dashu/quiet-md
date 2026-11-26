@@ -181,7 +181,7 @@ type Decoded = Result<Arc<RenderImage>, ImageCacheError>;
 /// its frames, so its pixels are kept.
 struct Slot { path: Option<Arc<Path>>, image: Option<Decoded>, used: Instant, windows: HashMap<WindowId, Instant>, generation: Arc<()>, waiters: Vec<EntityId>, ready: Option<Instant>, whole: bool, wanted: Arc<AtomicU64> }
 
-/// Decoded document pictures (editor and Home cards). gpui's global asset
+/// Decoded document pictures (editor and folder page cards). gpui's global asset
 /// cache keeps every image it has decoded until the app quits; this one lets go
 /// of pictures unused for 30 seconds, or sooner when the offscreen cache
 /// exceeds 64 MiB, freeing their pixels and atlas textures. Pictures are

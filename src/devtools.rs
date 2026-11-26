@@ -175,7 +175,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                         window.draw(cx).clear(cx);
                         if cmd != "anchor" { return row_center(window, name); }
                         let ws = root.downcast::<crate::app::Workspace>().map_err(|_| "no workspace window".to_string())?;
-                        let b = ws.read(cx).home.anchor(name).or_else(|| probed_anchor(window, name)).ok_or(format!("no anchor {name:?}"))?;
+                        let b = ws.read(cx).folder_page.anchor(name).or_else(|| probed_anchor(window, name)).ok_or(format!("no anchor {name:?}"))?;
                         Ok((f32::from(b.center().x).round(), f32::from(b.center().y).round()))
                     }).unwrap_or_else(|e| Err(e.to_string()));
                     match at {
@@ -512,7 +512,7 @@ type Drawn = std::cell::RefCell<std::collections::HashMap<WindowId, Vec<(String,
 thread_local! {
     /// The sidebar rows drawn in each window's last frame: title, and the part of the row on screen.
     static ROWS: Drawn = Default::default();
-    /// Controls that `anchor_probe` named, the same way (the app's own anchors are `Home::anchor`).
+    /// Controls that `anchor_probe` named, the same way (the app's own anchors are `FolderPage::anchor`).
     static ANCHORS: Drawn = Default::default();
 }
 

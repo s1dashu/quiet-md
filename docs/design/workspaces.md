@@ -8,7 +8,7 @@
 
 > （W4，2026-11-22）我希望默认根也可以移除，所有根是平等地位，只是有一个是初始默认的。位置无所谓。
 
-> 术语（2026-11-24 用户定）：「文件夹就是普通的 folder，没有 root 这些东西，只有一个我们自己的主页，那个是真正的 root，叫 root 或者叫 home 都行」。本稿原先说的「根」「根文件夹」「工作区」，现在一律叫**主页下的顶层文件夹**；主页（我的文档，代码里的 `home::Home`）是唯一的根。代码里：`Workspace` → `Home`，`Root` → `TopFolder`，`roots.json` → `folders.json`（旧名启动时自动迁移），「根 key」→ 文件夹 key，`Meta.root_order` → `top_order`（磁盘上仍叫 `root_order`），设备元数据里的 `_root` 保留条目名不变（代码里 `FOLDER_ITEM`）。CLI 的路径一律从主页算起，第一段就是顶层文件夹名。
+> 术语（2026-11-24 用户定）：「文件夹就是普通的 folder，没有 root 这些东西，只有一个我们自己的主页，那个是真正的 root，叫 root 或者叫 home 都行」。本稿原先说的「根」「根文件夹」「工作区」，现在一律叫**主页下的顶层文件夹**；主页（我的文档，代码里的 `home::Home`）是唯一的根。（2026-11-26 用户定：没有单独的主页了，每个顶层文件夹页面就是它自己的主页；代码里的集合改名 `top_folders::TopFolders`，主页概念从代码移除。下文是当时的草稿。）代码里：`Workspace` → `Home`，`Root` → `TopFolder`，`roots.json` → `folders.json`（旧名启动时自动迁移），「根 key」→ 文件夹 key，`Meta.root_order` → `top_order`（磁盘上仍叫 `root_order`），设备元数据里的 `_root` 保留条目名不变（代码里 `FOLDER_ITEM`）。CLI 的路径一律从主页算起，第一段就是顶层文件夹名。
 
 相关草案：[sync.md](sync.md)（同步，worktree `cross-platform-sync-architecture-3a798c`）、mobile.md（移动端，worktree `mobile-plan-76ad65`）、#357 子文档（s1dashu/quiet-md#360）。
 

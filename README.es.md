@@ -69,7 +69,7 @@ Las pizarras son un tablero portado de Excalidraw: formas, flechas que siguen un
 
 ### Organiza en carpetas de verdad
 
-El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas en la barra lateral, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
+La página de una carpeta muestra cada carpeta que contiene como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas en la barra lateral, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
 
 ### Trae tus notas
 
@@ -77,7 +77,7 @@ El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota s
   <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece abrir donde está una bóveda de Obsidian que ha encontrado.">
 </p>
 
-En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown al Inicio o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
+En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown a la página de una carpeta o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
 
 ### Y además
 
@@ -152,7 +152,7 @@ Gracias a todas las personas que han ayudado a construir Quiet.md. Los issues y 
 - **0.1.7** (6 nov): guardado en varias ventanas, recuperación de conflictos y escritura en disco más seguros; acceso a archivos restringido al exportar; las exportaciones a Markdown conservan los adjuntos en línea. Corregido el borrado de texto al escribir chino con Weasel en Windows.
 - **0.1.6** (6 nov): cambio de ventana y escritura más fluidos, tablas más anchas, guardado periódico mientras escribes sin parar y Option+Espacio para notas rápidas desde cualquier lugar en macOS. Windows añade pegar imágenes, exportar a PDF e imprimir, y corrige el borrado por palabras.
 - **0.1.5** (5 nov): la app pasa a llamarse Quiet.md; tu biblioteca y tus notas siguen donde estaban.
-  - Gestiona varios documentos a la vez desde **Inicio**: duplícalos, muévelos o elimínalos juntos.
+  - Gestiona varios documentos a la vez desde la página de una carpeta: duplícalos, muévelos o elimínalos juntos.
   - Vacía la papelera de una vez; las flechas recorren los iconos del menú de inserción; eliminar todos los documentos ya no crea uno vacío.
   - Tras actualizar desde la app, la barra lateral muestra una vez qué ha cambiado en la nueva versión.
   - Windows: los atajos y la guía integrada indican Ctrl / Alt, y si el arranque falla se explica el motivo y se deja un registro.

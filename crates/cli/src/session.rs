@@ -6,10 +6,10 @@
 //! Every operation is `call(op, args)` with JSON in and out, so the shell
 //! commands and the script API are the same code.
 //!
-//! The library is every top-level folder the app has open (主页)
-//! (`Home`, the same list in the same order), each a library of its
+//! The library is every top-level folder the app has open
+//! (`TopFolders`, the same list in the same order), each a library of its
 //! own. Documents are found across them; ids are unique across top-level folders (W14).
-//! Paths start at 主页: a top-level folder's name, then the path in it.
+//! Paths start with a top-level folder's name, then the path in it.
 //! `--library DIR` works on that folder alone, paths starting in it.
 
 use std::path::{Path, PathBuf};
@@ -17,14 +17,14 @@ use std::path::{Path, PathBuf};
 use fdl_core::editor::core::{Core, DropPlace};
 use fdl_core::model::{Block, BlockId, BlockKind, Document, RichText};
 use fdl_core::store::{DocKind, Entry, Store};
-use fdl_core::home::{TopFolderEntry, Home};
+use fdl_core::top_folders::{TopFolderEntry, TopFolders};
 use serde_json::{Value, json};
 
 use crate::blocks;
 use crate::fail::{R, fail};
 
 pub struct Session {
-    pub ws: Home,
+    pub tops: TopFolders,
     /// Every document and folder of every open top-level folder, each with its folder's key.
     pub(crate) entries: Vec<Entry>,
     /// The same, for `[[…]]` (`find_linked`).
@@ -37,7 +37,7 @@ pub struct Session {
     pub(crate) assets: Vec<(PathBuf, PathBuf)>,
     /// In `quiet run`: nothing outside the library (no `import`, no local pictures).
     pub sandbox: bool,
-    /// `--library DIR`: that folder on its own; paths start in it, not at 主页.
+    /// `--library DIR`: that folder on its own; paths start in it, not with a top-level folder.
     pub(crate) alone: bool,
 }
 
@@ -47,7 +47,7 @@ pub(crate) struct Open {
     pub(crate) top: String,
     /// None: created in this session, written at commit.
     pub(crate) id: Option<String>,
-    /// From 主页: the top-level folder's name, then the path in it.
+    /// The top-level folder's name, then the path in it.
     pub(crate) path: String,
     pub(crate) title: String,
     pub(crate) kind: &'static str,
@@ -124,8 +124,8 @@ fn open_top(e: &TopFolderEntry) -> anyhow::Result<Store> {
 
 /// Top-level folder `key`'s library, made the one image and 数据表 paths resolve
 /// against (as the app does for the document in front).
-fn lib_in<'a>(ws: &'a mut Home, key: &str) -> R<&'a mut Store> {
-    let r = ws.folders.iter_mut().find(|r| r.key == key).ok_or_else(|| fail("no_folder", "that folder is no longer open"))?;
+fn lib_in<'a>(tops: &'a mut TopFolders, key: &str) -> R<&'a mut Store> {
+    let r = tops.folders.iter_mut().find(|r| r.key == key).ok_or_else(|| fail("no_folder", "that folder is no longer open"))?;
     let (path, store) = (&r.path, r.store.as_mut());
     let s = store.ok_or_else(|| fail("unavailable", format!("{} cannot be opened", path.display())))?;
     Store::set_active_dir(path);
@@ -134,10 +134,10 @@ fn lib_in<'a>(ws: &'a mut Home, key: &str) -> R<&'a mut Store> {
 
 impl Session {
     /// `library`: that folder alone; else the top-level folders the app has
-    /// open here (`QUIET_MD_HOME`: that folder alone). Paths start at 主页:
+    /// open here (`QUIET_MD_HOME`: that folder alone). Paths start with a top-level folder's name:
     /// the top-level folder's name first.
     pub fn open(library: Option<&str>) -> R<Session> {
-        let ws = match library {
+        let tops = match library {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
                 if !Store::is_library(&dir) {
@@ -146,28 +146,28 @@ impl Session {
                 if Store::flat_at(&dir) {
                     return Err(fail("old_library", "this library still has the old layout").hint("open it in Quiet.md once to move it to real folders"));
                 }
-                Home::open_with(vec![TopFolderEntry { key: "library".into(), path: dir, bookmark: None, added: 0 }], true, open_top)
+                TopFolders::open_with(vec![TopFolderEntry { key: "library".into(), path: dir, bookmark: None, added: 0 }], true, open_top)
             }
             // `fixed`: folders.json stays the app's to write.
-            None => Home::open_with(Home::entries().0, true, open_top),
+            None => TopFolders::open_with(TopFolders::entries().0, true, open_top),
         };
-        if ws.folders.is_empty() {
+        if tops.folders.is_empty() {
             return Err(fail("no_library", "Quiet.md has no folders open on this computer")).map_err(|f| f.hint("add a folder in Quiet.md (the + beside the sidebar's folders), or pass --library DIR"));
         }
-        let mut s = Session { ws, entries: vec![], all: vec![], docs: vec![], tables: vec![], pending: vec![], assets: vec![], sandbox: false, alone: library.is_some() };
+        let mut s = Session { tops, entries: vec![], all: vec![], docs: vec![], tables: vec![], pending: vec![], assets: vec![], sandbox: false, alone: library.is_some() };
         s.refresh();
         Ok(s)
     }
 
-    /// A path from 主页 split at its first segment, when that names a
+    /// A path split at its first segment, when that names a
     /// top-level folder (its name, any case, or its key): (key, the rest).
     /// An absolute path on disk inside one is taken too. Two folders of
     /// that name: `ambiguous`, with how to tell them apart.
-    fn split_home(&self, spec: &str) -> R<Option<(String, String)>> {
+    fn split_top(&self, spec: &str) -> R<Option<(String, String)>> {
         let raw = spec.trim();
         // `--library DIR`: one folder, and paths start in it.
         if self.alone {
-            let Some(r) = self.ws.folders.first() else { return Ok(None) };
+            let Some(r) = self.tops.folders.first() else { return Ok(None) };
             let disk = PathBuf::from(raw);
             let rest = if disk.is_absolute() { disk.strip_prefix(&r.path).map(|p| p.to_string_lossy().replace('\\', "/")).unwrap_or_default() } else { raw.trim_start_matches("./").trim_matches('/').to_string() };
             return Ok(Some((r.key.clone(), rest)));
@@ -176,7 +176,7 @@ impl Session {
         if disk.is_absolute() {
             let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
             let d = canon(&disk);
-            if let Some(r) = self.ws.folders.iter().find(|r| d.starts_with(canon(&r.path))) {
+            if let Some(r) = self.tops.folders.iter().find(|r| d.starts_with(canon(&r.path))) {
                 let rest = d.strip_prefix(canon(&r.path)).unwrap_or(Path::new("")).to_string_lossy().replace('\\', "/");
                 return self.usable(r).map(|k| Some((k, rest)));
             }
@@ -184,8 +184,8 @@ impl Session {
         let s = raw.trim_start_matches("./").trim_matches('/');
         let (first, rest) = s.split_once('/').unwrap_or((s, ""));
         if first.is_empty() { return Ok(None); }
-        let mut hits: Vec<&fdl_core::home::TopFolder> = self.ws.folders.iter().filter(|r| r.key == first).collect();
-        if hits.is_empty() { hits = self.ws.folders.iter().filter(|r| r.name().to_lowercase() == first.to_lowercase()).collect(); }
+        let mut hits: Vec<&fdl_core::top_folders::TopFolder> = self.tops.folders.iter().filter(|r| r.key == first).collect();
+        if hits.is_empty() { hits = self.tops.folders.iter().filter(|r| r.name().to_lowercase() == first.to_lowercase()).collect(); }
         match hits.as_slice() {
             [] => Ok(None),
             [r] => self.usable(r).map(|k| Some((k, rest.to_string()))),
@@ -195,74 +195,74 @@ impl Session {
     }
 
     /// `r`'s key, when it opens.
-    fn usable(&self, r: &fdl_core::home::TopFolder) -> R<String> {
+    fn usable(&self, r: &fdl_core::top_folders::TopFolder) -> R<String> {
         if let Some(e) = &r.error { return Err(fail("unavailable", format!("{} ({}) cannot be opened: {e}", r.name(), r.path.display())).hint("`quiet ls` shows every top-level folder and whether it opens")); }
         Ok(r.key.clone())
     }
 
-    /// Path `rel` in top-level folder `top`, as from 主页.
-    pub(crate) fn home_path(&self, top: &str, rel: &str) -> String {
+    /// Path `rel` in top-level folder `top`, its name first.
+    pub(crate) fn full_path(&self, top: &str, rel: &str) -> String {
         let rel = rel.trim_matches('/');
         if self.alone { return rel.to_string(); }
         let name = self.top_name(top);
         if rel.is_empty() { name } else { format!("{name}/{rel}") }
     }
 
-    /// Where folder `spec` (a path from 主页) is: `None` for 主页 itself,
+    /// Where folder `spec` (a path, its top-level folder first) is: `None` for none,
     /// else its top-level folder and the folder in it (`None`: its top).
     /// A path whose first segment names no top-level folder is looked up in
     /// all of them, as a path or a name.
     pub(crate) fn locate(&self, spec: Option<&str>) -> R<Option<(String, Option<String>)>> {
         let s = spec.unwrap_or("").trim().trim_matches('/');
         if s.is_empty() { return Ok(None); }
-        if let Some((k, rest)) = self.split_home(s)? {
+        if let Some((k, rest)) = self.split_top(s)? {
             if rest.is_empty() { return Ok(Some((k, None))); }
             return self.folder_in(&k, &rest).and_then(|f| f.map(|id| Some((k.clone(), Some(id)))).ok_or_else(|| fail("not_found", format!("no folder {s:?}"))));
         }
         let named = folders_named(&self.entries, s);
         match named.as_slice() {
             [e] => Ok(Some((e.top.clone(), Some(e.id.clone())))),
-            [] => Err(fail("not_found", format!("no folder {s:?}")).hint("paths start at 主页: `quiet ls` lists the top-level folders, `quiet ls -r --kind folder` every folder")),
+            [] => Err(fail("not_found", format!("no folder {s:?}")).hint("paths start with a top-level folder: `quiet ls` lists the top-level folders, `quiet ls -r --kind folder` every folder")),
             _ => Err(self.ambiguous("folders", s, &named)),
         }
     }
 
     pub(crate) fn refresh(&mut self) {
-        self.all = self.ws.list();
+        self.all = self.tops.list();
         self.entries = self.all.clone();
     }
 
     /// What the sidebar calls top-level folder `key`.
-    pub(crate) fn top_name(&self, key: &str) -> String { self.ws.folder(key).map(|r| r.name()).unwrap_or_default() }
+    pub(crate) fn top_name(&self, key: &str) -> String { self.tops.folder(key).map(|r| r.name()).unwrap_or_default() }
 
     /// Top-level folder `key` on disk.
-    pub(crate) fn top_dir(&self, key: &str) -> PathBuf { self.ws.folder(key).map(|r| r.path.clone()).unwrap_or_default() }
+    pub(crate) fn top_dir(&self, key: &str) -> PathBuf { self.tops.folder(key).map(|r| r.path.clone()).unwrap_or_default() }
 
     /// The top-level folder that document or folder `id` is in.
     pub(crate) fn top_of(&self, id: &str) -> R<String> {
         self.entry_by_id(id).map(|e| e.top.clone()).ok_or_else(|| fail("not_found", format!("no document or folder {id}")))
     }
 
-    pub(crate) fn lib(&mut self, key: &str) -> R<&mut Store> { lib_in(&mut self.ws, key) }
+    pub(crate) fn lib(&mut self, key: &str) -> R<&mut Store> { lib_in(&mut self.tops, key) }
 
     /// The library `id` is in.
     pub(crate) fn lib_of(&mut self, id: &str) -> R<&mut Store> { let k = self.top_of(id)?; self.lib(&k) }
 
-    /// Where something new goes: into folder `spec` (a path from 主页) when
+    /// Where something new goes: into folder `spec` (a path, its top-level folder first) when
     /// given, else the first top-level folder that opens, as in the app.
     pub(crate) fn landing(&self, spec: Option<&str>) -> R<(String, Option<String>)> {
         if let Some(t) = self.locate(spec)? { return Ok(t); }
-        let key = self.ws.first().map(|r| r.key.clone());
+        let key = self.tops.first().map(|r| r.key.clone());
         Ok((key.ok_or_else(|| fail("no_library", "none of Quiet.md's folders opens")).map_err(|f| f.hint("`quiet ls` says why; or pass --library DIR"))?, None))
     }
 
-    /// Entry `e`'s path from 主页.
-    pub(crate) fn label(&self, e: &Entry) -> String { self.home_path(&e.top, &e.meta.rel) }
+    /// Entry `e`'s path, its top-level folder first.
+    pub(crate) fn label(&self, e: &Entry) -> String { self.full_path(&e.top, &e.meta.rel) }
 
-    /// `ambiguous` for several entries matching `s`, each by its path from 主页.
+    /// `ambiguous` for several entries matching `s`, each by its path (its top-level folder first).
     fn ambiguous(&self, what: &str, s: &str, many: &[&Entry]) -> crate::fail::Fail {
         let list = many.iter().map(|e| self.label(e)).collect::<Vec<_>>().join(", ");
-        fail("ambiguous", format!("{} {what} match {s:?}: {list}", many.len())).hint("pass the path from 主页 (the top-level folder first), or the document's id")
+        fail("ambiguous", format!("{} {what} match {s:?}: {list}", many.len())).hint("pass the full path (the top-level folder first), or the document's id")
     }
 
     fn docs_list(&self) -> impl Iterator<Item = &Entry> + Clone { self.entries.iter().filter(|e| e.meta.folder.is_none() && !e.meta.local()) }
@@ -274,8 +274,8 @@ impl Session {
         let s = spec.trim().trim_start_matches("./").trim_start_matches('/');
         // An id finds its document in whichever top-level folder it is (W14).
         if let Some(e) = self.docs_list().find(|e| e.id == s) { return Ok(e.id.clone()); }
-        // A path from 主页: in that top-level folder.
-        if let Some((k, rest)) = self.split_home(spec)? {
+        // A full path: in that top-level folder.
+        if let Some((k, rest)) = self.split_top(spec)? {
             if rest.is_empty() { return Err(fail("not_a_document", format!("{s:?} is a top-level folder")).hint(format!("`quiet ls {s}` lists what is in it"))); }
             match match_docs(self.docs_list().filter(|e| e.top == k), &rest) {
                 Ok(Some(e)) => return Ok(e.id.clone()),
@@ -304,8 +304,8 @@ impl Session {
         let s = spec.trim().trim_start_matches("./").trim_start_matches('/');
         let docs = || self.all.iter().filter(|e| e.meta.folder.is_none() && !e.meta.local());
         if let Some(e) = docs().find(|e| e.id == s) { return Ok(e.id.clone()); }
-        // A path from 主页 names its top-level folder.
-        if let Ok(Some((k, rest))) = self.split_home(s) && !rest.is_empty() && let Ok(Some(e)) = match_docs(docs().filter(|e| e.top == k), &rest) { return Ok(e.id.clone()); }
+        // A full path names its top-level folder.
+        if let Ok(Some((k, rest))) = self.split_top(s) && !rest.is_empty() && let Ok(Some(e)) = match_docs(docs().filter(|e| e.top == k), &rest) { return Ok(e.id.clone()); }
         match match_docs(docs().filter(|e| e.top == top), s) {
             Ok(Some(e)) => return Ok(e.id.clone()),
             Err(many) => return Err(self.ambiguous("documents", s, &many)),
@@ -314,7 +314,7 @@ impl Session {
         // Each other top-level folder on its own: a match in more than one is ambiguous,
         // however closely each matches.
         let mut hits: Vec<&Entry> = vec![];
-        for r in self.ws.folders.iter().filter(|r| r.key != top) {
+        for r in self.tops.folders.iter().filter(|r| r.key != top) {
             match match_docs(docs().filter(|e| e.top == r.key), s) { Ok(Some(e)) => hits.push(e), Err(many) => hits.extend(many), Ok(None) => {} }
         }
         match hits.as_slice() {
@@ -347,7 +347,7 @@ impl Session {
         named.retain(|e| e.top == top);
         match named.len() {
             1 => Ok(Some(named[0].id.clone())),
-            0 => Err(fail("not_found", format!("no folder {:?}", self.home_path(top, s))).hint("`quiet ls -r --kind folder` lists folders; `quiet mkdir` makes one")),
+            0 => Err(fail("not_found", format!("no folder {:?}", self.full_path(top, s))).hint("`quiet ls -r --kind folder` lists folders; `quiet mkdir` makes one")),
             _ => Err(self.ambiguous("folders", s, &named)),
         }
     }
@@ -492,7 +492,7 @@ impl Session {
                 let top = self.docs[i].top.clone();
                 // Within its top-level folder: each is a library of its own (its 回收站, its versions).
                 let folder = match self.locate(arg(a, "folder"))? {
-                    None => return Err(fail("bad_args", "a document goes in a top-level folder, not on 主页 itself").hint(format!("move it to its top: `quiet mv … {}`", self.top_name(&top)))),
+                    None => return Err(fail("bad_args", "a document goes in a top-level folder, not beside them").hint(format!("move it to its top: `quiet mv … {}`", self.top_name(&top)))),
                     Some((k, f)) if k == top => f,
                     Some(_) => return Err(fail("cross_folder", format!("{} is in {}; that folder is in another top-level folder", self.docs[i].path, self.top_name(&top))).hint("moving between top-level folders is not supported yet: create the document there (`quiet read` then `quiet new --in`) and `quiet rm` this one")),
                 };
@@ -532,15 +532,15 @@ impl Session {
 
     pub(crate) fn saved_id(&self, i: usize) -> R<String> { self.docs[i].id.clone().ok_or_else(|| fail("not_yet", "this document is created when the script ends; move or rename it in the next run")) }
 
-    /// A folder's contents by their paths from 主页; no folder (or `/`):
-    /// the top-level folders on 主页, whether they open or not.
+    /// A folder's contents by their full paths; no folder (or `/`):
+    /// the top-level folders, whether they open or not.
     fn ls(&mut self, a: &Value) -> R<Value> {
         let (deep, kind) = (flag(a, "recursive"), arg(a, "kind"));
         let at = self.locate(arg(a, "folder"))?;
         let mut tops: Vec<Value> = vec![];
         if at.is_none() && !self.alone && kind.is_none_or(|k| k == "folder") {
-            let first = self.ws.first().map(|r| r.key.clone());
-            for r in self.ws.folders.iter_mut() {
+            let first = self.tops.first().map(|r| r.key.clone());
+            for r in self.tops.folders.iter_mut() {
                 let docs = r.store.as_mut().map(|s| s.list().iter().filter(|e| e.meta.folder.is_none() && !e.meta.local()).count());
                 let mut v = json!({ "path": r.name(), "kind": "folder", "top": true, "dir": r.path.display().to_string(), "key": r.key, "available": r.store.is_some() });
                 match (docs, &r.error) {
@@ -557,7 +557,7 @@ impl Session {
             .filter(|e| { let rel = e.meta.rel.trim_end_matches('/'); let rest = if base.is_empty() { Some(rel) } else { rel.strip_prefix(&format!("{base}/")) }; rest.is_some_and(|r| !r.is_empty() && (deep || !r.contains('/'))) })
             .filter(|e| kind.is_none_or(|k| k == kind_of(e))).collect();
         // One top-level folder after another, in the sidebar's order.
-        let order = |e: &Entry| self.ws.folders.iter().position(|r| r.key == e.top).unwrap_or(0);
+        let order = |e: &Entry| self.tops.folders.iter().position(|r| r.key == e.top).unwrap_or(0);
         out.sort_by(|a, b| (order(a), a.meta.folder.is_none(), &a.meta.rel).cmp(&(order(b), b.meta.folder.is_none(), &b.meta.rel)));
         let mut list = tops;
         list.extend(out.iter().map(|e| {
@@ -812,13 +812,13 @@ impl Session {
             Some(k) => return Err(fail("bad_args", format!("kind {k:?}: a new file is a doc, md, board or table"))),
         };
         // A folder made earlier in this run exists only by its path until commit.
-        let made = self.pending.iter().find_map(|p| match p { Pending::Mkdir { top, name, folder: f } if folder.as_deref().map(|s| s.trim_matches('/')) == Some(&self.home_path(top, &join(&self.folder_rel(f.as_deref()), name))) => Some((top.clone(), join(&self.folder_rel(f.as_deref()), name))), _ => None });
+        let made = self.pending.iter().find_map(|p| match p { Pending::Mkdir { top, name, folder: f } if folder.as_deref().map(|s| s.trim_matches('/')) == Some(&self.full_path(top, &join(&self.folder_rel(f.as_deref()), name))) => Some((top.clone(), join(&self.folder_rel(f.as_deref()), name))), _ => None });
         let (top, base) = match made {
             Some((top, rel)) => (top, rel),
             None => { let (top, f) = self.landing(folder.as_deref())?; let base = self.folder_rel(f.as_deref()); (top, base) }
         };
         let ext = match kind { "md" => "md", "board" => "excalidraw", "table" => "sqlite", _ => "xml" };
-        let path = self.home_path(&top, &join(&base, &format!("{}.{ext}", fdl_core::store::file_name_for(&title))));
+        let path = self.full_path(&top, &join(&base, &format!("{}.{ext}", fdl_core::store::file_name_for(&title))));
         let folder = Some(base).filter(|b| !b.is_empty());
         if kind == "table" {
             // Columns from a CSV (its first row names them), or just their names.
@@ -845,7 +845,7 @@ impl Session {
     fn mkdir(&mut self, a: &Value) -> R<Value> {
         let name = need(a, "name")?.trim().to_string();
         let (top, f) = self.landing(arg(a, "folder"))?;
-        let path = self.home_path(&top, &join(&self.folder_rel(f.as_deref()), &fdl_core::store::file_name_for(&name)));
+        let path = self.full_path(&top, &join(&self.folder_rel(f.as_deref()), &fdl_core::store::file_name_for(&name)));
         self.pending.push(Pending::Mkdir { top, name, folder: f });
         Ok(json!({ "path": path, "mkdir": true }))
     }
@@ -890,9 +890,9 @@ impl Session {
             }
         }
         // Each top-level folder's assets against its own documents.
-        let tops: Vec<String> = self.ws.folders.iter().filter(|r| r.store.is_some()).map(|r| r.key.clone()).collect();
+        let tops: Vec<String> = self.tops.folders.iter().filter(|r| r.store.is_some()).map(|r| r.key.clone()).collect();
         for top in tops {
-            let assets = self.home_path(&top, fdl_core::store::ASSETS);
+            let assets = self.full_path(&top, fdl_core::store::ASSETS);
             match Store::unused_assets_at(self.top_dir(&top), live.remove(&top).unwrap_or_default(), vec![]) {
                 Ok(list) => for (name, size) in list { issues.push(json!({ "path": format!("{assets}/{name}"), "code": "unused_asset", "message": format!("not used by any document ({size} bytes)") })); },
                 Err(e) => issues.push(json!({ "path": assets, "code": "assets_unchecked", "message": format!("{e:#}") })),
@@ -908,7 +908,7 @@ impl Session {
     pub fn commit(&mut self, dry: bool) -> R<Value> {
         let mut report = vec![];
         for d in self.docs.iter().filter(|d| d.dirty && d.id.is_some()) {
-            let file = lib_in(&mut self.ws, &d.top)?.file_path(d.id.as_deref().unwrap()).ok_or_else(|| fail("conflict", format!("{} is gone", d.path)))?;
+            let file = lib_in(&mut self.tops, &d.top)?.file_path(d.id.as_deref().unwrap()).ok_or_else(|| fail("conflict", format!("{} is gone", d.path)))?;
             if std::fs::read(&file).ok().as_deref() != Some(&d.disk[..]) {
                 return Err(fail("conflict", format!("{} changed on disk while this ran; nothing was written", d.path)).hint("read it again and redo the edit"));
             }
@@ -931,7 +931,7 @@ impl Session {
         for i in 0..self.docs.len() {
             if !(self.docs[i].dirty && self.docs[i].id.is_some()) { continue; }
             let id = self.docs[i].id.clone().unwrap();
-            let store = lib_in(&mut self.ws, &self.docs[i].top)?;
+            let store = lib_in(&mut self.tops, &self.docs[i].top)?;
             if self.docs[i].keep_version { let _ = store.save_version_now(&id); }
             store.save(&id, &self.docs[i].doc).map_err(|e| fail("io", format!("{}: {e:#}", self.docs[i].path)))?;
             let disk = store.file_path(&id).and_then(|f| std::fs::read(f).ok()).unwrap_or_default();
@@ -948,7 +948,7 @@ impl Session {
                     let top = self.docs[i].top.clone();
                     let parent = self.folder_in(&top, folder.as_deref().unwrap_or(""))?;
                     let d = &self.docs[i];
-                    let store = lib_in(&mut self.ws, &top)?;
+                    let store = lib_in(&mut self.tops, &top)?;
                     let id = match d.kind {
                         "md" => store.create_markdown_in(&d.doc, "", parent.as_deref()),
                         "board" => store.create_board_in(&d.title, fdl_core::whiteboard::board_of(&d.doc).unwrap_or(&Default::default()), parent.as_deref()),
@@ -975,7 +975,7 @@ impl Session {
                 Pending::Mkdir { top, name, folder } => {
                     let id = self.lib(&top)?.create_folder(&name, folder.as_deref())?;
                     self.refresh();
-                    report.push(json!({ "path": self.home_path(&top, &self.folder_rel(Some(&id))), "action": "folder created" }));
+                    report.push(json!({ "path": self.full_path(&top, &self.folder_rel(Some(&id))), "action": "folder created" }));
                 }
                 Pending::Rename { id, title } => {
                     let from = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
@@ -1007,7 +1007,7 @@ impl Session {
                     let id = crate::library::import_file(self.lib(&top)?, &dir, &path, parent.as_deref())?;
                     self.refresh();
                     let rel = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
-                    report.push(json!({ "path": self.home_path(&top, &rel), "action": "imported", "source": path.display().to_string() }));
+                    report.push(json!({ "path": self.full_path(&top, &rel), "action": "imported", "source": path.display().to_string() }));
                 }
                 Pending::RestoreTable { id, version } => {
                     self.lib_of(&id)?.restore_version(&id, &version).map_err(|e| fail("io", format!("{e:#}")))?;
@@ -1021,8 +1021,8 @@ impl Session {
 
     /// `path` inside one of the top-level folders, as that top-level folder sees it.
     fn in_top(&self, path: &Path) -> String {
-        match self.ws.folders.iter().find_map(|r| path.strip_prefix(&r.path).ok().map(|p| (r.key.clone(), p))) {
-            Some((k, p)) => self.home_path(&k, &p.to_string_lossy().replace('\\', "/")),
+        match self.tops.folders.iter().find_map(|r| path.strip_prefix(&r.path).ok().map(|p| (r.key.clone(), p))) {
+            Some((k, p)) => self.full_path(&k, &p.to_string_lossy().replace('\\', "/")),
             None => path.to_string_lossy().replace('\\', "/"),
         }
     }
@@ -1031,13 +1031,13 @@ impl Session {
         let rel = |id: &str| self.entry_by_id(id).map(|e| self.label(e)).unwrap_or_default();
         Some(match p {
             Pending::Create { .. } => return None,
-            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.home_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据表" }),
-            Pending::Mkdir { top, name, folder } => json!({ "path": self.home_path(top, &join(&self.folder_rel(folder.as_deref()), name)), "action": "would create folder" }),
+            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.full_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据表" }),
+            Pending::Mkdir { top, name, folder } => json!({ "path": self.full_path(top, &join(&self.folder_rel(folder.as_deref()), name)), "action": "would create folder" }),
             Pending::Rename { id, title } => json!({ "path": rel(id), "action": "would rename", "to": title }),
-            Pending::Move { id, folder } => json!({ "path": rel(id), "action": "would move", "to": self.entry_by_id(id).map(|e| self.home_path(&e.top, &self.folder_rel(folder.as_deref()))).unwrap_or_default() }),
+            Pending::Move { id, folder } => json!({ "path": rel(id), "action": "would move", "to": self.entry_by_id(id).map(|e| self.full_path(&e.top, &self.folder_rel(folder.as_deref()))).unwrap_or_default() }),
             Pending::Trash { id } => json!({ "path": rel(id), "action": "would move to trash" }),
             Pending::Untrash { title, .. } => json!({ "path": title, "action": "would restore from trash" }),
-            Pending::Import { top, path, folder } => json!({ "path": path.display().to_string(), "action": "would import", "to": self.home_path(top, folder.as_deref().unwrap_or("")) }),
+            Pending::Import { top, path, folder } => json!({ "path": path.display().to_string(), "action": "would import", "to": self.full_path(top, folder.as_deref().unwrap_or("")) }),
             Pending::RestoreTable { id, version } => json!({ "path": rel(id), "action": "would restore version", "to": version }),
         })
     }

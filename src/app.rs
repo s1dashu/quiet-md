@@ -470,7 +470,7 @@ pub struct Workspace {
     /// The first-launch pages laid over the window again (⌘⌥⇧O, Settings › About).
     pub onboarding: Option<Entity<crate::onboarding::Onboarding>>,
     pub view: View,
-    pub home: crate::home::Home,
+    pub folder_page: crate::folder_page::FolderPage,
     pub settings_scroll: ScrollHandle,
     /// 回收站 rows, refreshed when the page opens or changes.
     pub trash: Vec<crate::store::TrashEntry>,
@@ -598,7 +598,7 @@ impl Workspace {
                     if let Some(ed) = this.editor.clone() { ed.update(cx, |e, cx| e.files_changed(cx)); }
                     crate::update::check_if_stale(cx); crate::usage::opened(); cx.notify();
                 }
-                else if !this.store.file_task_busy() { this.cancel_home_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); if !this.tree_writes_pending() { this.flush(cx); } }
+                else if !this.store.file_task_busy() { this.cancel_card_drag(cx); this.end_folder_drag(true, cx); this.cancel_shortcut_recording(cx); if !this.tree_writes_pending() { this.flush(cx); } }
             }),
             cx.subscribe_in(&search, window, |this, _, ev: &TextFieldEvent, window, cx| {
                 match ev {
@@ -761,7 +761,7 @@ impl Workspace {
             dialog_focus: crate::design::DialogFocus::new(cx),
             onboarding: None,
             view: View::Doc,
-            home: Default::default(),
+            folder_page: Default::default(),
             settings_scroll: ScrollHandle::new(),
             trash: vec![],
             trash_menu: None,
@@ -792,10 +792,10 @@ impl Workspace {
             _subs: subs,
         };
         ws.sort();
-        ws.load_home();
+        ws.load_page_view();
         // With no folder open the window shows the empty state; only a quick note
         // window starts a document of its own. The main window returns to the
-        // document read last (#234), or the home page when that is set; the
+        // document read last (#234), or the default folder's page when that is set; the
         // site's live demo always starts on the default folder, so visitors see the whole
         // notebook first.
         match document {
@@ -843,7 +843,7 @@ impl Workspace {
     pub(crate) fn loaded(&mut self, entries: Vec<Entry>, window: &mut Window, cx: &mut Context<Self>) {
         self.entries.set(entries);
         self.sort();
-        self.load_home();
+        self.load_page_view();
         self.load_cover = matches!(self.view, View::Default | View::Folder);
         if std::mem::take(&mut self.start_later) && self.current.is_none() && self.view == View::Default { self.open_start(window, cx); }
         self.show_warnings(cx);
@@ -2029,7 +2029,7 @@ impl Workspace {
 
 /// Header and action group share an 8px top/right inset.
 pub const HEADER_H: f32 = 48.;
-/// The narrowest the main pane (document, Home, settings) gets and the
+/// The narrowest the main pane (document, folder page, settings) gets and the
 /// window's minimum width: a narrower window hides the sidebar.
 pub const DOC_MIN_W: f32 = 480.;
 pub(crate) const HEADER_ACTIONS_H: f32 = 32.;
@@ -2098,7 +2098,7 @@ impl Render for Workspace {
         let resize = self.sidebar_open.then(|| self.render_resize_handle(window, cx));
         let resize_overlay = self.render_resize_overlay(cx);
         let folder_drag_overlay = self.render_folder_drag_overlay(cx);
-        let home_drag_overlay = self.render_home_drag_overlay(window, cx);
+        let card_drag_overlay = self.render_card_drag_overlay(window, cx);
         let file_drop = self.render_file_drop(window, cx);
         let create_menu = self.render_create_menu(cx);
         let crumb_menu = self.render_crumb_menu(cx);
@@ -2110,7 +2110,7 @@ impl Render for Workspace {
         self.dialog_focus.sync(self.export_md.is_some() || self.doc_info.is_some() || self.import_apps.is_some(), window, cx);
         let confirm = self.render_confirm(cx);
         let trash_menu = self.render_trash_menu(cx);
-        let home_menus = self.render_home_menus(cx);
+        let page_menus = self.render_page_menus(cx);
         let theme_menu = self.render_theme_menu(cx);
         let lang_menu = self.render_lang_menu(cx);
         let pref_menu = self.render_pref_menu(cx);
@@ -2295,8 +2295,8 @@ impl Render for Workspace {
                 if ev.keystroke.key == "escape" && w.history.is_some() {
                     w.close_history(cx); cx.stop_propagation(); return;
                 }
-                if ev.keystroke.key == "escape" && w.has_home_drag() {
-                    w.cancel_home_drag(cx); cx.stop_propagation(); return;
+                if ev.keystroke.key == "escape" && w.has_card_drag() {
+                    w.cancel_card_drag(cx); cx.stop_propagation(); return;
                 }
                 if ev.keystroke.key == "escape" && w.folder_drag.active.is_some() {
                     w.end_folder_drag(true, cx); cx.stop_propagation(); return;
@@ -2341,7 +2341,7 @@ impl Render for Workspace {
             .children(mode_menu)
             .children(doc_info)
             .children(trash_menu)
-            .children(home_menus)
+            .children(page_menus)
             .children(theme_menu)
             .children(lang_menu)
             .children(pref_menu)
@@ -2356,7 +2356,7 @@ impl Render for Workspace {
             .when(self.file_history.busy || self.store.file_task_busy(), |d| d.child(deferred(div().id("file-history-pending").absolute().inset_0().occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())).with_priority(20)))
-            .children(home_drag_overlay)
+            .children(card_drag_overlay)
             .children(create_menu)
             .children(crumb_menu)
             .children(forced_update)

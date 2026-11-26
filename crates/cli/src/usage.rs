@@ -44,7 +44,7 @@ fn blocked() -> Option<&'static str> {
     if env("CI") { return Some("running in CI"); }
     // The app's 设置 › 通用 › 匿名使用统计 off; untouched, it follows
     // 自动检查更新 (off: the user wants the app to stay offline).
-    // 应用级设置 since 主页; before, the library's `.quiet/`.
+    // 应用级设置 since there are several top-level folders; before, the library's `.quiet/`.
     let prefs = [fdl_core::store::Store::settings_dir(), fdl_core::store::Store::legacy_dir().join(".quiet")].map(|d| d.join("preferences.json"));
     if let Some(p) = prefs.iter().find_map(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
         match p.get("usage_stats").and_then(Value::as_bool) {

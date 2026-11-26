@@ -33,7 +33,7 @@ impl Workspace {
             cx.notify();
         }
         // Over the sidebar, the page's own drop veil steps back.
-        if self.sidebar_drop.is_some() && let Some(d) = self.home.folders.file_drop.as_mut() { d.leave(); cx.notify(); }
+        if self.sidebar_drop.is_some() && let Some(d) = self.folder_page.folders.file_drop.as_mut() { d.leave(); cx.notify(); }
         self.sidebar_drop.is_some()
     }
 
@@ -59,7 +59,7 @@ impl Workspace {
     /// The place a drop goes, for the dialog and the toast.
     pub(crate) fn drop_place(&self, target: &SidebarDropAt) -> String {
         target.parent.as_ref().and_then(|t| self.entries.iter().find(|e| &e.id == t)).map(|e| crate::settings::display_title(&e.title))
-            .unwrap_or_else(|| self.home_name())
+            .unwrap_or_else(|| self.front_top_name())
     }
 
     /// 导入 confirmed: bring it in where it was dropped.

@@ -1469,7 +1469,7 @@ impl Workspace {
         };
         div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::ui_family())
             // The document sidebar's header, 返回 where 添加文件夹 is: the toggle doesn't move.
-            .child(self.sidebar_header(crate::ui::header_icon("settings-back", "arrow-left").relative().child(self.home.track("settings-back")).tip(tr("返回", "Back"), Some("Esc"))
+            .child(self.sidebar_header(crate::ui::header_icon("settings-back", "arrow-left").relative().child(self.folder_page.track("settings-back")).tip(tr("返回", "Back"), Some("Esc"))
                 .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx))), cx))
             // The document sidebar's rhythm: 设置 sits where the first folder's heading does, a
             // row right under the bar, and the rows follow `ROW_GAP` apart.
@@ -2722,7 +2722,7 @@ mod localization_tests {
 
     #[test]
     fn user_titles_are_never_translation_keys() {
-        for title in ["主页", "收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
+        for title in ["收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
     }
 }
 

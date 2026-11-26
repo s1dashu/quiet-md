@@ -1,4 +1,4 @@
-//! 主页: the top-level folders the sidebar lists, all alike. Each is a library
+//! `TopFolders`: the top-level folders the sidebar lists, all alike. Each is a library
 //! of its own (`Store`, its `.quiet/` holding its index, settings, 回收站 and
 //! history); which folders are open is this computer's, in `folders.json`.
 //! See docs/design/workspaces.md.
@@ -81,7 +81,7 @@ pub enum RenameError {
 }
 
 #[derive(Default)]
-pub struct Home {
+pub struct TopFolders {
     pub folders: Vec<TopFolder>,
     /// Which top-level folder each id is in, as of the last `list`.
     owner: HashMap<String, String>,
@@ -98,7 +98,7 @@ fn canonical(p: &Path) -> PathBuf { plain(p.fs_canonicalize().unwrap_or_else(|_|
 
 use crate::time::now;
 
-impl Home {
+impl TopFolders {
     /// `folders.json`: beside the other things this computer keeps, or where
     /// `QUIET_MD_FOLDERS` says (test runs with several top-level folders, which must not
     /// touch this computer's list).
@@ -165,23 +165,23 @@ impl Home {
     /// `open`, each top-level folder's library opened by `open`: tools beside the app
     /// (the `quiet` CLI) open them as they are and leave crash copies alone.
     pub fn open_with(entries: Vec<TopFolderEntry>, fixed: bool, mut open: impl FnMut(&TopFolderEntry) -> Result<Store>) -> Self {
-        let mut ws = Home { fixed, ..Default::default() };
+        let mut tops = TopFolders { fixed, ..Default::default() };
         for e in entries {
             let store = open(&e);
-            ws.push(e.key, e.path, store);
+            tops.push(e.key, e.path, store);
         }
-        ws
+        tops
     }
 
     /// The top-level folders as last left, opened.
     pub fn load() -> Self {
         let (entries, fixed) = Self::entries();
         let first = !fixed && !Self::list_file().fs_exists();
-        let ws = Self::open(entries, fixed);
+        let tops = Self::open(entries, fixed);
         // The first run here, or the first after the rename: the list is written under its name now.
         // The old file stays as it was: a way back, and what older builds read.
-        if first && (!ws.folders.is_empty() || Self::old_list_file().is_some_and(|p| p.fs_exists())) { let _ = ws.save(); }
-        ws
+        if first && (!tops.folders.is_empty() || Self::old_list_file().is_some_and(|p| p.fs_exists())) { let _ = tops.save(); }
+        tops
     }
 
     fn push(&mut self, key: String, path: PathBuf, store: Result<Store>) {
@@ -394,7 +394,7 @@ mod tests {
     use crate::model::{Document, RichText};
 
     fn dir(name: &str) -> PathBuf {
-        let d = crate::vfs::temp_dir().join(format!("quiet-ws-{name}-{}", uuid::Uuid::new_v4()));
+        let d = crate::vfs::temp_dir().join(format!("quiet-tops-{name}-{}", uuid::Uuid::new_v4()));
         crate::vfs::create_dir_all(&d).unwrap();
         d
     }
@@ -405,51 +405,51 @@ mod tests {
     fn folders_are_libraries_of_their_own() {
         let (a, b) = (dir("a"), dir("b"));
         crate::vfs::write(b.join("note.md"), "# note\n").unwrap();
-        let mut ws = Home { fixed: true, ..Default::default() };
-        let ka = ws.add(&a).unwrap();
-        let kb = ws.add(&b).unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ka = tops.add(&a).unwrap();
+        let kb = tops.add(&b).unwrap();
         assert!(a.join(".quiet/format.json").fs_is_file() && b.join(".quiet/format.json").fs_is_file(), "every top-level folder has its .quiet/");
-        let made = ws.store(&ka).unwrap().create_from(&doc("in a")).unwrap();
-        let list = ws.list();
+        let made = tops.store(&ka).unwrap().create_from(&doc("in a")).unwrap();
+        let list = tops.list();
         assert_eq!(list.iter().find(|e| e.id == made).unwrap().top, ka);
         assert_eq!(list.iter().find(|e| e.title == "note").unwrap().top, kb);
-        assert_eq!(ws.owner(&made).as_deref(), Some(ka.as_str()));
+        assert_eq!(tops.owner(&made).as_deref(), Some(ka.as_str()));
         // Nesting: the same folder, one inside, one around.
-        assert_eq!(ws.add(&a), Err(AddError::Open(ka.clone())));
+        assert_eq!(tops.add(&a), Err(AddError::Open(ka.clone())));
         crate::vfs::create_dir_all(a.join("sub")).unwrap();
-        assert_eq!(ws.add(&a.join("sub")), Err(AddError::Inside(ka.clone())));
-        assert!(matches!(ws.add(a.parent().unwrap()), Err(AddError::Holds(_))));
+        assert_eq!(tops.add(&a.join("sub")), Err(AddError::Inside(ka.clone())));
+        assert!(matches!(tops.add(a.parent().unwrap()), Err(AddError::Holds(_))));
         // Removed: the folder stays, and comes back as it was.
-        ws.remove(&ka).unwrap();
+        tops.remove(&ka).unwrap();
         assert!(a.join("in a.xml").fs_is_file() || a.join("in a.md").fs_is_file());
-        let back = ws.add(&a).unwrap();
-        assert!(ws.list().iter().any(|e| e.id == made && e.top == back), "same id after reopening");
+        let back = tops.add(&a).unwrap();
+        assert!(tops.list().iter().any(|e| e.id == made && e.top == back), "same id after reopening");
     }
 
     #[test]
     fn a_folder_gone_from_the_disk_is_never_written_again() {
         let (a, b) = (dir("gone"), dir("stays"));
-        let mut ws = Home { fixed: true, ..Default::default() };
-        let ka = ws.add(&a).unwrap();
-        let kb = ws.add(&b).unwrap();
-        let made = ws.store(&ka).unwrap().create_from(&doc("in a")).unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ka = tops.add(&a).unwrap();
+        let kb = tops.add(&b).unwrap();
+        let made = tops.store(&ka).unwrap().create_from(&doc("in a")).unwrap();
         // Moved away while open (in the Finder): the window finds it gone and closes its library.
         let moved = a.with_file_name(format!("{}-moved", a.file_name().unwrap().to_string_lossy()));
         crate::vfs::rename(&a, &moved).unwrap();
-        ws.lose(&ka, "gone".into());
-        assert!(ws.store(&ka).is_none(), "no library left to write with");
+        tops.lose(&ka, "gone".into());
+        assert!(tops.store(&ka).is_none(), "no library left to write with");
         // Whatever the app does meanwhile, nothing appears at the old path, not even an empty .quiet/.
-        let _ = ws.list();
-        ws.save().unwrap();
-        ws.store(&kb).unwrap().create_from(&doc("in b")).unwrap();
-        ws.retry(&ka);
-        assert!(ws.store(&ka).is_none() && !a.fs_exists(), "the folder is not made anew at its old path");
-        assert!(!ws.list().iter().any(|e| e.top == ka), "its documents are not listed");
+        let _ = tops.list();
+        tops.save().unwrap();
+        tops.store(&kb).unwrap().create_from(&doc("in b")).unwrap();
+        tops.retry(&ka);
+        assert!(tops.store(&ka).is_none() && !a.fs_exists(), "the folder is not made anew at its old path");
+        assert!(!tops.list().iter().any(|e| e.top == ka), "its documents are not listed");
         // Back where it was: it opens again, as it was.
         crate::vfs::rename(&moved, &a).unwrap();
-        ws.retry(&ka);
-        assert!(ws.store(&ka).is_some());
-        assert!(ws.list().iter().any(|e| e.id == made && e.top == ka));
+        tops.retry(&ka);
+        assert!(tops.store(&ka).is_some());
+        assert!(tops.list().iter().any(|e| e.id == made && e.top == ka));
     }
 
     #[test]
@@ -465,36 +465,36 @@ mod tests {
         crate::vfs::create_dir_all(b.join(".quiet").join(&own)).unwrap();
         crate::vfs::copy(a.join(".quiet/format.json"), b.join(".quiet/format.json")).unwrap();
         for e in crate::vfs::read_dir(a.join(".quiet").join(&own)).unwrap().flatten() { crate::vfs::copy(e.path(), b.join(".quiet").join(&own).join(e.file_name())).unwrap(); }
-        let mut ws = Home { fixed: true, ..Default::default() };
-        ws.add(&a).unwrap();
-        ws.add(&b).unwrap();
-        let list = ws.list();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        tops.add(&a).unwrap();
+        tops.add(&b).unwrap();
+        let list = tops.list();
         let ids: HashSet<&String> = list.iter().map(|e| &e.id).collect();
         assert_eq!(ids.len(), list.len(), "no id in two top-level folders");
-        let (la, lb) = (ws.folders[0].store.as_ref().unwrap().library_id(), ws.folders[1].store.as_ref().unwrap().library_id());
+        let (la, lb) = (tops.folders[0].store.as_ref().unwrap().library_id(), tops.folders[1].store.as_ref().unwrap().library_id());
         assert!(!la.is_empty() && la != lb, "the copy is a library of its own");
     }
 
     #[test]
     fn quick_notes_go_to_the_chosen_folder_while_it_is_open() {
         let (a, b) = (dir("qa"), dir("qb"));
-        let mut ws = Home { fixed: true, ..Default::default() };
-        let ka = ws.add(&a).unwrap();
-        let kb = ws.add(&b).unwrap();
-        let at = |ws: &Home, chosen: &str| ws.quick_note_folder(chosen).map(|r| r.key.clone());
-        assert_eq!(at(&ws, ""), Some(ka.clone()), "nothing chosen: the first top-level folder");
-        assert_eq!(at(&ws, &kb), Some(kb.clone()));
-        assert_eq!(at(&ws, "gone"), Some(ka.clone()), "a top-level folder no longer listed: the first");
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ka = tops.add(&a).unwrap();
+        let kb = tops.add(&b).unwrap();
+        let at = |tops: &TopFolders, chosen: &str| tops.quick_note_folder(chosen).map(|r| r.key.clone());
+        assert_eq!(at(&tops, ""), Some(ka.clone()), "nothing chosen: the first top-level folder");
+        assert_eq!(at(&tops, &kb), Some(kb.clone()));
+        assert_eq!(at(&tops, "gone"), Some(ka.clone()), "a top-level folder no longer listed: the first");
         // The chosen top-level folder can't be opened (an unplugged disk): the first that can.
-        ws.folders[1].store = None;
-        assert_eq!(at(&ws, &kb), Some(ka.clone()));
+        tops.folders[1].store = None;
+        assert_eq!(at(&tops, &kb), Some(ka.clone()));
         // The first can't either: the next one that can.
-        ws.folders[1].store = Some(Store::open_top_folder(&b).unwrap());
-        ws.folders[0].store = None;
-        assert_eq!(at(&ws, &ka), Some(kb.clone()));
-        ws.folders[1].store = None;
-        assert_eq!(at(&ws, &kb), None, "none open: the empty state");
-        assert!(Home::default().quick_note_folder("").is_none());
+        tops.folders[1].store = Some(Store::open_top_folder(&b).unwrap());
+        tops.folders[0].store = None;
+        assert_eq!(at(&tops, &ka), Some(kb.clone()));
+        tops.folders[1].store = None;
+        assert_eq!(at(&tops, &kb), None, "none open: the empty state");
+        assert!(TopFolders::default().quick_note_folder("").is_none());
     }
 
     #[test]
@@ -511,11 +511,11 @@ mod tests {
         let (home, other) = (dir("started-on").join("lib"), dir("added").join("vault"));
         crate::vfs::create_dir_all(&home).unwrap();
         crate::vfs::create_dir_all(&other).unwrap();
-        let mut ws = Home { fixed: true, ..Default::default() };
-        let (kh, ko) = (ws.add(&home).unwrap(), ws.add(&other).unwrap());
-        assert!(!ws.can_rename_beside(&kh, Some(&home)) && !ws.can_rename_beside(&kh, Some(&home.join("."))), "the run's own folder, however written");
-        assert!(ws.can_rename_beside(&ko, Some(&home)), "a folder added in the run renames");
-        assert!(ws.can_rename_beside(&kh, None) && ws.can_rename_beside(&ko, None), "an ordinary launch renames both");
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let (kh, ko) = (tops.add(&home).unwrap(), tops.add(&other).unwrap());
+        assert!(!tops.can_rename_beside(&kh, Some(&home)) && !tops.can_rename_beside(&kh, Some(&home.join("."))), "the run's own folder, however written");
+        assert!(tops.can_rename_beside(&ko, Some(&home)), "a folder added in the run renames");
+        assert!(tops.can_rename_beside(&kh, None) && tops.can_rename_beside(&ko, None), "an ordinary launch renames both");
     }
 
     #[test]
@@ -523,32 +523,32 @@ mod tests {
         // In a folder of their own: the new names are looked for beside them.
         let (a, b) = (dir("ra").join("a"), dir("rb"));
         crate::vfs::create_dir_all(&a).unwrap();
-        let mut ws = Home { fixed: true, ..Default::default() };
-        let ka = ws.add(&a).unwrap();
-        ws.add(&b).unwrap();
-        let id = ws.store(&ka).unwrap().create_from(&doc("kept")).unwrap();
-        ws.store(&ka).unwrap().touch(&id);
-        ws.list();
-        let to = ws.rename(&ka, " renamed/root ").unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ka = tops.add(&a).unwrap();
+        tops.add(&b).unwrap();
+        let id = tops.store(&ka).unwrap().create_from(&doc("kept")).unwrap();
+        tops.store(&ka).unwrap().touch(&id);
+        tops.list();
+        let to = tops.rename(&ka, " renamed/root ").unwrap();
         assert_eq!(to.file_name().unwrap().to_str(), Some(crate::store::file_name_for("renamed/root").as_str()), "the same name rules as a document's file");
         assert_ne!(to.file_name().unwrap(), "renamed/root");
         assert!(!a.fs_exists() && to.join(".quiet/format.json").fs_is_file(), "the folder itself moved");
-        assert_eq!(ws.folder(&ka).unwrap().path, to);
-        assert_eq!(ws.store(&ka).unwrap().top_dir(), to.as_path());
-        let list = ws.list();
+        assert_eq!(tops.folder(&ka).unwrap().path, to);
+        assert_eq!(tops.store(&ka).unwrap().top_dir(), to.as_path());
+        let list = tops.list();
         let e = list.iter().find(|e| e.id == id).expect("same id after the rename");
         assert_eq!((e.top.as_str(), e.title.as_str()), (ka.as_str(), "kept"));
         assert!(e.meta.opened > 0, "this computer's 最近打开 still found by the key");
-        assert!(ws.store_of(&id).unwrap().load(&id).is_ok());
+        assert!(tops.store_of(&id).unwrap().load(&id).is_ok());
         // Taken by a sibling, empty, or not open: the name stays.
         crate::vfs::create_dir_all(to.with_file_name("other")).unwrap();
-        assert_eq!(ws.rename(&ka, "other"), Err(RenameError::Taken("other".into())));
-        assert_eq!(ws.rename(&ka, "  "), Err(RenameError::Empty));
-        assert_eq!(ws.rename("nope", "x"), Err(RenameError::Unavailable));
-        assert_eq!(ws.folder(&ka).unwrap().path, to);
+        assert_eq!(tops.rename(&ka, "other"), Err(RenameError::Taken("other".into())));
+        assert_eq!(tops.rename(&ka, "  "), Err(RenameError::Empty));
+        assert_eq!(tops.rename("nope", "x"), Err(RenameError::Unavailable));
+        assert_eq!(tops.folder(&ka).unwrap().path, to);
         // A change of case only is a rename of the same folder.
-        let upper = ws.rename(&ka, &to.file_name().unwrap().to_string_lossy().to_uppercase()).unwrap();
-        assert!(upper != to && upper.fs_is_dir() && ws.folder(&ka).unwrap().path == upper);
+        let upper = tops.rename(&ka, &to.file_name().unwrap().to_string_lossy().to_uppercase()).unwrap();
+        assert!(upper != to && upper.fs_is_dir() && tops.folder(&ka).unwrap().path == upper);
     }
 
     #[test]
@@ -561,16 +561,16 @@ mod tests {
         s.recover_later(&doc("unsaved")).unwrap();
         drop(s);
         let key = new_key();
-        let mut ws = Home::open(vec![TopFolderEntry { key: key.clone(), path: a.clone(), bookmark: None, added: 0 }], true);
-        let s = ws.store(&key).unwrap();
+        let mut tops = TopFolders::open(vec![TopFolderEntry { key: key.clone(), path: a.clone(), bookmark: None, added: 0 }], true);
+        let s = tops.store(&key).unwrap();
         assert_eq!(s.key(), key);
         let list = s.list();
         assert!(list.iter().any(|e| e.title == "unsaved (recovered copy)"), "the recovery copy kept by path comes back");
         assert!(list.iter().find(|e| e.id == id).unwrap().meta.opened > 0, "最近打开 kept by path is found");
-        drop(ws);
+        drop(tops);
         // Taken over once: the next launch neither restores nor loses anything.
-        let mut ws = Home::open(vec![TopFolderEntry { key: key.clone(), path: a.clone(), bookmark: None, added: 0 }], true);
-        assert_eq!(ws.list().len(), 2);
+        let mut tops = TopFolders::open(vec![TopFolderEntry { key: key.clone(), path: a.clone(), bookmark: None, added: 0 }], true);
+        assert_eq!(tops.list().len(), 2);
         if let Some(d) = dirs::data_local_dir() { let _ = crate::vfs::remove_dir_all(d.join("quiet-md/recovery").join(&key)); }
     }
 
@@ -580,7 +580,7 @@ mod tests {
         let d = dir("old-list");
         let old = d.join("roots.json");
         crate::vfs::write(&old, r#"{"v":1,"roots":[{"key":"k1","path":"/tmp/a"}]}"#).unwrap();
-        let v = Home::read_list(&old).unwrap();
+        let v = TopFolders::read_list(&old).unwrap();
         assert_eq!((v.len(), v[0].key.as_str()), (1, "k1"));
     }
 
@@ -588,9 +588,9 @@ mod tests {
     fn a_missing_folder_is_listed_not_fatal() {
         let a = dir("gone");
         let entries = vec![TopFolderEntry { key: "k".into(), path: a.join("not-here"), bookmark: None, added: 0 }];
-        let mut ws = Home::open(entries, true);
-        assert!(ws.folders[0].store.is_none() && ws.folders[0].error.is_some());
+        let mut tops = TopFolders::open(entries, true);
+        assert!(tops.folders[0].store.is_none() && tops.folders[0].error.is_some());
         assert!(!a.join("not-here").fs_exists(), "never made anew");
-        assert!(ws.list().is_empty());
+        assert!(tops.list().is_empty());
     }
 }

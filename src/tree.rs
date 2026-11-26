@@ -30,7 +30,7 @@ impl<'a> Tree<'a> {
 
     /// 我的文档 ordered by the page list's setting (`order`), or — when it is
     /// not given — by the arrangement the user dragged into place.
-    pub fn with_order(entries: &'a [Entry], order: Option<crate::home::Order>) -> Self {
+    pub fn with_order(entries: &'a [Entry], order: Option<crate::folder_page::Order>) -> Self {
         // Only folders take children. Every step over all entries is one lookup in
         // this small table, not a set of every id: the tree is rebuilt each frame
         // the sidebar draws, and a vault of 15,000 notes made that 5 ms a frame.
@@ -131,7 +131,7 @@ impl<'a> Tree<'a> {
     }
 }
 
-/// What a sidebar row or a Home card shows of `e`: its links, reminders and body stay behind.
+/// What a sidebar row or a folder page's card shows of `e`: its links, reminders and body stay behind.
 pub(crate) fn face(e: &Entry) -> Entry {
     Entry { id: e.id.clone(), meta: e.meta.clone(), title: e.title.clone(), icon: e.icon.clone(), body: Default::default(),
         reminders: vec![], links: vec![], note: e.note.clone(), top: e.top.clone() }
@@ -347,7 +347,7 @@ impl Workspace {
                     .rounded(px(9.))
                     .bg(Theme::fill_hover_strong())
                     .child(icon("folder", 15., Theme::icon()))
-                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(self.home_name())),
+                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(self.front_top_name())),
             );
 
         let row = |key: String, selected: bool| {
@@ -503,12 +503,12 @@ mod tests {
     use super::Tree;
     use std::collections::{HashMap, HashSet};
     use crate::store::Entry;
-    use crate::home::{HomeSort, Order, SortDir};
+    use crate::folder_page::{PageSort, Order, SortDir};
     use crate::store::Meta;
 
     // The tree as it was built before #big-library-perf, to hold the faster one to.
     impl<'a> Tree<'a> {
-    fn old(entries: &'a [Entry], order: Option<crate::home::Order>) -> Self {
+    fn old(entries: &'a [Entry], order: Option<crate::folder_page::Order>) -> Self {
         let ids: HashSet<&str> = entries.iter().filter(|e| e.meta.folder.is_some()).map(|e| e.id.as_str()).collect();
         let parent = |e: &'a Entry| e.meta.parent.as_deref().filter(|p| ids.contains(p) && *p != e.id);
         let notes: HashMap<&str, &str> = entries.iter().filter_map(|e| Some((e.id.as_str(), e.note.as_deref()?))).collect();
@@ -593,8 +593,8 @@ mod tests {
     fn same_tree_as_before() {
         let mut seed = 7u64;
         let mut next = |n: u64| { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (seed >> 33) % n };
-        let orders = [None, Some(Order { field: HomeSort::Title, dir: SortDir::Asc, folders_first: true }),
-            Some(Order { field: HomeSort::Modified, dir: SortDir::Desc, folders_first: false })];
+        let orders = [None, Some(Order { field: PageSort::Title, dir: SortDir::Asc, folders_first: true }),
+            Some(Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: false })];
         for round in 0..300 {
             let n = 1 + next(60) as usize;
             let mut entries: Vec<Entry> = (0..n).map(|i| {

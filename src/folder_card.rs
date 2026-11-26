@@ -21,7 +21,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use web_time::Instant;
 
 /// The tab's share of a folder card's height: the folder's body is a document
-/// card's size, the tab rises above it (`home.rs` lowers the cards beside it).
+/// card's size, the tab rises above it (`folder_page.rs` lowers the cards beside it).
 pub(crate) const TAB: f32 = 0.06;
 /// Papers peeking out of a folder.
 const PAPERS: usize = 3;
@@ -31,10 +31,10 @@ const MINI_W: f32 = 110.;
 const MINI_H: f32 = MINI_W * 264. / 236.;
 
 #[derive(Default)]
-pub(crate) struct HomeFolders {
+pub(crate) struct FolderCards {
     fx: HashMap<String, FolderFx>,
     hovered: Option<String>,
-    pub(crate) drag: Option<HomeDrag>,
+    pub(crate) drag: Option<CardDrag>,
     /// Files dragged in from outside.
     pub(crate) file_drop: Option<FileDrop>,
     /// Last-frame window bounds of the folder and document cards, by entry id.
@@ -79,7 +79,7 @@ impl FolderFx {
     }
 }
 
-pub(crate) struct HomeDrag {
+pub(crate) struct CardDrag {
     id: String,
     start: Point<Pixels>,
     at: Point<Pixels>,
@@ -87,7 +87,7 @@ pub(crate) struct HomeDrag {
     /// Where on the card it was picked up (0–1), kept on the carried paper.
     grab: (f32, f32),
     /// The card's bounds when picked up; a cancelled drag flies back there.
-    home: Bounds<Pixels>,
+    origin: Bounds<Pixels>,
     /// The carried paper in window coordinates (x, y, w, h).
     rect: Spring<4>,
     /// The folder under the pointer: a drop puts the document inside.
@@ -261,7 +261,7 @@ fn glass(o: Point<Pixels>, p: &Pose, window: &mut Window) {
 impl Workspace {
     fn folder_papers(&self, id: &str, front: Option<&String>) -> (Vec<Entry>, usize) {
         let key = self.entries.generation();
-        let mut p = self.home.folders.papers.borrow_mut();
+        let mut p = self.folder_page.folders.papers.borrow_mut();
         if p.key != Some(key) {
             let mut children: HashMap<String, Vec<usize>> = HashMap::new();
             for (i, e) in self.entries.iter().enumerate() {
@@ -308,13 +308,13 @@ impl Workspace {
     pub(crate) fn render_folder_card(&mut self, e: &Entry, w: f32, card_h: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let id = e.id.clone();
         let h = card_h;
-        let hot = self.home.folders.hovered.as_ref() == Some(&id) && self.home.folders.drag.is_none();
-        let over = self.home.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning && d.over.as_ref() == Some(&id)) || self.file_drop_over(&id);
-        let front = self.home.folders.fx.get(&id).and_then(|f| f.front.clone());
+        let hot = self.folder_page.folders.hovered.as_ref() == Some(&id) && self.folder_page.folders.drag.is_none();
+        let over = self.folder_page.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning && d.over.as_ref() == Some(&id)) || self.file_drop_over(&id);
+        let front = self.folder_page.folders.fx.get(&id).and_then(|f| f.front.clone());
         let (kids, count) = self.folder_papers(&id, front.as_ref());
 
         // ---- Springs.
-        let fx = self.home.folders.fx.entry(id.clone()).or_insert_with(FolderFx::new);
+        let fx = self.folder_page.folders.fx.entry(id.clone()).or_insert_with(FolderFx::new);
         let now = Instant::now();
         let dt = fx.last.replace(now).map_or(1. / 120., |t| now.duration_since(t).as_secs_f32().min(0.032));
         fx.open.to = if hot || over { 1. } else { 0. };
@@ -354,7 +354,7 @@ impl Workspace {
         let pose = Pose { w, h, lift, open: o, yl: 0.49 * h + lean, yr: 0.54 * h + lean, inset: -(3. * o + 7. * m), papers };
 
         // ---- Elements: back canvas, the front paper's title, the glass, the labels.
-        let record = self.home.folders.bounds.clone();
+        let record = self.folder_page.folders.bounds.clone();
         let rid = id.clone();
         // The front paper is never tilted, so it carries the document's real first page.
         let front_face = if kids.first().is_some_and(|k| k.meta.folder.is_none()) { Face::Content } else { Face::Titled };
@@ -387,26 +387,26 @@ impl Workspace {
                     .child(crate::localized_count!(count, "{} 项", "{} item", "{} items", count))))
             .when(self.batch.is_none(), |d| d
                 // Outline buttons floating on the tile, round.
-                .child(crate::design::Button::outline(SharedString::from(format!("home-fnew-{id}"))).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)
+                .child(crate::design::Button::outline(SharedString::from(format!("page-fnew-{id}"))).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)
                     .tip(crate::settings::tr("新建文档", "New document"), None)
                     .child(crate::design::icon("plus", 16., crate::design::color::muted_foreground()).with_transformation(Transformation::scale(size(0.7 + 0.3 * reveal, 0.7 + 0.3 * reveal))))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |w, _, window, cx| { cx.stop_propagation(); w.new_child(&new_id, window, cx); })))
-                .child(self.home_more(e, format!("home-fmore-{id}"), cx).variant(crate::design::ButtonVariant::Outline).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)));
+                .child(self.card_more(e, format!("page-fmore-{id}"), cx).variant(crate::design::ButtonVariant::Outline).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)));
         // 批量管理: checked like a document card, its box where a card's is (12 into the folder's body).
-        let check = self.home_check(e).map(|c| div().absolute().left(px(12.)).top(px(TAB * h + 12. + lift)).child(c));
-        div().id(SharedString::from(format!("home-folder-{id}"))).relative().w_full().min_w_0().h(px(h)).cursor_pointer()
+        let check = self.card_check(e).map(|c| div().absolute().left(px(12.)).top(px(TAB * h + 12. + lift)).child(c));
+        div().id(SharedString::from(format!("page-folder-{id}"))).relative().w_full().min_w_0().h(px(h)).cursor_pointer()
             .on_hover(cx.listener(move |w, on: &bool, _, cx| {
-                if *on { w.home.folders.hovered = Some(hover_id.clone()); }
-                else if w.home.folders.hovered.as_ref() == Some(&hover_id) { w.home.folders.hovered = None; }
+                if *on { w.folder_page.folders.hovered = Some(hover_id.clone()); }
+                else if w.folder_page.folders.hovered.as_ref() == Some(&hover_id) { w.folder_page.folders.hovered = None; }
                 cx.notify();
             }))
             .on_mouse_down(MouseButton::Left, cx.listener({ let id = id.clone(); move |w, _, _, cx| {
                 // A press sinks the front a little; the release springs it back.
-                if let Some(f) = w.home.folders.fx.get_mut(&id) { f.dip.v += 2.2; }
+                if let Some(f) = w.folder_page.folders.fx.get_mut(&id) { f.dip.v += 2.2; }
                 cx.notify();
             }}))
-            .on_click(cx.listener(move |w, _, window, cx| if w.batch.is_some() { w.home_click(&open_id, window, cx) } else { w.try_open(&open_id, window, cx); }))
+            .on_click(cx.listener(move |w, _, window, cx| if w.batch.is_some() { w.card_click(&open_id, window, cx) } else { w.try_open(&open_id, window, cx); }))
             .when(self.batch.is_none(), |d| d
                 .on_mouse_down(MouseButton::Right, cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                     w.row_menu = Some(RowMenu { id: menu_id.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch: false, from: None });
@@ -418,26 +418,26 @@ impl Workspace {
     }
 
     /// The card's bounds are kept for picking it up (and for the flight back).
-    pub(crate) fn record_home_card(&self, id: &str) -> impl IntoElement {
-        let record = self.home.folders.bounds.clone();
+    pub(crate) fn record_card(&self, id: &str) -> impl IntoElement {
+        let record = self.folder_page.folders.bounds.clone();
         let id = id.to_string();
         canvas(move |b, _, _| { record.borrow_mut().insert(id.clone(), b); }, |_, _, _, _| {}).absolute().inset_0()
     }
 
-    /// A document card picked up on Home or a folder page: it is carried as a
+    /// A document card picked up on a folder page: it is carried as a
     /// small page skeleton and can be dropped into a folder (cards are not
     /// reordered by dragging).
-    pub(crate) fn arm_home_drag(&mut self, id: &str, at: Point<Pixels>, _cx: &mut Context<Self>) {
-        let Some(home) = self.home.folders.bounds.borrow().get(id).copied() else { return };
-        let grab = (((at.x - home.left()) / home.size.width).clamp(0., 1.), ((at.y - home.top()) / home.size.height).clamp(0., 1.));
-        let r = [f32::from(home.left()), f32::from(home.top()), f32::from(home.size.width), f32::from(home.size.height)];
-        self.home.folders.drag = Some(HomeDrag { id: id.to_string(), start: at, at, started: false, grab, home, rect: Spring::new(r), over: None, returning: false, last: None });
+    pub(crate) fn arm_card_drag(&mut self, id: &str, at: Point<Pixels>, _cx: &mut Context<Self>) {
+        let Some(origin) = self.folder_page.folders.bounds.borrow().get(id).copied() else { return };
+        let grab = (((at.x - origin.left()) / origin.size.width).clamp(0., 1.), ((at.y - origin.top()) / origin.size.height).clamp(0., 1.));
+        let r = [f32::from(origin.left()), f32::from(origin.top()), f32::from(origin.size.width), f32::from(origin.size.height)];
+        self.folder_page.folders.drag = Some(CardDrag { id: id.to_string(), start: at, at, started: false, grab, origin, rect: Spring::new(r), over: None, returning: false, last: None });
     }
 
-    /// Before the drag starts the pointer is tracked by the home body.
-    pub(crate) fn track_home_press(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
-        let Some(d) = self.home.folders.drag.as_mut().filter(|d| !d.started) else { return };
-        if ev.pressed_button != Some(MouseButton::Left) { self.home.folders.drag = None; return; }
+    /// Before the drag starts the pointer is tracked by the folder page's body.
+    pub(crate) fn track_card_press(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some(d) = self.folder_page.folders.drag.as_mut().filter(|d| !d.started) else { return };
+        if ev.pressed_button != Some(MouseButton::Left) { self.folder_page.folders.drag = None; return; }
         d.at = ev.position;
         if f32::from(d.at.x - d.start.x).hypot(f32::from(d.at.y - d.start.y)) >= 5. {
             d.started = true;
@@ -446,41 +446,41 @@ impl Workspace {
         }
     }
 
-    pub(crate) fn home_dragging(&self, id: &str) -> bool {
-        self.home.folders.drag.as_ref().is_some_and(|d| d.started && d.id == id)
+    pub(crate) fn card_dragging(&self, id: &str) -> bool {
+        self.folder_page.folders.drag.as_ref().is_some_and(|d| d.started && d.id == id)
     }
 
-    fn move_home_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        if !self.home.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning) { return; }
+    fn move_card_drag(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.folder_page.folders.drag.as_ref().is_some_and(|d| d.started && !d.returning) { return; }
         // Only folders on the page now: bounds linger for cards of pages left behind.
         let shown = self.level_entries(self.folder_current.as_deref());
         let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
-            .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
+            .find(|e| self.folder_page.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
-        let Some(d) = self.home.folders.drag.as_mut() else { return };
+        let Some(d) = self.folder_page.folders.drag.as_mut() else { return };
         d.at = at;
         if over != d.over {
             // The folder notices: a small dip as its mouth opens.
-            if let Some(f) = over.as_ref().and_then(|k| self.home.folders.fx.get_mut(k)) { f.dip.v -= 1.6; }
+            if let Some(f) = over.as_ref().and_then(|k| self.folder_page.folders.fx.get_mut(k)) { f.dip.v -= 1.6; }
             d.over = over;
         }
         cx.notify();
     }
 
-    pub(crate) fn has_home_drag(&self) -> bool { self.home.folders.drag.is_some() }
+    pub(crate) fn has_card_drag(&self) -> bool { self.folder_page.folders.drag.is_some() }
 
-    pub(crate) fn cancel_home_drag(&mut self, cx: &mut Context<Self>) {
-        self.home.folders.drag = None;
+    pub(crate) fn cancel_card_drag(&mut self, cx: &mut Context<Self>) {
+        self.folder_page.folders.drag = None;
         cx.notify();
     }
 
-    fn end_home_drag(&mut self, cx: &mut Context<Self>) {
-        let Some(d) = self.home.folders.drag.as_mut().filter(|d| d.started && !d.returning) else { self.home.folders.drag = None; return };
-        let target = d.over.clone().and_then(|f| self.home.folders.bounds.borrow().get(&f).copied().map(|b| (f, b)));
+    fn end_card_drag(&mut self, cx: &mut Context<Self>) {
+        let Some(d) = self.folder_page.folders.drag.as_mut().filter(|d| d.started && !d.returning) else { self.folder_page.folders.drag = None; return };
+        let target = d.over.clone().and_then(|f| self.folder_page.folders.bounds.borrow().get(&f).copied().map(|b| (f, b)));
         let Some((folder, b)) = target else {
             // Not over a folder: the paper flies back and becomes the card again.
             d.returning = true;
-            d.rect.target = [f32::from(d.home.left()), f32::from(d.home.top()), f32::from(d.home.size.width), f32::from(d.home.size.height)];
+            d.rect.target = [f32::from(d.origin.left()), f32::from(d.origin.top()), f32::from(d.origin.size.width), f32::from(d.origin.size.height)];
             cx.notify();
             return;
         };
@@ -488,18 +488,18 @@ impl Workspace {
         // Hand the paper to the folder where it is; it slides in behind the glass.
         let [x, y, w, h] = d.rect.p;
         let local = [x - f32::from(b.left()), y - f32::from(b.top()), w, h];
-        self.home.folders.drag = None;
-        let fx = self.home.folders.fx.entry(folder.clone()).or_insert_with(FolderFx::new);
+        self.folder_page.folders.drag = None;
+        let fx = self.folder_page.folders.fx.entry(folder.clone()).or_insert_with(FolderFx::new);
         fx.arrival = Some((id.clone(), Spring::new(local)));
         fx.front = Some(id.clone());
         fx.dip.v += 5.5;
         self.move_into_folder(&id, &folder, cx);
     }
 
-    pub(crate) fn render_home_drag_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.home.folders.drag = None; return None; }
-        let folder_bounds = self.home.folders.drag.as_ref().and_then(|d| d.over.clone()).and_then(|f| self.home.folders.bounds.borrow().get(&f).copied());
-        let d = self.home.folders.drag.as_mut().filter(|d| d.started)?;
+    pub(crate) fn render_card_drag_overlay(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.folder_page.folders.drag = None; return None; }
+        let folder_bounds = self.folder_page.folders.drag.as_ref().and_then(|d| d.over.clone()).and_then(|f| self.folder_page.folders.bounds.borrow().get(&f).copied());
+        let d = self.folder_page.folders.drag.as_mut().filter(|d| d.started)?;
         let now = Instant::now();
         let dt = d.last.replace(now).map_or(1. / 120., |t| now.duration_since(t).as_secs_f32().min(0.032));
         if !d.returning {
@@ -513,7 +513,7 @@ impl Workspace {
             d.rect.target = [x, y, MINI_W, MINI_H];
         }
         let moving = d.rect.step(dt);
-        if d.returning && !moving { self.home.folders.drag = None; cx.notify(); return None; }
+        if d.returning && !moving { self.folder_page.folders.drag = None; cx.notify(); return None; }
         window.request_animation_frame();
         let [x, y, w, h] = d.rect.p;
         let e = self.entries.iter().find(|e| e.id == d.id)?.clone();
@@ -521,17 +521,17 @@ impl Workspace {
         // painted straight onto the GPU: nothing is laid out while it moves.
         let paper = Paper { cx: w / 2., cy: h / 2., w, h, rot: 0., seed: seed(&e.id) };
         let lines = canvas(|_, _, _| {}, move |b, _, window, _| paper.paint(b.origin, Face::Sketch, window)).absolute().inset_0();
-        let layer = div().id("home-drag-overlay").absolute().inset_0().occlude().cursor(CursorStyle::ClosedHand)
+        let layer = div().id("page-drag-overlay").absolute().inset_0().occlude().cursor(CursorStyle::ClosedHand)
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, _, cx| {
-                if ev.pressed_button != Some(MouseButton::Left) { w.cancel_home_drag(cx); return; }
-                w.move_home_drag(ev.position, cx);
+                if ev.pressed_button != Some(MouseButton::Left) { w.cancel_card_drag(cx); return; }
+                w.move_card_drag(ev.position, cx);
             }))
             .on_mouse_up(MouseButton::Left, cx.listener(|w, ev: &MouseUpEvent, window, cx| {
                 let p = ev.position;
                 let size = window.viewport_size();
-                if p.x < px(0.) || p.y < px(0.) || p.x >= size.width || p.y >= size.height { w.cancel_home_drag(cx); return; }
-                w.move_home_drag(p, cx);
-                w.end_home_drag(cx);
+                if p.x < px(0.) || p.y < px(0.) || p.x >= size.width || p.y >= size.height { w.cancel_card_drag(cx); return; }
+                w.move_card_drag(p, cx);
+                w.end_card_drag(cx);
             }))
             .child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h))
                 .shadow(theme::shadow_panel()).rounded(px(10.))
@@ -632,7 +632,7 @@ impl Workspace {
     pub(crate) fn file_drag_move(&mut self, ev: &DragMoveEvent<ExternalPaths>, cx: &mut Context<Self>) {
         // Every listener hears every move: off the page (over the sidebar) it steps back.
         if !ev.bounds.contains(&ev.event.position) {
-            if let Some(d) = self.home.folders.file_drop.as_mut() { d.leave(); cx.notify(); }
+            if let Some(d) = self.folder_page.folders.file_drop.as_mut() { d.leave(); cx.notify(); }
             return;
         }
         let paths = ev.drag(cx).paths().to_vec();
@@ -642,17 +642,17 @@ impl Workspace {
     /// `file_drag_move` from a position and the dragged paths (scripted runs too).
     pub(crate) fn file_drag_at(&mut self, at: Point<Pixels>, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
         if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { return; }
-        let fresh = self.home.folders.file_drop.as_ref().is_none_or(|d| d.landed.is_some());
-        if fresh { self.home.folders.file_drop = Some(FileDrop::new(paths)); }
+        let fresh = self.folder_page.folders.file_drop.as_ref().is_none_or(|d| d.landed.is_some());
+        if fresh { self.folder_page.folders.file_drop = Some(FileDrop::new(paths)); }
         let shown = self.level_entries(self.folder_current.as_deref());
         let over = shown.iter().filter(|e| e.meta.folder.is_some() && e.note.is_none())
-            .find(|e| self.home.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
+            .find(|e| self.folder_page.folders.bounds.borrow().get(&e.id).is_some_and(|b| b.contains(&at)))
             .map(|e| e.id.clone());
-        let Some(d) = self.home.folders.file_drop.as_mut() else { return };
+        let Some(d) = self.folder_page.folders.file_drop.as_mut() else { return };
         d.leaving = false;
         if over != d.over {
             // The folder notices, as it does for a dragged card.
-            if let Some(f) = over.as_ref().and_then(|k| self.home.folders.fx.get_mut(k)) { f.dip.v -= 1.6; }
+            if let Some(f) = over.as_ref().and_then(|k| self.folder_page.folders.fx.get_mut(k)) { f.dip.v -= 1.6; }
             d.over = over;
         }
         d.at = at;
@@ -670,14 +670,14 @@ impl Workspace {
         if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { return; }
         // The first listing still running: Markdown files and folders open where they are, as from the Finder.
         if self.store.loading() {
-            self.home.folders.file_drop = None;
+            self.folder_page.folders.file_drop = None;
             let open: Vec<_> = paths.into_iter().filter(|p| p.fs_is_dir() || crate::local_files::is_markdown_path(p)).collect();
             if open.is_empty() { self.still_loading(cx); } else { self.open_paths(&open, window, cx); }
             return;
         }
-        if self.home.folders.file_drop.is_none() { self.home.folders.file_drop = Some(FileDrop::new(paths)); }
+        if self.folder_page.folders.file_drop.is_none() { self.folder_page.folders.file_drop = Some(FileDrop::new(paths)); }
         let page = if self.view == crate::app::View::Folder { self.folder_current.clone() } else { None };
-        let Some(d) = self.home.folders.file_drop.as_mut() else { return };
+        let Some(d) = self.folder_page.folders.file_drop.as_mut() else { return };
         if d.importable() == 0 {
             d.shake.v += 34.;
             d.leaving = true;
@@ -689,7 +689,7 @@ impl Workspace {
         d.drop_at = d.at;
         d.land.to = 1.;
         d.dip.v += 5.5;
-        if let Some(f) = d.over.as_ref().and_then(|k| self.home.folders.fx.get_mut(k)) { f.dip.v += 5.5; }
+        if let Some(f) = d.over.as_ref().and_then(|k| self.folder_page.folders.fx.get_mut(k)) { f.dip.v += 5.5; }
         let (dirs, files): (Vec<_>, Vec<_>) = d.paths.iter().cloned().partition(|p| p.fs_is_dir());
         let files: Vec<_> = files.into_iter().filter(|p| crate::local_files::is_markdown_path(p) || p.extension().is_some_and(|x| x.eq_ignore_ascii_case("xml"))).collect();
         if !files.is_empty() { self.import_paths(&files, target.clone(), false, window, cx); }
@@ -698,19 +698,19 @@ impl Workspace {
     }
 
     pub(crate) fn file_drop_over(&self, id: &str) -> bool {
-        self.home.folders.file_drop.as_ref().is_some_and(|d| d.landed.is_none() && !d.leaving && d.importable() > 0 && d.over.as_deref() == Some(id))
+        self.folder_page.folders.file_drop.as_ref().is_some_and(|d| d.landed.is_none() && !d.leaving && d.importable() > 0 && d.over.as_deref() == Some(id))
     }
 
     /// The veil and the tray, over the page while files are dragged in.
     pub(crate) fn render_file_drop(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.home.folders.file_drop = None; return None; }
+        if !matches!(self.view, crate::app::View::Default | crate::app::View::Folder) { self.folder_page.folders.file_drop = None; return None; }
         let dragging = cx.has_active_drag() || crate::devtools::file_drag();
         let target_title = |w: &Self, id: Option<&String>| id.and_then(|id| w.entries.iter().find(|e| &e.id == id)).map(|e| display_title(&e.title))
-            .unwrap_or_else(|| w.home_name());
+            .unwrap_or_else(|| w.front_top_name());
         let page = if self.view == crate::app::View::Folder { self.folder_current.clone() } else { None };
-        let d = self.home.folders.file_drop.as_ref()?;
+        let d = self.folder_page.folders.file_drop.as_ref()?;
         let place = target_title(self, d.landed.clone().flatten().as_ref().or(d.over.as_ref()).or(page.as_ref()));
-        let d = self.home.folders.file_drop.as_mut()?;
+        let d = self.folder_page.folders.file_drop.as_mut()?;
         // The drag went away without a drop here (left the window, or let go elsewhere).
         if !dragging && d.landed.is_none() { d.leaving = true; }
         let now = Instant::now();
@@ -732,7 +732,7 @@ impl Workspace {
         for r in &mut d.rise { r.step(dt); }
         // Landed and settled: the tray goes.
         if d.landed.is_some() && d.land.p > 0.97 && !d.leaving { d.leaving = true; }
-        if d.leaving && d.show.p < 0.01 && d.veil.p < 0.01 { self.home.folders.file_drop = None; cx.notify(); return None; }
+        if d.leaving && d.show.p < 0.01 && d.veil.p < 0.01 { self.folder_page.folders.file_drop = None; cx.notify(); return None; }
         // The tray breathes while it waits, so it draws every frame while shown.
         window.request_animation_frame();
 

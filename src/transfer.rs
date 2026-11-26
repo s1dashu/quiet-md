@@ -709,7 +709,7 @@ impl Workspace {
     pub(crate) fn place_name(&self, parent: Option<&str>) -> String {
         match parent {
             Some(p) => self.entries.iter().find(|e| e.id == p).map(|e| if crate::shared_store::top_of_row(&e.id).is_some() { self.folder_name(&e.top) } else { crate::settings::display_title(&e.title) }).unwrap_or_default(),
-            None => self.home_name(),
+            None => self.front_top_name(),
         }
     }
 

@@ -29,4 +29,4 @@ pub mod time;
 pub mod versions;
 pub mod vfs;
 pub mod whiteboard;
-pub mod home;
+pub mod top_folders;

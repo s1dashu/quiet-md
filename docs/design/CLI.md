@@ -26,7 +26,7 @@
 
 ## 现状
 
-- **文档库在哪：** 和应用一样，是这台电脑上应用打开的全部顶层文件夹，也就是主页（唯一的根）下的文件夹，见 [workspaces.md](workspaces.md)。CLI 用 core 的 `Home::entries()` 读同一份 `folders.json`（设了 `QUIET_MD_HOME` 就只有那一个文件夹，测试用 `QUIET_MD_FOLDERS` 指向临时的列表），顺序也一样；不写 `folders.json`。每个顶层文件夹用 `Store::open_for_tools` 打开：文件夹不在了就标为不可用，不会新建；崩溃留下的副本留给应用恢复。
+- **文档库在哪：** 和应用一样，是这台电脑上应用打开的全部顶层文件夹，也就是主页（唯一的根）下的文件夹，见 [workspaces.md](workspaces.md)。CLI 用 core 的 `TopFolders::entries()` 读同一份 `folders.json`（设了 `QUIET_MD_HOME` 就只有那一个文件夹，测试用 `QUIET_MD_FOLDERS` 指向临时的列表），顺序也一样；不写 `folders.json`。每个顶层文件夹用 `Store::open_for_tools` 打开：文件夹不在了就标为不可用，不会新建；崩溃留下的副本留给应用恢复。
 - **路径从主页算起**（用户 2026-11-24 定：只有主页是根，顶层文件夹就是普通文件夹，所以没有专门挑顶层文件夹的参数）：
   - 路径第一段是顶层文件夹名（不分大小写），如 `Quiet.md/工作/周报`；也接受磁盘上的绝对路径。CLI 输出的所有路径都是这种从主页算起的路径。
   - `quiet ls` 不带参数列出主页下的顶层文件夹：名字、磁盘位置、key、文档数，或打不开的原因（`--json` 里 `top: true`）。`quiet ls -r` 列出全部。原来的 `quiet roots` / `quiet folders` 不再需要。

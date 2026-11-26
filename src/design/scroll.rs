@@ -34,7 +34,7 @@ pub const FADE: Duration = Duration::from_millis(150);
 pub fn ends_for(r: f32) -> f32 { if r > 0. { r + PAD } else { PAD } }
 
 /// How far the window's own corner curves in from its edges, for a box that runs into it (the page, a
-/// settings page, the home lists, a side panel): macOS draws a continuous corner whose curve starts 18
+/// settings page, the folder page lists, a side panel): macOS draws a continuous corner whose curve starts 18
 /// from the corner (measured on macOS 27 with `deskshot`, 2026-11-25); Windows 11 rounds 8.
 pub const WINDOW_R: f32 = if cfg!(target_os = "macos") { 18. } else if cfg!(windows) { 8. } else { 0. };
 

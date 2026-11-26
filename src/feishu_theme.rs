@@ -103,7 +103,7 @@ pub fn shadow_dialog() -> Vec<BoxShadow> {
     vec![shadow(0.12, 8., 24., 4.)]
 }
 
-/// `--shadow-s4-down`: the 「…」 menu, home menus, the icon picker.
+/// `--shadow-s4-down`: the 「…」 menu, folder page menus, the icon picker.
 pub fn shadow_s4_down() -> Vec<BoxShadow> {
     vec![shadow(0.04, 8., 24., 8.), shadow(0.04, 6., 12., 0.), shadow(0.06, 4., 8., -8.)]
 }

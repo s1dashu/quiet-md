@@ -64,13 +64,13 @@ impl Session {
 
     /// Every top-level folder's 回收站 (each top-level folder keeps its own), as (top-level folder key, entry).
     fn all_trash(&mut self) -> Vec<(String, fdl_core::store::TrashEntry)> {
-        self.ws.folders.iter_mut().filter_map(|r| Some((r.key.clone(), r.store.as_mut()?)))
+        self.tops.folders.iter_mut().filter_map(|r| Some((r.key.clone(), r.store.as_mut()?)))
             .flat_map(|(k, s)| s.list_trash().into_iter().map(move |t| (k.clone(), t))).collect()
     }
 
     pub(crate) fn trash_list(&mut self) -> R<Value> {
         let list: Vec<Value> = self.all_trash().iter().map(|(k, t)| json!({ "id": t.id, "title": t.title, "folder": self.top_name(k), "deleted": date_ms(t.deleted * 1000) })).collect();
-        let days = self.ws.folders.iter().find_map(|r| r.store.as_ref()).map_or(fdl_core::store::TRASH_DAYS, |s| s.settings().trash_days());
+        let days = self.tops.folders.iter().find_map(|r| r.store.as_ref()).map_or(fdl_core::store::TRASH_DAYS, |s| s.settings().trash_days());
         Ok(json!({ "days": days, "items": list }))
     }
 
@@ -96,7 +96,7 @@ impl Session {
         kind_of_file(&path)?;
         let (top, folder) = self.landing(arg(a, "folder"))?;
         let to = self.folder_rel(folder.as_deref());
-        let shown = self.home_path(&top, &to);
+        let shown = self.full_path(&top, &to);
         self.pending.push(Pending::Import { top, path: path.clone(), folder: Some(to).filter(|t| !t.is_empty()) });
         Ok(json!({ "path": path.display().to_string(), "import": true, "to": shown }))
     }
