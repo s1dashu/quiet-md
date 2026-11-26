@@ -266,6 +266,8 @@ pub struct Editor {
     /// Heading just clicked in the catalogue.
     pub(super) cat_jump: Option<BlockId>,
     pub(super) cat_scroll: UniformListScrollHandle,
+    /// The outline's scrollbar (the shared one).
+    pub(super) cat_bar: Rc<crate::design::ScrollBar>,
     pub(super) scrollbar: Rc<super::scrollbar::Scrollbar>,
     /// Column-gap hover: (grid, gap index, over the 新增分栏 circle).
     pub(super) gap_hover: Option<(BlockId, usize, bool)>,
@@ -519,6 +521,7 @@ impl Editor {
             cat_seen: ((usize::MAX, 0), TITLE),
             cat_jump: None,
             cat_scroll: UniformListScrollHandle::new(),
+            cat_bar: Default::default(),
             scrollbar: Rc::default(),
             gap_hover: None,
             col_drag: None,

@@ -698,7 +698,9 @@ impl Editor {
             Drop::Time => time_slots(set_time).into_iter().map(|t| (slot_label(t), t, t == set_time)).collect(),
             Drop::Jet => jet_lags(r.whole_day, jet).into_iter().map(|(l, v)| (l.to_string(), v, v == jet)).collect(),
         };
-        let mut col = div().id(("rm-list", ix)).max_h(px(LIST_H)).py(px(LIST_PAD / 2.)).overflow_y_scroll().when(d == Drop::Time, |d| d.track_scroll(&self.rm.list));
+        // the shared scrollbar in its own lane beside the menu rows (their 4 from the side)
+        let (key, handle) = if d == Drop::Time { ("rm-list-time", self.rm.list.clone()) } else { ("rm-list-jet", crate::design::scroll::handle("rm-list-jet")) };
+        let mut col = crate::design::scroll::make_room(div().id(("rm-list", ix)).max_h(px(LIST_H)).py(px(LIST_PAD / 2.)).overflow_y_scroll().track_scroll(&handle), key, dmenu::PAD);
         let n = items.len();
         // List rows: menu rows, the current choice checked.
         for (i, (label, v, on)) in items.into_iter().enumerate() {
@@ -727,6 +729,7 @@ impl Editor {
         let vh = f32::from(window.viewport_size().height);
         let below = f32::from(a.bottom()) + 4.;
         let y = if below + h > vh - 8. { f32::from(a.top()) - 4. - h } else { below };
+        let col = col.child(crate::design::scroll::bar(key, &handle, crate::design::geo().menu_r));
         let list = super::countdown::list_box(("rm-list-box", ix)).w(px(w)).child(col).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         vec![deferred(anchored().position_mode(AnchoredPositionMode::Window).position(point(a.left(), px(y))).child(list)).with_priority(3).into_any_element()]
     }

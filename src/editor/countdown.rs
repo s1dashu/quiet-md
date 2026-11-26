@@ -828,7 +828,9 @@ impl Editor {
         pick: impl Fn(&mut Editor, u32, &mut Window, &mut Context<Editor>) + Clone + 'static,
         cx: &mut Context<Self>,
     ) -> Popover {
-        let mut col = div().id(("cd-list", ix)).h(px(LIST_H)).py(px(LIST_PAD / 2.)).overflow_y_scroll().track_scroll(&self.cd.lists[ix]);
+        // the shared scrollbar in its own lane beside the menu rows (their 4 from the side)
+        let key = ["cd-list-0", "cd-list-1", "cd-list-2"][ix.min(2)];
+        let mut col = crate::design::scroll::make_room(div().id(("cd-list", ix)).h(px(LIST_H)).py(px(LIST_PAD / 2.)).overflow_y_scroll().track_scroll(&self.cd.lists[ix]), key, dmenu::PAD);
         for v in 0..n {
             let on = cur == Some(v);
             let pick = pick.clone();
@@ -840,7 +842,7 @@ impl Editor {
                     .on_mouse_down(MouseButton::Left, cx.listener(move |e, _, window, cx| pick(e, v, window, cx))),
             );
         }
-        list_box(("cd-list-box", ix)).child(col)
+        list_box(("cd-list-box", ix)).child(col.child(crate::design::scroll::bar(key, &self.cd.lists[ix], crate::design::geo().menu_r)))
     }
 
     fn cd_calendar(&self, d: &Dialog, cx: &mut Context<Self>) -> impl IntoElement {

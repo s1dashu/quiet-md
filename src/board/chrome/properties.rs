@@ -664,7 +664,9 @@ pub(crate) fn render(me: &BoardView, window: &mut Window, cx: &mut Context<Board
     let max_h = (me.bounds.get().size.height - px(166.)).max(px(120.));
     Some(div().absolute().left(px(style::PADDING)).top(px(TOP))
         .child(island("board-props", 0.).max_w(px(MAX_W)).max_h(max_h).flex().flex_col()
-            .child(div().id("board-props-scroll").max_h(max_h).overflow_y_scroll().p(px(PAD)).child(body.w(px(cw)))))
+            .child(div().id("board-props-scroll").max_h(max_h).overflow_y_scroll().track_scroll(&crate::design::scroll::handle("board-props-scroll")).p(px(PAD)).child(body.w(px(cw)))
+                // the app's shared scrollbar, its ends clear of the island's corners
+                .child(crate::design::scroll::bar("board-props-scroll", &crate::design::scroll::handle("board-props-scroll"), style::RADIUS_LG))))
         .into_any_element())
 }
 

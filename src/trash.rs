@@ -149,7 +149,8 @@ impl Workspace {
             .child(col(Some(168.), "位置"))
             .child(col(Some(168.), "剩余时间"))
             .child(div().w(px(48.)).flex_none());
-        let mut list = div().id("trash-list").flex_1().min_h_0().overflow_y_scroll().px(px(24.)).pb(px(24.));
+        let scroll = crate::design::scroll::handle("trash-list");
+        let mut list = div().id("trash-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&scroll).px(px(24.)).pb(px(24.));
         for (i, t) in self.trash.iter().enumerate() {
             let (id, id2) = (t.id.clone(), t.id.clone());
             let menu_open = self.trash_menu.as_ref().is_some_and(|(m, _, _)| *m == t.id);
@@ -216,7 +217,8 @@ impl Workspace {
                     .child(div().w(px(48.)).flex_none().flex().justify_end().pr(px(12.)).child(more)),
             );
         }
-        page = page.child(table_header).child(list);
+        // the shared scrollbar, down to the window's corner (the rows keep 24 from the side: room enough)
+        page = page.child(table_header).child(list.child(crate::design::scroll::bar_corners("trash-list", &scroll, 0., crate::design::scroll::WINDOW_R)));
         page.into_any_element()
     }
 

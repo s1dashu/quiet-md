@@ -339,7 +339,8 @@ impl Workspace {
             Some(em) => div().size(px(16.)).flex_none().flex().items_center().justify_center().text_size(px(14.)).child(em.clone()).into_any_element(),
             None => icon(crate::search::file_glyph(&e.meta), 16., Theme::icon()).into_any_element(),
         };
-        let mut list = div().id("move-tree").flex_1().min_w_0().px(px(8.)).py(px(12.)).overflow_y_scroll().track_scroll(&dlg.scroll);
+        // rows 8 from the side: while the tree scrolls it makes room for the shared scrollbar's lane
+        let mut list = crate::design::scroll::make_room(div().id("move-tree").flex_1().min_w_0().px(px(8.)).py(px(12.)).overflow_y_scroll().track_scroll(&dlg.scroll), "move-tree", 8.);
         if q.is_empty() {
             list = list.child(
                 row("move-root".into(), dlg.target == Some(None))
@@ -435,7 +436,7 @@ impl Workspace {
                     .overflow_hidden()
                     .child(left)
                     .child(Separator::new().vertical())
-                    .child(list),
+                    .child(list.child(crate::design::scroll::bar("move-tree", &dlg.scroll, crate::design::geo().button_r))),
             )
             .footer(
                 div()

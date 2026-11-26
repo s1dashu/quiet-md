@@ -304,8 +304,8 @@ pub struct TableView {
     /// point when it hangs from one (`hang_popup`); a popup opened at the pointer has none.
     pub(crate) anchors: Rc<std::cell::RefCell<HashMap<SharedString, Bounds<Pixels>>>>,
     pub(crate) popup_corner: Option<Anchor>,
-    /// The grid's scroll thumbs' fades, down and across (`design::scroll::Fade`).
-    pub(crate) bar_fades: Rc<[crate::design::scroll::Fade; 2]>,
+    /// The grid's scroll thumbs, down and across (`design::scroll::Thumb`).
+    pub(crate) bar_thumbs: [Rc<crate::design::scroll::Thumb>; 2],
     _refresh: Task<()>,
     _subs: Vec<Subscription>,
 }
@@ -366,7 +366,7 @@ impl TableView {
             sel: None, rows_sel: HashSet::new(), col_sel: vec![], editing: None, input, aux, scroll: point(0., 0.),
             body: Rc::new(Cell::new(Bounds::default())), lanes: Cell::new((0., 0.)), drag: None, popup: None, dropdown: None, rename: None,
             expanded: None, record: Default::default(), notes: Default::default(), find: None, find_input,
-            grip_hover: None, slide: Default::default(), fit_lines: HashMap::new(), anchors: Default::default(), popup_corner: None, bar_fades: Default::default(), _refresh: refresh, _subs: subs,
+            grip_hover: None, slide: Default::default(), fit_lines: HashMap::new(), anchors: Default::default(), popup_corner: None, bar_thumbs: Default::default(), _refresh: refresh, _subs: subs,
         }
     }
 

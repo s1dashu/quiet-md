@@ -360,7 +360,6 @@ impl Editor {
             }
         }
         let collapsed = self.cat_collapsed.clone();
-        let text_w = width - 11.;
         let mut style = window.text_style();
         style.font_family = theme::ui_family().into();
         let entity = cx.entity();
@@ -368,6 +367,8 @@ impl Editor {
         let rows = Rc::new(rows);
         let h = (n as f32 * ROW_H + 22.).min(max_h.max(ROW_H));
         let scrolls = n as f32 * ROW_H + 22. > h;
+        // a list that scrolls runs out to the side, its rows `room_for` clear of the shared scrollbar's lane
+        let text_w = if scrolls { width - crate::design::scroll::room_for(0.) } else { width - 11. };
         let list = uniform_list("catalogue-list", n, move |range, window, _| {
             range
                 .map(|ix| {
@@ -443,13 +444,14 @@ impl Editor {
                 .collect()
         })
         .track_scroll(&self.cat_scroll)
-        .w(px(width - 11.))
+        .w(px(if scrolls { width } else { width - 11. }))
         .h(px(h))
         // A list that scrolls ends 44 below its last row: GPUI 0.2's
         // uniform_list counted the bottom padding twice.
         .pb(px(if scrolls { 44. } else { 22. }));
         // A list that scrolls keeps the wheel: the page under it stays put.
-        div().w(px(width)).when(scrolls, |d| d.on_scroll(|_, _, cx| cx.stop_propagation())).child(list).into_any_element()
+        let handle = self.cat_scroll.0.borrow().base_handle.clone();
+        div().relative().w(px(width)).when(scrolls, |d| d.on_scroll(|_, _, cx| cx.stop_propagation())).child(list).child(self.cat_bar.render(&handle)).into_any_element()
     }
 }
 

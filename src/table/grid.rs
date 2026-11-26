@@ -829,7 +829,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
 /// on the straight edges only: down from under the header, across from past the frozen columns, and
 /// short of the sheet's `corner` or the other lane.
 fn scrollbars(v: &TableView, max_x: f32, max_y: f32, size_: Size<f32>, (lx, ly): (f32, f32), corner: f32, frozen_w: f32, cx: &Context<TableView>) -> Vec<AnyElement> {
-    use crate::design::scroll::{BAR, MIN, PAD, THUMB, ends_for, thumb_color};
+    use crate::design::scroll::{BAR, MIN, PAD, THUMB, ends_for};
     let mut out = vec![];
     let end = |other: f32| if other > 0. { other } else { ends_for(corner) };
     // the thumbs' places (from the grid's top left)
@@ -855,20 +855,22 @@ fn scrollbars(v: &TableView, max_x: f32, max_y: f32, size_: Size<f32>, (lx, ly):
             .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, _, cx| { cx.stop_propagation(); v.drag = Some(Drag::Thumb { across: true, p0: f32::from(ev.position.x), s0: v.scroll.x, per }); cx.notify(); }))
             .into_any_element());
     }
-    // drawn as the shared ScrollArea's (`design::scroll`): its width, inset and colour, shown while the
-    // pointer is over the grid, a thumb is held or it scrolls, fading out after
-    let fades = v.bar_fades.clone();
+    // drawn as the shared ScrollArea's (`design::scroll::Thumb`): its width, inset, colour and tones,
+    // shown while the pointer is over the grid, a thumb is held or it scrolls, fading out after
+    let thumbs = v.bar_thumbs.clone();
     let (sx, sy) = (v.scroll.x, v.scroll.y);
-    let held = matches!(v.drag, Some(Drag::Thumb { .. }));
+    let held = match v.drag { Some(Drag::Thumb { across, .. }) => Some(across), _ => None };
     out.push(canvas(|_, _, _| {}, move |b, _, window, cx| {
-        let over = b.contains(&window.mouse_position()) || held;
+        let over = b.contains(&window.mouse_position());
         if let Some((top, len, _)) = down {
-            let a = fades[0].step(over, sy, window, cx);
-            if a > 0. { window.paint_quad(fill(Bounds::new(point(b.right() - px(PAD + THUMB), b.top() + px(top)), size(px(THUMB), px(len))), thumb_color(a)).corner_radii(px(THUMB / 2.))); }
+            let thumb = Bounds::new(point(b.right() - px(PAD + THUMB), b.top() + px(top)), size(px(THUMB), px(len)));
+            let zone = Bounds::new(point(b.right() - px(BAR), b.top() + px(top)), size(px(BAR), px(len)));
+            thumbs[0].paint(thumb, zone, over || held.is_some(), held == Some(false), sy, window, cx);
         }
         if let Some((left, len, _)) = across {
-            let a = fades[1].step(over, sx, window, cx);
-            if a > 0. { window.paint_quad(fill(Bounds::new(point(b.left() + px(left), b.bottom() - px(PAD + THUMB)), size(px(len), px(THUMB))), thumb_color(a)).corner_radii(px(THUMB / 2.))); }
+            let thumb = Bounds::new(point(b.left() + px(left), b.bottom() - px(PAD + THUMB)), size(px(len), px(THUMB)));
+            let zone = Bounds::new(point(b.left() + px(left), b.bottom() - px(BAR)), size(px(len), px(BAR)));
+            thumbs[1].paint(thumb, zone, over || held.is_some(), held == Some(true), sx, window, cx);
         }
     }).absolute().inset_0().into_any_element());
     out

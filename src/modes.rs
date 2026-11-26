@@ -200,6 +200,7 @@ impl Workspace {
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
+                        .track_scroll(&crate::design::scroll::handle("shortcuts-body"))
                         .pt(px(4.))
                         .px(px(16.))
                         .pb(px(24.))
@@ -216,7 +217,9 @@ impl Workspace {
                                 .text_color(crate::design::color::muted_foreground())
                                 .child(crate::settings::text("Markdown 是一种快速输入带格式文本的方式，让你书写文档时行云流水，一气呵成，例如输入#空格，即可输入一级标题。")),
                         )
-                        .children(rows(MARKDOWN)),
+                        .children(rows(MARKDOWN))
+                        // the shared scrollbar, down to the window's corner (the rows keep 16 from the side: room enough)
+                        .child(crate::design::scroll::bar_corners("shortcuts-body", &crate::design::scroll::handle("shortcuts-body"), 0., crate::design::scroll::WINDOW_R)),
                 )
                 .into_any_element(),
         )

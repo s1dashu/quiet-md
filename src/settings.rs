@@ -1134,7 +1134,8 @@ impl Workspace {
             div().px(px(10.)).py(px(6.)).text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 5.))
                 .text_color(Theme::text_caption()).child(tr("没有匹配的字体", "No matching font")).into_any_element()
         } else {
-            uniform_list("font-list", n, cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
+            // the rows keep the menu's 4 from the side: while the list scrolls, the shared scrollbar's lane beside them
+            crate::design::scroll::make_room(uniform_list("font-list", n, cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
                 range.map(|i| {
                     let g = SharedString::from(format!("font-{}-{i}", target.key()));
                     match &choices[i] {
@@ -1158,9 +1159,10 @@ impl Workspace {
                 }).collect()
             }))
             .track_scroll(&menu.scroll)
-            .h(px((n as f32 * menu::ROW_H).min(420.)))
+            .h(px((n as f32 * menu::ROW_H).min(420.))), "font-list", menu::PAD)
             .into_any_element()
         };
+        let bar_handle = menu.scroll.0.borrow().base_handle.clone();
         let anchors = self.font_anchors.clone();
         let key = target.key();
         let popup = Popover::new("font-menu").flex()
@@ -1175,7 +1177,9 @@ impl Workspace {
                     .child(Field::new("font-search").sized(FieldSize::Sm)
                         .child(crate::design::icon("search", 14., crate::design::color::muted_foreground()))
                         .child(div().flex_1().min_w_0().child(menu.field.clone()))))
-                .child(div().pb(px(menu::PAD)).child(list)));
+                .child(div().relative().pb(px(menu::PAD)).child(list)
+                    // its bottom end clear of the popover's corner, which is the menu's padding below it
+                    .when(n > 0, |d| d.child(crate::design::scroll::bar_corners("font-list", &bar_handle, 0., (crate::design::geo().menu_r - menu::PAD).max(0.))))));
         Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(popup)).with_priority(2).into_any_element())
     }
 

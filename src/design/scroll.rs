@@ -65,9 +65,9 @@ pub fn widen(style: &mut StyleRefinement, room: f32) -> bool {
     }
 }
 
-/// Paints the thumb: a capsule (`ends_for` keeps it out of the corners).
+/// Paints the thumb: a capsule (`ends_for` keeps it out of the corners), down or across.
 pub fn paint_thumb(window: &mut Window, thumb: Bounds<Pixels>, color: Hsla) {
-    window.paint_quad(fill(thumb, color).corner_radii(thumb.size.width / 2.));
+    window.paint_quad(fill(thumb, color).corner_radii(thumb.size.width.min(thumb.size.height) / 2.));
 }
 
 thread_local! {
@@ -174,6 +174,30 @@ impl Fade {
             else { None };
         if let Some(wait) = wait { wake(window, cx, wait); }
         a
+    }
+}
+
+/// A thumb a box lays out and drags itself (the data table's grid, which scrolls by offsets of its
+/// own, not a `ScrollHandle`): `ScrollBar`'s fade, tone and colour for it, so it shows, darkens under
+/// the pointer and darkest while held as every other thumb does.
+#[derive(Default)]
+pub struct Thumb { fade: Fade, tone: Tone, on: Cell<bool> }
+
+impl Thumb {
+    /// Paints the thumb at `thumb`, its band `zone` (the `BAR` that takes the press) lit under the
+    /// pointer; `active`: the pointer is over the box or a thumb is held; `held`: this one is;
+    /// `offset`: the scroll position along its way.
+    pub fn paint(self: &std::rc::Rc<Self>, thumb: Bounds<Pixels>, zone: Bounds<Pixels>, active: bool, held: bool, offset: f32, window: &mut Window, cx: &mut App) {
+        let on = zone.contains(&window.mouse_position());
+        self.on.set(on);
+        let a = self.fade.step(active || held, offset, window, cx);
+        let tone = self.tone.step(if held { HELD } else if on { HOVER } else { 0. }, window, cx);
+        if a > 0. { paint_thumb(window, thumb, thumb_tone(tone, a)); }
+        let me = self.clone();
+        // onto or off the thumb: its tone moves
+        window.on_mouse_event(move |ev: &MouseMoveEvent, phase, window, _| {
+            if phase == DispatchPhase::Bubble && zone.contains(&ev.position) != me.on.get() { window.refresh(); }
+        });
     }
 }
 

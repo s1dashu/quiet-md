@@ -649,7 +649,7 @@ impl Onboarding {
             (head, rows)
         });
         // Auto margins centre it while it fits; taller, it starts at the top and scrolls.
-        div().id("onb-scroll").size_full().overflow_y_scroll().flex().flex_col().items_center().px(px(48.)).pt(px(56.)).pb(px(88.))
+        div().id("onb-scroll").size_full().overflow_y_scroll().track_scroll(&crate::design::scroll::handle("onb-scroll")).flex().flex_col().items_center().px(px(48.)).pt(px(56.)).pb(px(88.))
             .child(div().my_auto().flex_none().w_full().max_w(px(560.)).flex().flex_col().gap(px(24.))
                 .child(heading(over, tr("带上已有的笔记", "Bring your notes"), if self.copy { tr("导入的是副本，原来的文件不会被改动。也可以跳过，以后从菜单导入。", "Imports are copies; your files stay as they are. You can skip this and import later.") }
                     else { tr("选中的文件夹会直接打开，文件留在原处。也可以跳过，以后从菜单打开。", "The folders you pick open where they are; the files stay put. You can skip this and open them later.") }))
@@ -662,6 +662,8 @@ impl Onboarding {
                     .with_animation("onb-copy-in", Animation::new(std::time::Duration::from_millis(180)), |el, k| el.opacity(k))))
                 .children(found.map(|(head, rows)| sheet("onb-found-sheet", Some(head.into_any_element()), rows)))
                 .children(self.error.clone().map(|e| note_owned(e, true))))
+            // the shared scrollbar, clear of the window's corners at both ends (48 of room beside the column)
+            .child(crate::design::scroll::bar_corners("onb-scroll", &crate::design::scroll::handle("onb-scroll"), crate::design::scroll::WINDOW_R, crate::design::scroll::WINDOW_R))
             .into_any_element()
     }
 

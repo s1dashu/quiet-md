@@ -732,7 +732,8 @@ impl Workspace {
             .child(MenuLabel::new(crate::localized_format!("「{}」是一个 Obsidian 库", "“{}” is an Obsidian vault", name)))
             .children(self.vault_rows(&place, cx)));
         let found = apps.found.as_ref().filter(|f| !f.is_empty()).map(|found| {
-            crate::table::style::inset_list("import-found-list").max_h(px(220.)).overflow_y_scroll()
+            // the shared scrollbar in its own lane, as the table's inset lists keep it
+            crate::design::scroll::make_room(crate::table::style::inset_list("import-found-list").max_h(px(220.)).overflow_y_scroll().track_scroll(&crate::design::scroll::handle("import-found-list")), "import-found-list", crate::design::menu::PAD)
                 .child(MenuLabel::new(crate::settings::tr("在这台电脑上找到", "Found on this computer")))
                 .children(found.iter().enumerate().flat_map(|(i, f)| {
                     let row = MenuItem::new(("import-found", i)).icon(f.source().icon()).label(f.title()).description(f.desc())
@@ -740,6 +741,7 @@ impl Workspace {
                     let open = matches!(&apps.choose, Some(Choice::At(p, _)) if *p == f.path);
                     std::iter::once(row).chain(if open { self.vault_rows(&place, cx) } else { vec![] })
                 }).collect::<Vec<_>>())
+                .child(crate::design::scroll::bar("import-found-list", &crate::design::scroll::handle("import-found-list"), crate::design::geo().menu_r))
         });
         let ws = cx.entity().downgrade();
         let dialog = Dialog::new("import-apps")
