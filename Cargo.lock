@@ -2103,6 +2103,7 @@ dependencies = [
  "wayland-protocols-wlr",
  "x11rb",
  "xkbcommon",
+ "yeslogic-fontconfig-sys",
  "zed-scap",
  "zed-xim",
 ]
@@ -4323,6 +4324,7 @@ dependencies = [
  "futures",
  "gpui",
  "gpui_apple",
+ "gpui_linux",
  "gpui_platform",
  "gpui_web",
  "gpui_wgpu",

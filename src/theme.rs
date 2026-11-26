@@ -383,11 +383,10 @@ pub fn shadow_button() -> Vec<BoxShadow> {
 }
 
 /// The platform's sans: the interface's family unless 外观 › 界面字体 says
-/// otherwise, and the document's when its theme names no family.
-#[cfg(any(target_vendor = "apple", target_os = "windows"))]
+/// otherwise, and the document's when its theme names no family. On Linux
+/// fontconfig's sans-serif (`gpui_linux::system_ui_font_family`, #452).
+#[cfg(not(target_family = "wasm"))]
 pub const SYSTEM_FONT: &str = ".SystemUIFont";
-#[cfg(not(any(target_vendor = "apple", target_os = "windows", target_family = "wasm")))]
-pub const SYSTEM_FONT: &str = "Noto Sans";
 /// The web build brings its own fonts (src/web.rs).
 #[cfg(target_family = "wasm")]
 pub const SYSTEM_FONT: &str = "Inter";
@@ -691,3 +690,20 @@ pub fn heading_weight(level: u8) -> gpui::FontWeight {
 /// reference `.pageTitle`, to match preview typography; the larger title is
 /// an intentional deviation, not a measurement.
 pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    /// `.SystemUIFont` loads, as the family fontconfig names for sans-serif.
+    #[test]
+    fn system_font_is_fontconfigs_sans() {
+        use gpui::PlatformTextSystem;
+        let family = gpui_linux::system_ui_font_family();
+        let ts = gpui_wgpu::CosmicTextSystem::new(&family);
+        // The two names load the face twice, under separate ids: compare the faces.
+        let face = |name: &str| {
+            let id = ts.font_id(&gpui::font(name.to_string())).unwrap_or_else(|e| panic!("{name} ({family}): {e}"));
+            (format!("{:?}", ts.font_metrics(id)), "Quiet 中".chars().map(|c| ts.glyph_for_char(id, c)).collect::<Vec<_>>())
+        };
+        assert_eq!(face(super::SYSTEM_FONT), face(&family), "{family}");
+    }
+}

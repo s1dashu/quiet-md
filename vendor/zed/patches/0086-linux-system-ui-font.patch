@@ -1,0 +1,115 @@
+Linux: .SystemUIFont is fontconfig's sans-serif match (in the locale's language) instead of Zed's bundled IBM Plex Sans, which Quiet.md does not ship; Noto Sans when fontconfig matches nothing. Exposed as gpui_linux::system_ui_font_family. Issue #452.
+
+diff --git a/crates/gpui_linux/Cargo.toml b/crates/gpui_linux/Cargo.toml
+index a91818acd0e2a83c17775a7606db663dfb1feee1..07f922e788acd62b188daa75a2bdbdb7b13e9714 100644
+--- a/crates/gpui_linux/Cargo.toml
++++ b/crates/gpui_linux/Cargo.toml
+@@ -18,6 +18,7 @@ test-support = ["gpui/test-support"]
+ wayland = [
+     "dep:accesskit_unix",
+     "gpui_wgpu",
++    "dep:yeslogic-fontconfig-sys",
+     "ashpd/wayland",
+ 
+     "calloop-wayland-source",
+@@ -36,6 +37,7 @@ wayland = [
+ x11 = [
+     "dep:accesskit_unix",
+     "gpui_wgpu",
++    "dep:yeslogic-fontconfig-sys",
+     "ashpd",
+ 
+     "as-raw-xcb-connection",
+@@ -83,6 +85,9 @@ raw-window-handle.workspace = true
+ 
+ # Used in both windowing options
+ ashpd = { workspace = true, optional = true }
++# quiet.md: the system's sans for `.SystemUIFont` (text_system.rs). Already
++# linked through font-kit's fontconfig source.
++yeslogic-fontconfig-sys = { version = "6.0", optional = true }
+ filedescriptor = { version = "0.8.2", optional = true }
+ open = { version = "5.2.0", optional = true }
+ xkbcommon = { workspace = true, optional = true }
+diff --git a/crates/gpui_linux/src/gpui_linux.rs b/crates/gpui_linux/src/gpui_linux.rs
+index a5390e77f87710f448cabda4d802253a66ea74ee..f4ea42d5cbc3c4f0d8d8d805000b8a5177854725 100644
+--- a/crates/gpui_linux/src/gpui_linux.rs
++++ b/crates/gpui_linux/src/gpui_linux.rs
+@@ -2,3 +2,5 @@
+ mod linux;
+ 
+ pub use linux::{current_platform, linux_platform};
++#[cfg(any(feature = "wayland", feature = "x11"))]
++pub use linux::system_ui_font_family;
+diff --git a/crates/gpui_linux/src/linux.rs b/crates/gpui_linux/src/linux.rs
+index c5afc4a0f5d9f48dd093eb47bec4e0dd9c3d9db1..9050f0a80a2373699f7bd70d885eb575d0e8fa7d 100644
+--- a/crates/gpui_linux/src/linux.rs
++++ b/crates/gpui_linux/src/linux.rs
+@@ -23,6 +23,8 @@ pub(crate) use keyboard::*;
+ pub(crate) use platform::*;
+ #[cfg(any(feature = "wayland", feature = "x11"))]
+ pub(crate) use text_system::*;
++#[cfg(any(feature = "wayland", feature = "x11"))]
++pub use text_system::system_ui_font_family;
+ #[cfg(feature = "wayland")]
+ pub(crate) use wayland::*;
+ #[cfg(feature = "x11")]
+diff --git a/crates/gpui_linux/src/linux/platform.rs b/crates/gpui_linux/src/linux/platform.rs
+index c9bbd2defd8f37c2a5f1d01928828ec11cf4e133..31bbeb827dc69621b94432e869d2b904d994258a 100644
+--- a/crates/gpui_linux/src/linux/platform.rs
++++ b/crates/gpui_linux/src/linux/platform.rs
+@@ -127,7 +127,8 @@ impl LinuxCommon {
+         let (power_sender, power_receiver) = calloop::channel::channel();
+ 
+         #[cfg(any(feature = "wayland", feature = "x11"))]
+-        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
++        // quiet.md: `.SystemUIFont` is the system's sans, not Zed's bundled IBM Plex Sans.
++        let text_system = Arc::new(crate::linux::CosmicTextSystem::new(&crate::linux::system_ui_font_family()));
+         #[cfg(not(any(feature = "wayland", feature = "x11")))]
+         let text_system = Arc::new(gpui::NoopTextSystem::new());
+ 
+diff --git a/crates/gpui_linux/src/linux/text_system.rs b/crates/gpui_linux/src/linux/text_system.rs
+index d6571021e0647453844b7564c8cdac32926bc6a6..5ce0f9010e96b1d8c9bd26895059ef59c6d197eb 100644
+--- a/crates/gpui_linux/src/linux/text_system.rs
++++ b/crates/gpui_linux/src/linux/text_system.rs
+@@ -1 +1,41 @@
+ pub(crate) use gpui_wgpu::CosmicTextSystem;
++
++/// quiet.md: the family `.SystemUIFont` stands for, read when the platform
++/// starts: fontconfig's match for sans-serif in the locale's language (what
++/// `fc-match sans-serif` prints), so it follows the user's and the
++/// distribution's settings and covers CJK under a CJK locale. Noto Sans, the
++/// family this used to be, only when fontconfig matches nothing.
++pub fn system_ui_font_family() -> String {
++    fontconfig_sans().unwrap_or_else(|| "Noto Sans".into())
++}
++
++fn fontconfig_sans() -> Option<String> {
++    use fontconfig_sys::{constants::FC_FAMILY, *};
++    use std::ptr::null_mut;
++    // SAFETY: FcInit loads the default configuration that the null config
++    // pointers below refer to; every pattern made here is destroyed here, and
++    // the family string is copied before its pattern goes.
++    unsafe {
++        if FcInit() == 0 {
++            return None;
++        }
++        let pattern = FcNameParse(c"sans-serif".as_ptr().cast());
++        if pattern.is_null() {
++            return None;
++        }
++        FcConfigSubstitute(null_mut(), pattern, FcMatchPattern);
++        FcDefaultSubstitute(pattern);
++        let mut result = FcResultNoMatch;
++        let matched = FcFontMatch(null_mut(), pattern, &mut result);
++        FcPatternDestroy(pattern);
++        if matched.is_null() {
++            return None;
++        }
++        let mut family = null_mut();
++        let found = FcPatternGetString(matched, FC_FAMILY.as_ptr(), 0, &mut family) == FcResultMatch;
++        let name = (found && !family.is_null())
++            .then(|| std::ffi::CStr::from_ptr(family.cast()).to_string_lossy().trim().to_string());
++        FcPatternDestroy(matched);
++        name.filter(|n| !n.is_empty())
++    }
++}

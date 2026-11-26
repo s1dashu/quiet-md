@@ -127,7 +127,8 @@ impl LinuxCommon {
         let (power_sender, power_receiver) = calloop::channel::channel();
 
         #[cfg(any(feature = "wayland", feature = "x11"))]
-        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
+        // quiet.md: `.SystemUIFont` is the system's sans, not Zed's bundled IBM Plex Sans.
+        let text_system = Arc::new(crate::linux::CosmicTextSystem::new(&crate::linux::system_ui_font_family()));
         #[cfg(not(any(feature = "wayland", feature = "x11")))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
 

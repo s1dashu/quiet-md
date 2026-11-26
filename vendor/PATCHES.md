@@ -112,6 +112,7 @@ Snapshot: Zed `e2f00a41ac67` (2026-11-15). Legacy numbers refer to the GPUI 0.2.
 | 0080 reuse-coretext-fonts | New | `gpui_apple/text_system.rs` | `layout_line` made a new CTFont for every run of every line, and CoreText fell back to new CJK faces for every line too; CoreText keeps a font's shaping tables, ASCII advances and fallback faces on the CTFont, so each line set them all up again. Each font is now made once per size, and the face CoreText fell back to for a CJK character (Han, kana, CJK and full-width punctuation) is kept per font, size and character and set on that character in later lines. It is CoreText's own face, so weight and variation stay as CoreText chose them. About a third of the time laying out new text (docs/PERFORMANCE.md, "Dragging the scrollbar"); glyphs, positions and faces are unchanged (`kept_cjk_fallbacks_shape_like_coretext`). |
 | 0081 list-set-overdraw | New | `gpui/elements/list.rs` | `ListState::set_overdraw` changes after construction how much is laid out beyond the visible area. The editor sets none while its scrollbar thumb is held, where every frame lands somewhere new and rows nobody sees were most of the frame, and puts it back when the thumb is let go. Lists that never call it (iOS included) behave as before. |
 | 0085 windows-font-family-names | New | `gpui_windows/direct_write.rs` | A DirectWrite font set matches a family by its name in the system's language only: on a Chinese Windows "Microsoft YaHei" and "SimSun" found nothing (微软雅黑 and 宋体 did), so a document font saved on a Mac or an English system, or a family named in code, quietly fell back to the default face. When a name finds nothing, `matching_fonts` tries the family's names in its other languages: the collection's `FindFamilyName`, else every family's names (`other_names`, unit-tested). Font fallback lists match the same way. Numbered 0085: 0048–0084 are taken by other branches. |
+| 0086 linux-system-ui-font | New | `gpui_linux/linux/text_system.rs`, `platform.rs`, `Cargo.toml` | On Linux `.SystemUIFont` meant Zed's bundled IBM Plex Sans, which Quiet.md does not ship, so the app named Noto Sans itself: Latin-only, and missing on many distributions. Chinese then fell to a serif face (#452). It now resolves to fontconfig's match for sans-serif in the locale's language, the face `fc-match sans-serif` reports, and to Noto Sans only when fontconfig matches nothing. The app uses `.SystemUIFont` on every desktop platform. `gpui_linux::system_ui_font_family` exposes the family for the app's Linux test in `theme.rs`. `yeslogic-fontconfig-sys` was already linked through font-kit. |
 
 ## Retired patches
 
@@ -213,6 +214,10 @@ None of the platform backends are omitted. gpui_web serves the website's live no
 
 - AccessKit platform adapters are wired up. Exposing elements to screen readers requires roles such as `.id(...).role(...)` or custom `a11y_role` implementations (gpui/src/_accessibility.rs). The app did not yet annotate elements at the time of the upgrade.
 - Clean macOS arm64 builds on 2026-11-15: release build time 66.8 → 45.3 s and binary size 36.6 → 35.1 MB. Dist with LTO took 210 → 161 s and shrank from 24.97 to 24.27 MB. Scripted memory usage stayed around 95 MB.
+
+## Other vendored crates
+
+- `vendor/xim-ctext` replaces crates.io's xim-ctext 0.3.0 through `[patch.crates-io]`. GPUI's X11 input method client, zed-xim, unwraps its decoder's result, and the decoder failed on every compound text except UTF-8 and JIS. Rime through IBus sends GB2312, and Quiet.md crashed on the first committed candidate (#465). The copy decodes all of COMPOUND_TEXT and never fails. Because it is a workspace member, its tests run with the app's. See `vendor/xim-ctext/README.md`.
 
 ## Removed vendor directories
 
