@@ -165,6 +165,7 @@ shadcn 的表头、标签、按钮是 500。GPUI 用系统字体时，500 和 40
 | `switch` | Switch | 32×18，开 `primary`、关 `input` |
 | `segmented` / `seg_track` / `segment` | Tabs | `muted` 底，36 高、圆角 10、内边距 3；选中的一段白底加 shadow-sm（深色 `input/30` 加 `input` 边）、圆角 8 |
 | `swatch` | — | 颜色块；选中时 2pt 的环，用边框画（半透明） |
+| `design::Slider` | Slider | 轨道 6pt `muted`、已选段 `primary`；滑块 16pt `background` 底、`primary` 边、shadow-sm，悬停 4pt `ring/50` 光晕 |
 | `tag` / `link_chip` / `person` | Badge | 高 20，胶囊，12 号字 |
 | `popover` | DropdownMenuContent / PopoverContent | `popover` 底，圆角 8，`shadow::popover()`，无描边 |
 | `menu_row` / `menu_item` / `list_row` / `menu_title` / `menu_rule` | DropdownMenuItem / Label / Separator | 32 高、圆角 6；亮的行 `accent` 底、`accent-foreground` 字；不可用整行 50%；分隔线 `border`，0.5pt，左右各收进 12（和行里的图标、文字对齐；维护者 2026-11-24 定的） |

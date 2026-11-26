@@ -3,12 +3,17 @@
 //! `Toolbar.tsx`, `HintViewer.tsx`), the styles panel (left,
 //! `SelectedShapeActions`), the footer (zoom, undo / redo, help), the context
 //! menu and the help dialog. Upstream decides what each piece contains, when
-//! it shows and how it looks: the looks are upstream's CSS (`style.rs`) and
-//! icons (`assets/icons/excalidraw/`), light and dark, not our `Theme`.
-//! Differs: no collaboration, library, sidebars, AI, socials, stats, zen /
-//! view mode, compact or mobile layouts; the main menu adds 退出, and the top
-//! left keeps room for the window's traffic lights. Everything here only
-//! reads `BoardView` and dispatches `BoardAction`s / `set_tool`.
+//! it shows and in what order; the looks are the app's design system
+//! (`crate::design`, docs/design/DESIGN_SYSTEM.md): every floating piece is a
+//! `Toolbar` or a `Popover` (the popover's face and edge), tools and options
+//! `Toggle`s, actions ghost or outline `Button`s, the icons Nucleo's
+//! (`assets/icons/`), but for the style options' pictures of what they draw
+//! (fill, stroke, sloppiness, arrowheads …), which stay upstream's
+//! (`assets/icons/excalidraw/`). The canvas itself keeps upstream's look
+//! (`style.rs`). Differs: no collaboration, library, sidebars, AI, socials,
+//! stats, zen / view mode, compact or mobile layouts; the main menu adds 退出,
+//! and the top left keeps room for the window's traffic lights. Everything here
+//! only reads `BoardView` and dispatches `BoardAction`s / `set_tool`.
 
 pub(crate) mod color_picker;
 pub mod colors;
@@ -23,6 +28,7 @@ mod tip;
 mod toolbar;
 
 use super::BoardView;
+use crate::design;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::cell::RefCell;
@@ -85,7 +91,7 @@ impl Render for ChromeView {
 pub fn render(me: &BoardView, window: &mut Window, cx: &mut Context<BoardView>) -> impl IntoElement {
     let panel = properties::render(me, window, cx);
     if panel.is_none() && matches!(pop(cx), Some(Pop::Stroke | Pop::Background | Pop::StartArrowhead | Pop::EndArrowhead | Pop::Font)) { set_pop(None, cx); }
-    div().absolute().top_0().left_0().size_full().font_family(style::UI_FONT).text_color(style::text())
+    div().absolute().top_0().left_0().size_full().font_family(crate::theme::ui_family()).text_size(px(design::geo().text)).text_color(design::color::foreground())
         .child(menu::main_menu(me, window, cx))
         .child(toolbar::render(me, cx))
         .when_some(panel, |d, p| d.child(p))
@@ -106,57 +112,28 @@ pub(crate) fn eat<E: InteractiveElement>(e: E) -> E {
         .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
-/// `Island`: island background, `--shadow-island`, radius 8, padding
-/// `padding × --space-factor`.
-pub(crate) fn island(id: impl Into<ElementId>, padding: f32) -> Stateful<Div> {
-    eat(div().id(id).occlude().bg(style::island_bg()).shadow(style::shadow_island()).rounded(px(style::RADIUS_LG)).p(px(padding * style::SPACE)))
-}
+/// A floating bar (the tool bar, the corners' buttons): `design::Toolbar`, the popover's face and
+/// edge, 40 tall.
+pub(crate) fn bar(id: impl Into<ElementId>) -> design::Toolbar { eat(design::Toolbar::new(id)) }
 
-/// An upstream icon (`assets/icons/excalidraw/`).
-pub(crate) fn icon(name: &str, size: f32, color: Hsla) -> Svg {
+/// A floating panel (the styles, a picker): `design::Popover`'s face and edge.
+pub(crate) fn panel(id: impl Into<ElementId>) -> design::Popover { eat(design::Popover::new(id)) }
+
+/// An upstream picture of what a style option draws (`assets/icons/excalidraw/`).
+pub(crate) fn picture(name: &str, size: f32, color: Hsla) -> Svg {
     svg().path(SharedString::from(format!("icons/excalidraw/{name}.svg"))).size(px(size)).flex_none().text_color(color)
 }
 
-/// `.ToolIcon` in the tool bar (`.App-toolbar-container .ToolIcon__icon`):
-/// `--lg-button-size`, radius 8; hover `--button-hover-bg`; pressed adds the
-/// `--button-active-border` ring; checked `--color-surface-primary-container`
-/// with the icon in `--color-on-primary-container`.
-pub(crate) fn tool_icon(id: impl Into<ElementId>, size: f32, checked: bool) -> Stateful<Div> {
-    div().id(id).flex_none().relative().size(px(size)).flex().items_center().justify_center().rounded(px(style::RADIUS_LG)).cursor_pointer()
-        .when(checked, |d| d.bg(style::surface_primary_container()))
-        .when(!checked, |d| d.hover(|s| s.bg(style::button_hover_bg())))
-        .active(|s| s.bg(style::button_hover_bg()).border_1().border_color(style::button_active_border()))
+/// A toolbar item's shortcut letter in its bottom right corner (upstream's
+/// `.ToolIcon__keybinding`): 10pt `muted-foreground`.
+pub(crate) fn keybinding(k: impl Into<SharedString>) -> Div {
+    div().absolute().right(px(3.)).bottom(px(1.)).text_size(px(10.)).line_height(px(10.)).text_color(design::color::muted_foreground()).child(k.into())
 }
 
-pub(crate) fn tool_icon_color(checked: bool) -> Hsla { if checked { style::on_primary_container() } else { style::text() } }
-
-/// `.ToolIcon__keybinding`: bottom 2, right 3, 10px, `--keybinding-color`.
-pub(crate) fn keybinding(k: impl Into<SharedString>, checked: bool) -> Div {
-    div().absolute().right(px(3.)).bottom(px(2.)).text_size(px(10.)).line_height(px(10.))
-        .text_color(if checked { style::on_primary_container() } else { style::keybinding() }).child(k.into())
-}
-
-/// `outlineButtonIconStyles` in the styles panel (`.buttonList label`):
-/// 32px, radius 8, `--button-bg` (transparent border); hover
-/// `--button-hover-bg`; pressed `--color-primary-darkest` border; checked
-/// `--color-surface-primary-container` with `--color-on-primary-container`.
-pub(crate) fn outline_button(id: impl Into<ElementId>, checked: bool) -> Stateful<Div> {
-    div().id(id).flex_none().size(px(style::DEFAULT_BUTTON)).flex().items_center().justify_center().rounded(px(style::RADIUS_LG)).border_1().cursor_pointer()
-        .when(checked, |d| d.bg(style::surface_primary_container()).border_color(style::surface_primary_container()))
-        .when(!checked, |d| d.bg(style::panel_button_bg()).border_color(transparent_black()).hover(|s| s.bg(style::panel_button_hover_bg())))
-        .active(|s| s.border_color(style::primary_darkest()))
-}
-
-/// `filledButtonOnCanvas` + `outlineButtonStyles` (`.help-icon`,
-/// `.main-menu-trigger`): `--lg-button-size`, `--color-surface-low` with a 1px
-/// `--color-surface-lowest` ring; hover `--button-hover-bg`; pressed
-/// `--color-brand-active` ring.
-pub(crate) fn filled_button(id: impl Into<ElementId>, open: bool) -> Stateful<Div> {
-    eat(div().id(id).occlude().flex_none().h(px(style::LG_BUTTON)).min_w(px(style::LG_BUTTON)).flex().items_center().justify_center().gap(px(8.))
-        .rounded(px(style::RADIUS_LG)).cursor_pointer().shadow(style::ring(style::surface_lowest()))
-        .bg(if open { style::button_hover_bg() } else { style::surface_low() })
-        .hover(|s| s.bg(style::button_hover_bg()))
-        .active(|s| s.shadow(style::ring(style::brand_active()))))
+/// A panel's section title (`text-xs`, `muted-foreground`), `label_gap` above its controls.
+pub(crate) fn legend(t: &'static str) -> Div {
+    let g = design::geo();
+    div().mb(px(g.label_gap)).text_size(px(g.text_xs)).line_height(px(design::text::XS_LINE)).text_color(design::color::muted_foreground()).child(t)
 }
 
 /// The key names upstream's `getShortcutKey` writes ("Cmd+Shift+Z").

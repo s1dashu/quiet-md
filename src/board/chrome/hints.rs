@@ -1,9 +1,8 @@
 //! The hint line under the tool bar, after Excalidraw `HintViewer.tsx` /
 //! `HintViewer.scss` @ 3a317b5: `getHints` for the states we have, the
-//! text centered in 12px `--color-gray-40` (dark: 60) with each shortcut in a
-//! bordered monospace `<kbd>`. Strings are upstream's `hints.*` (en /
-//! zh-CN). Differs: no search, sidebar, alt-cycle-selection, embed or
-//! draw-to-shape hints.
+//! text centered in `text-xs` `muted-foreground` with each shortcut a
+//! `design::Kbd`. Strings are upstream's `hints.*` (en / zh-CN). Differs: no
+//! search, sidebar, alt-cycle-selection, embed or draw-to-shape hints.
 
 use super::*;
 use crate::board::action::Tool;
@@ -156,14 +155,14 @@ fn pieces(hs: &[Hint]) -> Vec<Piece> {
 pub(crate) fn render(me: &BoardView) -> Option<Div> {
     let hs = hints(me);
     if hs.is_empty() { return None; }
-    let color = style::hint_text();
-    let mut line = div().p(px(4.)).flex().flex_wrap().justify_center().items_center().text_size(px(12.)).line_height(px(16.)).text_color(color);
+    let g = crate::design::geo();
+    // a line as tall as a key cap, so wrapped lines don't touch
+    let mut line = div().p(px(4.)).flex().flex_wrap().justify_center().items_center().text_size(px(g.text_xs)).line_height(px(20.)).text_color(crate::design::color::muted_foreground());
     for p in pieces(&hs) {
         line = line.child(match p {
             Piece::Word(w, sp) => div().when(sp, |d| d.ml(px(3.))).child(w),
-            Piece::Kbd(k, sp) => div().when(sp, |d| d.ml(px(3.))).mx(px(1.)).px(px(3.)).py(px(1.)).border_1().border_color(color).rounded(px(4.))
-                .font_family(crate::theme::MONO_FONT).text_size(px(10.)).line_height(px(12.)).child(k),
+            Piece::Kbd(k, sp) => div().when(sp, |d| d.ml(px(3.))).mx(px(2.)).child(crate::design::Kbd::new(k)),
         });
     }
-    Some(div().absolute().top(relative(1.)).left_0().right_0().mt(px(8.)).flex().justify_center().child(line))
+    Some(div().absolute().top(relative(1.)).left_0().right_0().mt(px(4.)).flex().justify_center().child(line))
 }

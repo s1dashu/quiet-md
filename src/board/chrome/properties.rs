@@ -1,14 +1,18 @@
 //! The styles panel, after Excalidraw `Actions.tsx` `SelectedShapeActions`,
 //! `shapeActionPredicates.ts`, the actions' `PanelComponent`s
 //! (`actionProperties.tsx`, `actionZindex.tsx`, `actionAlign.tsx`, …),
-//! `IconPicker.tsx`, `FontPicker/*`, `Range.tsx` and their SCSS @ 3a317b5:
-//! an island (`.App-menu__left`: padding 12, at most 200 wide) under the main
-//! menu with upstream's sections in upstream's order, each a 12px legend over
-//! 32px buttons 8 apart; which sections show follows upstream's predicates,
-//! each control shows `getFormValue` and dispatches the matching
-//! `BoardAction`. Differs: no freedraw pressure, link or bucket-fill
-//! controls; the font list has no top-picks drag & drop; the arrowhead
-//! picker has no letter keys.
+//! `IconPicker.tsx`, `FontPicker/*`, `Range.tsx` @ 3a317b5: a panel under the
+//! main menu with upstream's sections in upstream's order; which sections show
+//! follows upstream's predicates, each control shows `getFormValue` and
+//! dispatches the matching `BoardAction`. Looks: a `design::Popover` 200 wide
+//! (padded 16, scrolling under the shared scrollbar when short of room), each
+//! section a `text-xs` legend over its controls, 12 apart: a choice is a row
+//! of outline `Toggle`s in a `ButtonGroup` (the current one pressed) showing
+//! upstream's pictures of what it draws, an action a `ButtonGroup` of outline
+//! icon `Button`s, the opacity a `design::Slider`, the pickers `Popover`s
+//! beside or under their trigger. Differs: no freedraw pressure, link or
+//! bucket-fill controls; the font list has no top-picks drag & drop; the
+//! arrowhead picker has no letter keys.
 
 use super::*;
 use super::color_picker::color_picker;
@@ -23,15 +27,19 @@ use crate::board::sticky::{get_color_target_element, ColorProperty};
 use crate::board::text::{should_allow_vertical_align, supports_horizontal_align};
 use crate::board::types::{Arrowhead, Element, ElementType, FillStyle, StrokeStyle, TextAlign, VerticalAlign};
 use crate::board::utils::*;
+use crate::design::{self, Badge, Button, ButtonGroup, ButtonGroupSeparator, ButtonSize, MenuItem, MenuLabel, Toggle};
 use crate::input::{TextField, TextFieldEvent};
 use crate::settings::tr;
 use std::rc::Rc;
 
-/// `.App-menu__left`: padding 0.75rem, max-width 12.5rem.
-const PAD: f32 = 12.;
-const MAX_W: f32 = 200.;
-/// Below the main menu: its top, the 36px button, `menuTopGap` 6 × 4.
-const TOP: f32 = style::TOP_PADDING + style::LG_BUTTON + 24.;
+/// The panel: padded as a popover (p-4), 200 wide, so its controls get 168.
+pub(crate) const PAD: f32 = 16.;
+pub(crate) const PANEL_W: f32 = 200.;
+const W: f32 = PANEL_W - 2. * PAD;
+/// Between its sections.
+const GAP: f32 = 12.;
+/// Below the main menu's bar, 16 apart.
+const TOP: f32 = style::TOP_PADDING + design::toolbar::TOOLBAR_H + 16.;
 
 fn tool_type(t: Tool) -> Option<ElementType> {
     Some(match t {
@@ -111,17 +119,22 @@ fn run(a: BoardAction, cx: &Context<BoardView>) -> impl Fn(&ClickEvent, &mut Win
     cx.listener(move |me, _, window, cx| me.run(a.clone(), window, cx))
 }
 
-/// A `<fieldset>`: the 12px legend 4 above its controls.
-fn fieldset(legend: &'static str) -> Div {
-    div().flex().flex_col().child(div().mb(px(4.)).text_size(px(style::LABEL_TEXT)).line_height(style::lh(style::LABEL_TEXT)).child(legend))
+/// A `<fieldset>`: the legend over its controls.
+fn fieldset(t: &'static str) -> Div { div().flex().flex_col().child(legend(t)) }
+
+/// A row of choices or actions as wide as the panel, each as wide as the next.
+fn options<E: Styled + IntoElement + 'static>(items: impl IntoIterator<Item = E>) -> ButtonGroup {
+    items.into_iter().fold(ButtonGroup::new().w_full(), |g, e| g.child(e.flex_1().min_w(px(0.))))
 }
 
-/// `.buttonList` (in `.App-menu__left`: 4px above and below, 8 apart).
-fn button_list() -> Div { div().py(px(4.)).flex().flex_wrap().gap(px(8.)) }
+/// A `RadioSelection` option: an outline toggle showing upstream's picture.
+fn opt(id: impl Into<ElementId>, pic: &str, on: bool, tip: &str, keys: Option<&str>, a: BoardAction, cx: &Context<BoardView>) -> Toggle {
+    Toggle::new(id).outline().pressed(on).child(picture(pic, 16., design::color::foreground())).ex_tip(tip, keys).on_click(run(a, cx))
+}
 
-/// A `RadioSelection` option / action button with its icon.
-fn opt(id: impl Into<ElementId>, icon_name: &str, on: bool, tip: &str, keys: Option<&str>, a: BoardAction, cx: &Context<BoardView>) -> Stateful<Div> {
-    outline_button(id, on).child(icon(icon_name, style::ICON, tool_icon_color(on))).ex_tip(tip, keys).on_click(run(a, cx))
+/// An action: an outline icon button (`glyph`: upstream's picture, or one of the app's icons).
+fn act(id: impl Into<ElementId>, glyph: Svg, tip: &str, keys: Option<&str>, a: BoardAction, cx: &Context<BoardView>) -> Button {
+    Button::outline(id).sized(ButtonSize::Sm).child(glyph).ex_tip(tip, keys).on_click(run(a, cx))
 }
 
 // ---- arrowheads (`IconPicker`)
@@ -165,42 +178,38 @@ thread_local! {
     static MORE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-fn arrowhead_picker(end: End, current: Option<Option<Arrowhead>>, cx: &Context<BoardView>) -> Stateful<Div> {
+/// The trigger shows the current head; its picker hangs 4 under it: the
+/// options as ghost toggles (the current one pressed) with their letters,
+/// "More options" opening the rest and the cardinality heads.
+fn arrowhead_picker(end: End, current: Option<Option<Arrowhead>>, cx: &Context<BoardView>) -> Toggle {
     let (p, start, id) = if end == End::Start { (Pop::StartArrowhead, true, "board-head-start") } else { (Pop::EndArrowhead, false, "board-head-end") };
     let open = pop(cx) == Some(p);
     let cur = current.flatten();
-    let mut b = outline_button(id, open).relative().child(head_icon(cur, start, size(px(16.), px(16.)), tool_icon_color(open)))
+    let fg = design::color::foreground();
+    let b = Toggle::new(id).outline().pressed(open).relative().child(head_icon(cur, start, size(px(16.), px(16.)), fg))
         .on_click(cx.listener(move |_, _, _, cx| { let o = pop(cx) == Some(p); if !o { MORE.with(|m| m.set(HIDDEN.iter().any(|(h, _)| current == Some(*h)) || current.flatten().is_some_and(|h| CARDINALITY.contains(&h)))); } set_pop(if o { None } else { Some(p) }, cx) }));
     if !open { return b; }
-    // `.picker-option`: padding 4 4.5 5.6 4, the 36×18 icon; hover / the
-    // focused (current) one `--button-gray-2`; the letter at the corner
     let option = |i: usize, h: Option<Arrowhead>, k: Option<&'static str>| {
-        let on = current == Some(h);
-        div().id((id, i)).relative().flex().items_center().justify_center().pt(px(4.)).pl(px(4.)).pr(px(4.5)).pb(px(5.6)).rounded(px(4.)).cursor_pointer()
-            .when(on, |d| d.bg(style::button_gray_2())).hover(|s| s.bg(style::button_gray_2())).active(|s| s.bg(style::button_gray_3()))
-            .child(head_icon(h, start, size(px(36.), px(18.)), style::text()))
-            .when_some(k, |d, k| d.child(div().absolute().right(px(2.)).bottom(px(2.)).text_size(px(9.3)).line_height(px(10.)).text_color(style::keybinding()).child(k)))
+        Toggle::new((id, i)).pressed(current == Some(h)).relative().child(head_icon(h, start, size(px(36.), px(18.)), fg))
+            .when_some(k, |d, k| d.child(keybinding(k)))
             .ex_tip(&match k { Some(k) => format!("{} — {}", arrowhead_label(h), k.to_uppercase()), None => arrowhead_label(h).to_string() }, None)
             .on_click(cx.listener(move |me, _, window, cx| me.run(BoardAction::Arrowhead(end, h), window, cx)))
     };
-    let grid = |items: Vec<Stateful<Div>>| div().grid().grid_cols(4).gap(px(8.)).children(items);
+    let grid = |items: Vec<Toggle>| div().grid().grid_cols(4).gap(px(4.)).children(items);
     let more = MORE.with(|m| m.get());
-    let mut sections = div().flex().flex_col().gap(px(8.))
+    let mut sections = div().flex().flex_col().gap(px(4.))
         .child(grid(VISIBLE.iter().enumerate().map(|(i, (h, k))| option(i, *h, Some(*k))).collect()))
-        .child(div().id((id, 50usize)).flex().items_center().justify_between().cursor_pointer().text_size(px(12.)).text_color(style::text())
-            .child(tr("更多选项", "More options")).child(icon(if more { "collapse-up" } else { "collapse-down" }, 12., style::text()))
+        .child(Button::ghost((id, 50usize)).sized(ButtonSize::Sm).label(tr("更多选项", "More options")).icon_end(if more { "chevron-down" } else { "chevron-right" }).w_full().justify_between()
             .on_click(cx.listener(|_, _, _, cx| { MORE.with(|m| m.set(!m.get())); cx.notify() })));
     if more {
         sections = sections.child(grid(HIDDEN.iter().enumerate().map(|(i, (h, k))| option(10 + i, *h, Some(*k))).collect()))
-            .child(div().flex().flex_col().gap(px(8.)).child(div().text_size(px(12.)).child(tr("基数", "Cardinality")))
-                .child(grid(CARDINALITY.iter().enumerate().map(|(i, h)| option(20 + i, Some(*h), None)).collect())));
+            .child(MenuLabel::new(tr("基数", "Cardinality")))
+            .child(grid(CARDINALITY.iter().enumerate().map(|(i, h)| option(20 + i, Some(*h), None)).collect()));
     }
-    // `.picker`: padding 8, `--popup-bg-color`, `--shadow-island-stronger`,
-    // radius 4; below the trigger (`sideOffset` 12, `alignOffset` 12)
-    let picker = eat(div().id((id, 99usize)).occlude().p(px(8.)).bg(style::popup_bg()).shadow(style::shadow_island_stronger()).rounded(px(4.)).child(sections))
+    let picker = panel((id, 99usize)).p(px(design::menu::PAD)).child(sections)
         .on_mouse_down_out(cx.listener(move |_, _, _, cx| if pop(cx) == Some(p) { set_pop(None, cx) }));
-    b = b.child(div().absolute().top(px(style::DEFAULT_BUTTON + 12.)).left(px(12.)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(picker)).with_priority(3)));
-    b
+    b.child(div().absolute().top(px(design::toolbar::TOOLBAR_H - 2. * design::toolbar::TOOLBAR_PAD + design::menu::SIDE_OFFSET)).left_0()
+        .child(deferred(anchored().snap_to_window_with_margin(px(design::menu::EDGE)).child(picker)).with_priority(3)))
 }
 
 // ---- fonts (`FontPicker`)
@@ -249,7 +258,7 @@ pub(crate) fn font_popup_changed(open: bool, cx: &mut Context<BoardView>) {
     let had = FONT_LIST.with(|m| m.borrow().contains_key(&id));
     let e = cx.entity().downgrade();
     if open && !had {
-        let field = cx.new(|cx| { let mut t = TextField::new(tr("快速搜索", "Quick search"), cx); t.size = 14.; t.line_height = 16.; t.placeholder_color = style::hex(style::GRAY_40); t });
+        let field = cx.new(|cx| { let mut t = TextField::new(tr("快速搜索", "Quick search"), cx); t.size = 14.; t.line_height = 16.; t.placeholder_color = design::color::placeholder(); t });
         let sub = cx.subscribe(&field, |me, f, ev: &TextFieldEvent, cx| font_list_key(me, &f, ev, cx));
         FONT_LIST.with(|m| m.borrow_mut().insert(id, FontList { field, _sub: sub, hovered: None, focused: false, snap: None }));
         cx.defer(move |cx| { let _ = e.update(cx, |me, _| { me.font_cache = Some(me.scene.elements_including_deleted().to_vec()); me.font_previewing = false; }); });
@@ -316,35 +325,36 @@ fn pick_font(me: &mut BoardView, f: u32, cx: &mut Context<BoardView>) {
 
 fn font_picker(me: &BoardView, current: Option<u32>, window: &mut Window, cx: &mut Context<BoardView>) -> Div {
     let open = pop(cx) == Some(Pop::Font);
-    let mut picks = div().flex().gap(px(8.));
-    for f in FONT_PICKS {
-        picks = picks.child(opt(("board-font-pick", f as usize), font_icon(f), current == Some(f), font_pick_label(f), None, BoardAction::FontFamily(f), cx));
-    }
-    // the trigger (`FontPickerTrigger`: a borderless standalone button, `TextIcon`)
-    let mut trig = outline_button("board-font-more", open).relative().border_0().child(icon("text", style::ICON, tool_icon_color(open)))
+    let picks = options(FONT_PICKS.map(|f| opt(("board-font-pick", f as usize), font_icon(f), current == Some(f), font_pick_label(f), None, BoardAction::FontFamily(f), cx)));
+    // the trigger (`FontPickerTrigger`); the list opens beside the panel, level with it
+    let eid = cx.entity_id();
+    let trig = Toggle::new("board-font-more").outline().icon("type").pressed(open)
+        .child(canvas(move |b, _, _| TRIGGER.with(|t| { t.borrow_mut().insert(eid, b); }), |_, _, _, _| {}).absolute().size_full())
         .when(!open, |d| d.ex_tip(tr("显示字体选择器", "Show font picker"), None))
         .on_click(cx.listener(|_, _, _, cx| { let o = pop(cx) == Some(Pop::Font); set_pop(if o { None } else { Some(Pop::Font) }, cx) }));
     let state = FONT_LIST.with(|m| m.borrow_mut().get_mut(&cx.entity_id()).map(|l| {
         let snap = l.snap.get_or_insert_with(|| (current, scene_families(me))).clone();
         (l.field.clone(), l.hovered, l.focused, snap)
     }));
-    if open && let Some((field, hovered, focused, (current, used))) = state {
+    let at = TRIGGER.with(|t| t.borrow().get(&eid).copied());
+    let mut list_el = None;
+    if open && let Some((field, hovered, focused, (current, used))) = state && let Some(b) = at {
         // the search field takes the keyboard (`onOpenAutoFocus`)
         if !focused {
             let fh = field.read(cx).focus_handle(cx);
             window.focus(&fh, cx);
             FONT_LIST.with(|m| if let Some(l) = m.borrow_mut().get_mut(&cx.entity_id()) { l.focused = true; });
         }
-        field.update(cx, |t, _| t.color = style::text());
+        field.update(cx, |t, _| { t.color = design::color::foreground(); t.placeholder_color = design::color::placeholder(); });
         let (scene, rest) = font_lists(&used, &font_term(&field, cx));
+        let muted = design::color::muted_foreground();
         let item = |f: u32| {
-            let on = current == Some(f);
-            div().id(("board-font", f as usize)).h(px(32.)).px(px(8.)).flex().items_center().gap(px(10.)).rounded(px(style::RADIUS_MD)).cursor_pointer().text_size(px(14.))
-                // `.manual-hover`: the hover is the list's state (mouse or keys)
-                .when(on, |d| d.bg(style::primary_light())).when(!on && hovered == Some(f), |d| d.bg(style::button_hover_bg()))
-                .child(icon(font_icon(f), style::ICON, if on { style::primary_darker() } else { style::text() }))
-                .child(div().flex_1().font_family(font_name(f)).child(font_name(f)))
-                .when(font_deprecated(f), |d| d.child(div().px(px(4.)).rounded(px(4.)).bg(style::hex(if crate::theme::dark() { 0x4a2222 } else { 0xffe3e3 })).text_color(style::hex(if crate::theme::dark() { 0xff8787 } else { 0xc92a2a })).text_size(px(11.)).child(tr("旧的", "old"))))
+            MenuItem::new(("board-font", f as usize)).checked(current == Some(f))
+                // the list's hover is its own (mouse or keys), for the preview
+                .selected(hovered == Some(f))
+                .leading(picture(font_icon(f), 16., muted))
+                .child(div().flex_1().min_w_0().font_family(font_name(f)).child(font_name(f)))
+                .when(font_deprecated(f), |d| d.child(Badge::destructive(tr("旧的", "old"))))
                 .on_hover(cx.listener(move |me, h: &bool, _, cx| if *h {
                     FONT_LIST.with(|m| if let Some(l) = m.borrow_mut().get_mut(&cx.entity_id()) { l.hovered = Some(f); });
                     crate::board::run::font_preview(me, Some(f), cx);
@@ -352,21 +362,16 @@ fn font_picker(me: &BoardView, current: Option<u32>, window: &mut Window, cx: &m
                 }))
                 .on_click(cx.listener(move |me, _, _, cx| { set_pop(None, cx); crate::board::run::font_preview(me, None, cx); pick_font(me, f, cx) }))
         };
-        // each group 16 below what's above it, its 12px title 8 above the items
-        let group = |title: &'static str, fonts: &[u32]| div().mt(px(16.)).flex().flex_col().gap(px(1.))
-            .child(div().mb(px(8.)).text_size(px(12.)).line_height(px(15.6)).child(title)).children(fonts.iter().map(|f| item(*f)));
         let mut list = div().flex().flex_col();
-        if !scene.is_empty() { list = list.child(group(tr("画布中的", "In this scene"), &scene)); }
-        if !rest.is_empty() { list = list.child(group(tr("可用字体", "Available fonts"), &rest)); }
+        if !scene.is_empty() { list = list.child(MenuLabel::new(tr("画布中的", "In this scene"))).children(scene.iter().map(|f| item(*f))); }
+        if !rest.is_empty() { list = list.child(MenuLabel::new(tr("可用字体", "Available fonts"))).children(rest.iter().map(|f| item(*f))); }
         if scene.is_empty() && rest.is_empty() {
-            list = list.child(div().p(px(8.)).flex().justify_center().text_size(px(12.)).line_height(px(18.)).text_color(style::hex(style::GRAY_60)).child(tr("未找到字体", "No fonts found")));
+            list = list.child(div().py(px(24.)).flex().justify_center().text_size(px(design::geo().text)).text_color(muted).child(tr("未找到字体", "No fonts found")));
         }
-        // `QuickSearch`: 2.6rem, the search icon 12 in, a bottom border
-        let search = div().relative().h(px(41.6)).flex().items_center().border_b_1().border_color(style::list_border())
-            .child(div().absolute().left(px(12.)).top(px(9.8)).child(icon("search", 20., style::hex(style::GRAY_40))))
-            .child(div().pl(px(40.)).pr(px(12.)).w_full().child(field));
-        let content = island("board-font-list", 3.).w(px(240.)).child(search).child(list)
-            .id("board-font-list-hover")
+        // shadcn's `CommandInput`: h-9, the search icon, a rule under it
+        let search = div().h(px(36.)).px(px(12.)).flex().items_center().gap(px(8.)).border_b_1().border_color(design::color::border())
+            .child(design::icon("search", 16., muted)).child(div().flex_1().child(field));
+        let content = panel("board-font-list").menu().pt(px(0.)).w(px(design::menu_w::SM)).child(search).child(list.pt(px(design::menu::PAD)))
             // `onPointerLeave`: the preview goes
             .on_hover(cx.listener(|me, h: &bool, _, cx| if !*h {
                 FONT_LIST.with(|m| if let Some(l) = m.borrow_mut().get_mut(&cx.entity_id()) { l.hovered = None; });
@@ -374,28 +379,33 @@ fn font_picker(me: &BoardView, current: Option<u32>, window: &mut Window, cx: &m
                 cx.notify();
             }))
             .on_mouse_down_out(cx.listener(|_, _, _, cx| if pop(cx) == Some(Pop::Font) { set_pop(None, cx) }));
-        // `PropertiesPopover`: to the right (`sideOffset` 20 plus the 10px
-        // arrow, `alignOffset` -16), kept in the window
-        trig = trig.child(div().absolute().top(px(-16.)).left(px(style::DEFAULT_BUTTON + 30.)).child(deferred(anchored().snap_to_window().child(content)).with_priority(3)));
+        list_el = Some(beside(b, content));
     }
-    // `.FontPicker__container`: 3 buttons + 2 gaps, a 16px column with the separator, the trigger
-    fieldset(tr("字体", "Font family")).child(div().py(px(4.)).flex().items_center()
-        .child(div().w(px(112.)).child(picks))
-        .child(div().w(px(16.)).flex().justify_center().child(div().w(px(1.)).h(px(16.)).bg(style::border())))
+    fieldset(tr("字体", "Font family")).child(div().flex().items_center()
+        .child(picks.flex_1())
+        .child(div().w(px(17.)).h(px(16.)).flex().justify_center().child(ButtonGroupSeparator::new().my(px(0.))))
         .child(trig))
+        .children(list_el)
+}
+
+thread_local! {
+    /// The font list's trigger, as last laid out (the list opens beside it).
+    static TRIGGER: RefCell<HashMap<EntityId, Bounds<Pixels>>> = RefCell::default();
+}
+
+/// A picker beside the panel (shadcn's `side="right"`, 4 off the panel's
+/// edge), its top level with its trigger `b` (at the panel's content edge).
+pub(crate) fn beside(b: Bounds<Pixels>, picker: impl IntoElement) -> AnyElement {
+    deferred(anchored().position(point(b.right() + px(PAD + design::menu::SIDE_OFFSET), b.top())).snap_to_window_with_margin(px(design::menu::EDGE)).child(picker)).with_priority(3).into_any_element()
 }
 
 // ---- opacity (`Range`)
 
-/// The opacity range: 4px track (`--color-slider-track` up to the value,
-/// `--button-bg` after), the 16px `--color-slider-thumb`, the value under the
-/// thumb and "0" at the start. A `<label>`, not a fieldset: the legend sits
-/// right on the 43px `.range-wrapper` (thumb 6 down, labels 6 under it),
-/// and `.control-label`'s 4px bottom margin.
-fn opacity(value: Option<f64>, fallback: f64, w: f32, cx: &Context<BoardView>) -> Div {
+/// The opacity range (`Range`): its legend with the value at the other end,
+/// over a `design::Slider` in steps of 10; a mixed selection shows no range.
+fn opacity(value: Option<f64>, fallback: f64, cx: &Context<BoardView>) -> Div {
     let v = value.unwrap_or(fallback).clamp(0., 100.);
-    let f = (v / 100.) as f32;
-    const THUMB: f32 = 16.;
+    const THUMB: f32 = design::control::SLIDER_THUMB;
     // what the drag last set: several moves can land before the panel renders again, and `value` is the frame's
     let last = Rc::new(std::cell::Cell::new(value));
     let set = move |x: Pixels, bounds: Bounds<Pixels>, me: &mut BoardView, window: &mut Window, cx: &mut Context<BoardView>| {
@@ -405,22 +415,18 @@ fn opacity(value: Option<f64>, fallback: f64, w: f32, cx: &Context<BoardView>) -
     };
     let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
     let (b1, b2, b3, set2) = (bounds.clone(), bounds.clone(), bounds.clone(), set.clone());
-    let track_after = style::panel_button_bg();
-    let track_to = if value.is_some() { style::slider_track() } else { track_after };
-    let thumb_x = (w - THUMB) * f;
-    div().flex().flex_col().mb(px(4.)).child(div().text_size(px(style::LABEL_TEXT)).line_height(style::lh(style::LABEL_TEXT)).child(tr("透明度", "Opacity")))
-        .child(div().id("board-opacity").relative().w(px(w)).pt(px(6.)).pb(px(21.)).text_size(px(12.)).line_height(style::lh(12.)).cursor_pointer()
+    let g = design::geo();
+    div().flex().flex_col()
+        .child(legend(tr("透明度", "Opacity")).flex().justify_between().child(div().child(format!("{}", v.round() as i64))))
+        .child(div().id("board-opacity").relative().w_full().py(px(2.))
+        .child(design::Slider::new("board-opacity-slider", (v / 100.) as f32).mixed(value.is_none()))
         .child(canvas(move |b, _, _| b1.set(b), |_, _, _, _| {}).absolute().inset_0())
-        .child(div().relative().h(px(THUMB)).flex().items_center()
-            .child(div().w_full().h(px(4.)).rounded(px(2.)).bg(track_after).child(div().h_full().w(relative(f)).rounded(px(2.)).bg(track_to)))
-            .child(div().absolute().top_0().left(px(thumb_x)).size(px(THUMB)).rounded_full().bg(style::slider_thumb())))
-        .child(div().absolute().bottom_0().left(px(4.)).child("0"))
-        .when(v > 0., |d| d.child(div().absolute().bottom_0().left(px(thumb_x + THUMB / 2. - 12.)).w(px(24.)).flex().justify_center().child(format!("{}", v.round() as i64))))
         // one undo step per drag: the steps aren't captured till the release
         .on_mouse_down(MouseButton::Left, cx.listener(move |me, ev: &MouseDownEvent, window, cx| { me.begin_slider(); set(ev.position.x, b2.get(), me, window, cx) }))
         .on_mouse_move(cx.listener(move |me, ev: &MouseMoveEvent, window, cx| if ev.pressed_button == Some(MouseButton::Left) && me.sliding() { set2(ev.position.x, b3.get(), me, window, cx) }))
         .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.end_slider(cx)))
         .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.end_slider(cx))))
+        .text_size(px(g.text_xs))
 }
 
 /// The slider moved to `nv`: it differs from what was last set (the frame's value at first).
@@ -523,150 +529,122 @@ pub(crate) fn render(me: &BoardView, window: &mut Window, cx: &mut Context<Board
     let a = me.app_state();
     let Model { s, stroke_kind, bg_kind, stroke, background, fill, width, style_v, rough, round, arrow_type, start_head, end_head, family, font_size, align, valign, opacity_v, zigzag, all_hachure, can_group, editing_arrow } = (*model).clone();
 
-    // `.selected-shape-actions`: a column, 8 apart, as wide as its widest
-    // section (fit-content, at most 200 with the padding)
-    let mut body = div().flex().flex_col().gap(px(8.));
-    let mut cw: f32 = 0.;
-    let mut fit = |w: f32| cw = cw.max(w);
-    let list_w = |n: usize| n as f32 * style::DEFAULT_BUTTON + (n.max(1) - 1) as f32 * 8.;
+    // `.selected-shape-actions`: a column of sections
+    let mut body = div().w(px(W)).flex().flex_col().gap(px(GAP));
+    let fg = design::color::foreground();
     if s.stroke_color {
         let title = if stroke_kind == ColorTargetKind::Sticky { tr("文字颜色", "Text color") } else { tr("描边", "Stroke") };
-        fit(5. * 22. + 4. * 5. + 15. + 26.);
         body = body.child(color_picker("board-stroke", Some(title), Pop::Stroke, stroke, colors::STROKE_PICKS, BoardAction::StrokeColor, me.elements(), window, cx));
     }
     if s.background_color {
         let picks = if bg_kind == ColorTargetKind::Sticky { colors::STICKY_BACKGROUND_PICKS } else { colors::BACKGROUND_PICKS };
-        fit(5. * 22. + 4. * 5. + 15. + 26.);
         body = body.child(color_picker("board-bg", Some(tr("背景", "Background")), Pop::Background, background, picks, BoardAction::BackgroundColor, me.elements(), window, cx));
     }
     if s.fill {
         let first_tip = format!("{} ({}-Click)", if zigzag { tr("之字形折线", "Zigzag") } else { tr("斜线", "Hachure") }, if cfg!(target_os = "macos") { "Option" } else { "Alt" });
-        fit(list_w(3));
-        body = body.child(fieldset(tr("填充", "Fill")).child(button_list()
-            .child(outline_button(("board-fill", 0usize), zigzag || fill == Some(FillStyle::Hachure)).child(icon(if zigzag { "fill-zigzag" } else { "fill-hachure" }, style::ICON, tool_icon_color(zigzag || fill == Some(FillStyle::Hachure))))
+        let first_on = zigzag || fill == Some(FillStyle::Hachure);
+        body = body.child(fieldset(tr("填充", "Fill")).child(options([
+            Toggle::new(("board-fill", 0usize)).outline().pressed(first_on).child(picture(if zigzag { "fill-zigzag" } else { "fill-hachure" }, 16., fg))
                 .ex_tip(&first_tip, None)
-                .on_click(cx.listener(move |me, ev: &ClickEvent, window, cx| { let f = if ev.modifiers().alt && all_hachure { FillStyle::Zigzag } else { FillStyle::Hachure }; me.run(BoardAction::FillStyle(f), window, cx) })))
-            .child(opt(("board-fill", 1usize), "fill-cross-hatch", fill == Some(FillStyle::CrossHatch), tr("交叉线条", "Cross-hatch"), None, BoardAction::FillStyle(FillStyle::CrossHatch), cx))
-            .child(opt(("board-fill", 2usize), "fill-solid", fill == Some(FillStyle::Solid), tr("实心", "Solid"), None, BoardAction::FillStyle(FillStyle::Solid), cx))));
+                .on_click(cx.listener(move |me, ev: &ClickEvent, window, cx| { let f = if ev.modifiers().alt && all_hachure { FillStyle::Zigzag } else { FillStyle::Hachure }; me.run(BoardAction::FillStyle(f), window, cx) })),
+            opt(("board-fill", 1usize), "fill-cross-hatch", fill == Some(FillStyle::CrossHatch), tr("交叉线条", "Cross-hatch"), None, BoardAction::FillStyle(FillStyle::CrossHatch), cx),
+            opt(("board-fill", 2usize), "fill-solid", fill == Some(FillStyle::Solid), tr("实心", "Solid"), None, BoardAction::FillStyle(FillStyle::Solid), cx)])));
     }
     if s.stroke_width {
         let o = |k: StrokeWidthKey, i: usize, ic, tip| opt(("board-width", i), ic, width == Some(k), tip, None, BoardAction::StrokeWidth(STROKE_WIDTH[i]), cx);
-        fit(list_w(3));
-        body = body.child(fieldset(tr("描边宽度", "Stroke width")).child(button_list()
-            .child(o(StrokeWidthKey::Thin, 0, "stroke-width-base", tr("细", "Thin")))
-            .child(o(StrokeWidthKey::Medium, 1, "stroke-width-bold", tr("粗", "Bold")))
-            .child(o(StrokeWidthKey::Bold, 2, "stroke-width-extra-bold", tr("特粗", "Extra bold")))));
+        body = body.child(fieldset(tr("描边宽度", "Stroke width")).child(options([
+            o(StrokeWidthKey::Thin, 0, "stroke-width-base", tr("细", "Thin")),
+            o(StrokeWidthKey::Medium, 1, "stroke-width-bold", tr("粗", "Bold")),
+            o(StrokeWidthKey::Bold, 2, "stroke-width-extra-bold", tr("特粗", "Extra bold"))])));
     }
     if s.stroke_style {
         let o = |v: StrokeStyle, ic, tip| opt(("board-style", v as usize), ic, style_v == Some(v), tip, None, BoardAction::StrokeStyle(v), cx);
-        fit(list_w(3));
-        body = body.child(fieldset(tr("边框样式", "Stroke style")).child(button_list()
-            .child(o(StrokeStyle::Solid, "stroke-width-base", tr("实线", "Solid")))
-            .child(o(StrokeStyle::Dashed, "stroke-style-dashed", tr("虚线", "Dashed")))
-            .child(o(StrokeStyle::Dotted, "stroke-style-dotted", tr("点虚线", "Dotted")))));
+        body = body.child(fieldset(tr("边框样式", "Stroke style")).child(options([
+            o(StrokeStyle::Solid, "stroke-width-base", tr("实线", "Solid")),
+            o(StrokeStyle::Dashed, "stroke-style-dashed", tr("虚线", "Dashed")),
+            o(StrokeStyle::Dotted, "stroke-style-dotted", tr("点虚线", "Dotted"))])));
     }
     if s.sloppiness {
         let o = |v: i64, ic, tip| opt(("board-rough", v as usize), ic, rough == Some(v), tip, None, BoardAction::Roughness(v as f64), cx);
-        fit(list_w(3));
-        body = body.child(fieldset(tr("线条风格", "Sloppiness")).child(button_list()
-            .child(o(0, "sloppiness-architect", tr("朴素", "Architect")))
-            .child(o(1, "sloppiness-artist", tr("艺术", "Artist")))
-            .child(o(2, "sloppiness-cartoonist", tr("漫画家", "Cartoonist")))));
+        body = body.child(fieldset(tr("线条风格", "Sloppiness")).child(options([
+            o(0, "sloppiness-architect", tr("朴素", "Architect")),
+            o(1, "sloppiness-artist", tr("艺术", "Artist")),
+            o(2, "sloppiness-cartoonist", tr("漫画家", "Cartoonist"))])));
     }
     if s.roundness {
-        fit(list_w(2));
-        body = body.child(fieldset(tr("边角", "Edges")).child(button_list()
-            .child(opt("board-edge-sharp", "edge-sharp", round == Some(StrokeRoundness::Sharp), tr("尖锐", "Sharp"), None, BoardAction::Roundness(false), cx))
-            .child(opt("board-edge-round", "edge-round", round == Some(StrokeRoundness::Round), tr("圆润", "Round"), None, BoardAction::Roundness(true), cx))));
+        body = body.child(fieldset(tr("边角", "Edges")).child(options([
+            opt("board-edge-sharp", "edge-sharp", round == Some(StrokeRoundness::Sharp), tr("尖锐", "Sharp"), None, BoardAction::Roundness(false), cx),
+            opt("board-edge-round", "edge-round", round == Some(StrokeRoundness::Round), tr("圆润", "Round"), None, BoardAction::Roundness(true), cx)])));
     }
     if s.arrow_type {
         let o = |v: ArrowType, ic, tip| opt(("board-arrow-type", v as usize), ic, arrow_type == Some(v), tip, None, BoardAction::ArrowType(v), cx);
-        fit(list_w(3));
-        body = body.child(fieldset(tr("箭头类型", "Arrow type")).child(button_list()
-            .child(o(ArrowType::Sharp, "arrow-sharp", tr("直箭头", "Sharp arrow")))
-            .child(o(ArrowType::Round, "arrow-round", tr("曲线箭头", "Curved arrow")))
-            .child(o(ArrowType::Elbow, "arrow-elbow", tr("拐角箭头", "Elbow arrow")))));
+        body = body.child(fieldset(tr("箭头类型", "Arrow type")).child(options([
+            o(ArrowType::Sharp, "arrow-sharp", tr("直箭头", "Sharp arrow")),
+            o(ArrowType::Round, "arrow-round", tr("曲线箭头", "Curved arrow")),
+            o(ArrowType::Elbow, "arrow-elbow", tr("拐角箭头", "Elbow arrow"))])));
     }
     if s.text {
-        fit(112. + 16. + style::DEFAULT_BUTTON);
-        fit(list_w(4));
         body = body.child(font_picker(me, family, window, cx));
         let sizes = [("font-size-small", tr("小", "Small")), ("font-size-medium", tr("中", "Medium")), ("font-size-large", tr("大", "Large")), ("font-size-extra-large", tr("加大", "Very large"))];
-        let mut r = button_list();
-        for (i, (ic, tip)) in sizes.into_iter().enumerate() {
-            r = r.child(opt(("board-font-size", i), ic, font_size == Some(FONT_SIZES[i]), tip, None, BoardAction::FontSize(FONT_SIZES[i]), cx));
-        }
-        body = body.child(fieldset(tr("字体大小", "Font size")).child(r));
+        body = body.child(fieldset(tr("字体大小", "Font size")).child(options(sizes.into_iter().enumerate()
+            .map(|(i, (ic, tip))| opt(("board-font-size", i), ic, font_size == Some(FONT_SIZES[i]), tip, None, BoardAction::FontSize(FONT_SIZES[i]), cx)))));
         if s.text_align {
             let o = |v: TextAlign, ic, tip| opt(("board-align-text", v as usize), ic, align == Some(v), tip, None, BoardAction::TextAlign(v), cx);
-            body = body.child(fieldset(tr("文本对齐", "Text align")).child(button_list()
-                .child(o(TextAlign::Left, "text-align-left", tr("左对齐", "Left")))
-                .child(o(TextAlign::Center, "text-align-center", tr("居中", "Center")))
-                .child(o(TextAlign::Right, "text-align-right", tr("右对齐", "Right")))));
+            body = body.child(fieldset(tr("文本对齐", "Text align")).child(options([
+                o(TextAlign::Left, "text-align-left", tr("左对齐", "Left")),
+                o(TextAlign::Center, "text-align-center", tr("居中", "Center")),
+                o(TextAlign::Right, "text-align-right", tr("右对齐", "Right"))])));
         }
     }
     if s.vertical_align {
         // (no legend upstream)
         let o = |v: VerticalAlign, ic, tip| opt(("board-valign", v as usize), ic, valign == Some(v), tip, None, BoardAction::VerticalAlign(v), cx);
-        body = body.child(button_list()
-            .child(o(VerticalAlign::Top, "text-align-top", tr("顶部对齐", "Align top")))
-            .child(o(VerticalAlign::Middle, "text-align-middle", tr("垂直居中", "Center vertically")))
-            .child(o(VerticalAlign::Bottom, "text-align-bottom", tr("底端对齐", "Align bottom"))));
+        body = body.child(options([
+            o(VerticalAlign::Top, "text-align-top", tr("顶部对齐", "Align top")),
+            o(VerticalAlign::Middle, "text-align-middle", tr("垂直居中", "Center vertically")),
+            o(VerticalAlign::Bottom, "text-align-bottom", tr("底端对齐", "Align bottom"))]));
     }
     if s.arrowheads {
-        fit(list_w(2));
-        body = body.child(fieldset(tr("端点", "Arrowheads")).child(button_list()
-            .child(arrowhead_picker(End::Start, start_head, cx)).child(arrowhead_picker(End::End, end_head, cx))));
+        body = body.child(fieldset(tr("端点", "Arrowheads")).child(options([arrowhead_picker(End::Start, start_head, cx), arrowhead_picker(End::End, end_head, cx)])));
     }
-    if s.layers { fit(list_w(4)); }
-    if s.align { fit(list_w(if s.distribute { 4 } else { 3 })); }
-    if s.extra {
-        let n = 2 + can_group as usize + can_ungroup(a) as usize + s.crop_editor as usize + s.line_editor as usize;
-        fit(list_w(n));
-    }
-    // (a lone range is the browser's default 129px)
-    let cw = if cw == 0. { 129. } else { cw.min(MAX_W - 2. * PAD) };
-    body = body.child(opacity(opacity_v, a.current_item_opacity, cw, cx));
+    body = body.child(opacity(opacity_v, a.current_item_opacity, cx));
     if s.layers {
-        let o = |l: Layer, ic, tip, k: &str| opt(("board-layer", l as usize), ic, false, tip, Some(&shortcut(k)), BoardAction::Layer(l), cx);
-        body = body.child(fieldset(tr("图层", "Layers")).child(button_list()
-            .child(o(Layer::Back, "send-to-back", tr("置于底层", "Send to back"), if cfg!(target_os = "macos") { "CtrlOrCmd+Alt+[" } else { "CtrlOrCmd+Shift+[" }))
-            .child(o(Layer::Backward, "send-backward", tr("下移一层", "Send backward"), "CtrlOrCmd+["))
-            .child(o(Layer::Forward, "bring-forward", tr("上移一层", "Bring forward"), "CtrlOrCmd+]"))
-            .child(o(Layer::Front, "bring-to-front", tr("置于顶层", "Bring to front"), if cfg!(target_os = "macos") { "CtrlOrCmd+Alt+]" } else { "CtrlOrCmd+Shift+]" }))));
+        let o = |l: Layer, ic, tip, k: &str| act(("board-layer", l as usize), picture(ic, 16., fg), tip, Some(&shortcut(k)), BoardAction::Layer(l), cx);
+        body = body.child(fieldset(tr("图层", "Layers")).child(options([
+            o(Layer::Back, "send-to-back", tr("置于底层", "Send to back"), if cfg!(target_os = "macos") { "CtrlOrCmd+Alt+[" } else { "CtrlOrCmd+Shift+[" }),
+            o(Layer::Backward, "send-backward", tr("下移一层", "Send backward"), "CtrlOrCmd+["),
+            o(Layer::Forward, "bring-forward", tr("上移一层", "Bring forward"), "CtrlOrCmd+]"),
+            o(Layer::Front, "bring-to-front", tr("置于顶层", "Bring to front"), if cfg!(target_os = "macos") { "CtrlOrCmd+Alt+]" } else { "CtrlOrCmd+Shift+]" })])));
     }
     if s.align {
-        let o = |i: usize, ic, tip, k: Option<&str>, act| opt(("board-align", i), ic, false, tip, k.map(shortcut).as_deref(), act, cx);
-        // two rows (`.align-buttons`: 8 apart)
-        body = body.child(fieldset(tr("对齐", "Align")).child(div().py(px(4.)).flex().flex_col().gap(px(8.))
-            .child(div().flex().flex_wrap().gap(px(8.))
-                .child(o(0, "align-left", tr("左对齐", "Align left"), Some("CtrlOrCmd+Shift+Left"), BoardAction::Align(Axis::X, Position::Start)))
-                .child(o(1, "center-horizontally", tr("水平居中", "Center horizontally"), None, BoardAction::Align(Axis::X, Position::Center)))
-                .child(o(2, "align-right", tr("右对齐", "Align right"), Some("CtrlOrCmd+Shift+Right"), BoardAction::Align(Axis::X, Position::End)))
-                .when(s.distribute, |d| d.child(o(3, "distribute-horizontally", tr("水平等距分布", "Distribute horizontally"), Some("Alt+H"), BoardAction::Distribute(Axis::X)))))
-            .child(div().flex().flex_wrap().gap(px(8.))
-                .child(o(4, "align-top", tr("顶部对齐", "Align top"), Some("CtrlOrCmd+Shift+Up"), BoardAction::Align(Axis::Y, Position::Start)))
-                .child(o(5, "center-vertically", tr("垂直居中", "Center vertically"), None, BoardAction::Align(Axis::Y, Position::Center)))
-                .child(o(6, "align-bottom", tr("底端对齐", "Align bottom"), Some("CtrlOrCmd+Shift+Down"), BoardAction::Align(Axis::Y, Position::End)))
-                .when(s.distribute, |d| d.child(o(7, "distribute-vertically", tr("垂直等距分布", "Distribute vertically"), Some("Alt+V"), BoardAction::Distribute(Axis::Y)))))));
+        let o = |i: usize, ic, tip, k: Option<&str>, a| act(("board-align", i), picture(ic, 16., fg), tip, k.map(shortcut).as_deref(), a, cx);
+        // two rows
+        let mut x = vec![o(0, "align-left", tr("左对齐", "Align left"), Some("CtrlOrCmd+Shift+Left"), BoardAction::Align(Axis::X, Position::Start)),
+            o(1, "center-horizontally", tr("水平居中", "Center horizontally"), None, BoardAction::Align(Axis::X, Position::Center)),
+            o(2, "align-right", tr("右对齐", "Align right"), Some("CtrlOrCmd+Shift+Right"), BoardAction::Align(Axis::X, Position::End))];
+        let mut y = vec![o(4, "align-top", tr("顶部对齐", "Align top"), Some("CtrlOrCmd+Shift+Up"), BoardAction::Align(Axis::Y, Position::Start)),
+            o(5, "center-vertically", tr("垂直居中", "Center vertically"), None, BoardAction::Align(Axis::Y, Position::Center)),
+            o(6, "align-bottom", tr("底端对齐", "Align bottom"), Some("CtrlOrCmd+Shift+Down"), BoardAction::Align(Axis::Y, Position::End))];
+        if s.distribute {
+            x.push(o(3, "distribute-horizontally", tr("水平等距分布", "Distribute horizontally"), Some("Alt+H"), BoardAction::Distribute(Axis::X)));
+            y.push(o(7, "distribute-vertically", tr("垂直等距分布", "Distribute vertically"), Some("Alt+V"), BoardAction::Distribute(Axis::Y)));
+        }
+        body = body.child(fieldset(tr("对齐", "Align")).child(div().flex().flex_col().gap(px(8.)).child(options(x)).child(options(y))));
     }
     if s.extra {
-        body = body.child(fieldset(tr("操作", "Actions")).child(button_list()
-            .child(opt("board-act-duplicate", "duplicate", false, tr("创建副本", "Duplicate"), Some(&shortcut("CtrlOrCmd+D")), BoardAction::Duplicate, cx))
-            .child(opt("board-act-delete", "trash", false, tr("删除", "Delete"), None, BoardAction::Delete, cx))
-            .when(can_group, |d| d.child(opt("board-act-group", "group", false, tr("编组", "Group selection"), Some(&shortcut("CtrlOrCmd+G")), BoardAction::Group, cx)))
-            .when(can_ungroup(a), |d| d.child(opt("board-act-ungroup", "ungroup", false, tr("解除编组", "Ungroup selection"), Some(&shortcut("CtrlOrCmd+Shift+G")), BoardAction::Ungroup, cx)))
-            .when(s.crop_editor, |d| d.child(opt("board-act-crop", "crop", false, tr("裁剪图片", "Crop image"), None, BoardAction::ToggleCrop, cx)))
-            .when(s.line_editor, |d| d.child(opt("board-act-line", "line-editor", false, if editing_arrow { tr("编辑箭头", "Edit arrow") } else { tr("编辑线条", "Edit line") }, None, BoardAction::ToggleLinearEditor, cx)))));
+        let mut v = vec![act("board-act-duplicate", design::icon("copy", 16., fg), tr("创建副本", "Duplicate"), Some(&shortcut("CtrlOrCmd+D")), BoardAction::Duplicate, cx),
+            act("board-act-delete", design::icon("bin", 16., fg), tr("删除", "Delete"), None, BoardAction::Delete, cx)];
+        if can_group { v.push(act("board-act-group", picture("group", 16., fg), tr("编组", "Group selection"), Some(&shortcut("CtrlOrCmd+G")), BoardAction::Group, cx)); }
+        if can_ungroup(a) { v.push(act("board-act-ungroup", picture("ungroup", 16., fg), tr("解除编组", "Ungroup selection"), Some(&shortcut("CtrlOrCmd+Shift+G")), BoardAction::Ungroup, cx)); }
+        if s.crop_editor { v.push(act("board-act-crop", picture("crop", 16., fg), tr("裁剪图片", "Crop image"), None, BoardAction::ToggleCrop, cx)); }
+        if s.line_editor { v.push(act("board-act-line", picture("line-editor", 16., fg), if editing_arrow { tr("编辑箭头", "Edit arrow") } else { tr("编辑线条", "Edit line") }, None, BoardAction::ToggleLinearEditor, cx)); }
+        body = body.child(fieldset(tr("操作", "Actions")).child(options(v)));
     }
 
     // `appState.height - 166`
-    let max_h = (me.bounds.get().size.height - px(166.)).max(px(120.));
+    let max_h = f32::from((me.bounds.get().size.height - px(166.)).max(px(120.)));
     Some(div().absolute().left(px(style::PADDING)).top(px(TOP))
-        .child(island("board-props", 0.).max_w(px(MAX_W)).max_h(max_h).flex().flex_col()
-            .child(div().id("board-props-scroll").max_h(max_h).overflow_y_scroll().track_scroll(&crate::design::scroll::handle("board-props-scroll")).p(px(PAD)).child(body.w(px(cw)))
-                // the app's shared scrollbar, its ends clear of the island's corners
-                .child(crate::design::scroll::bar("board-props-scroll", &crate::design::scroll::handle("board-props-scroll"), style::RADIUS_LG))))
+        .child(panel("board-props").fit(max_h).inset(PAD).w(px(PANEL_W)).child(div().p(px(PAD)).child(body)))
         .into_any_element())
 }
 

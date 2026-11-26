@@ -2,7 +2,7 @@
 //! The 数据表's pieces are laid out as the table lays them out, with made-up rows.
 
 use super::*;
-use crate::design::{Badge, Button, ButtonSize, Card, Dialog, Field, Popover, Item, Kbd, Label, MenuItem, MenuLabel, MenuSeparator, Radio, Segment, Segmented, Separator, Switch, Textarea, Toast, ToastTone, geo};
+use crate::design::{Badge, Button, ButtonSize, Card, Dialog, Field, Popover, Item, Kbd, Label, MenuItem, MenuLabel, MenuSeparator, Radio, Segment, Segmented, Separator, Slider, Switch, Textarea, Toast, ToastTone, geo};
 
 type Cx<'a> = Context<'a, Gallery>;
 
@@ -33,6 +33,19 @@ fn swatches(g: &Gallery, k: K, n: u8, size: f32, cx: &mut Cx) -> Div {
             .on_click(tap(cx, move |g, _, _| { g.pick.insert(k, s as usize); })));
     }
     d
+}
+/// A slider to press and drag: the value in tenths (`pick`).
+fn slider(g: &Gallery, cx: &mut Cx) -> Stateful<Div> {
+    let at = std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
+    let (rec, a, b) = (at.clone(), at.clone(), at);
+    let set = |g: &mut Gallery, x: Pixels, bd: Bounds<Pixels>| {
+        let t = (f32::from(x - bd.left()) - 8.) / (f32::from(bd.size.width) - 16.);
+        g.pick.insert(("sld", 0), (t.clamp(0., 1.) * 10.).round() as usize);
+    };
+    div().id("sld-live").w(px(200.)).relative().py(px(2.)).child(Slider::new("sld-l", g.at(("sld", 0)) as f32 / 10.))
+        .child(canvas(move |bd, _, _| rec.set(bd), |_, _, _, _| {}).absolute().inset_0())
+        .on_mouse_down(MouseButton::Left, cx.listener(move |g, e: &MouseDownEvent, _, cx| { set(g, e.position.x, a.get()); cx.notify() }))
+        .on_mouse_move(cx.listener(move |g, e: &MouseMoveEvent, _, cx| if e.pressed_button == Some(MouseButton::Left) { set(g, e.position.x, b.get()); cx.notify() }))
 }
 fn chevron(open: bool) -> Svg { let i = icon("chevron-down", 14., color::muted_foreground()); if open { i.with_transformation(Transformation::rotate(percentage(0.5))) } else { i } }
 /// A menu of `items` (glyph, name), the picked one ticked: picking sets `k` and closes.
@@ -150,11 +163,14 @@ pub fn toggles(g: &mut Gallery, _w: &mut Window, cx: &mut Cx) -> Div {
             .child(Segment::new("seg-ic-1", "").icon("view-list").selected(g.at(("seg-ic", 0)) == 1).on_click(tap(cx, |g, _, _| { g.pick.insert(("seg-ic", 0), 1); })))))
         .child(item("Radio", div().flex().gap(px(16.)).children((0..2).map(|i| div().id(("rd", i)).flex().items_center().gap(px(8.)).cursor_pointer()
             .on_click(tap(cx, move |g, _, _| { g.pick.insert(("rd", 0), i); })).child(Radio::new(g.at(("rd", 0)) == i)).child(t(["仅文本", "所有内容"][i]))))))
-        .child(item("颜色（选项、填色）", swatches(g, ("sw-c", 0), 10, 22., cx).w(px(200.))));
+        .child(item("Swatch（选项、填色、画板颜色）", swatches(g, ("sw-c", 0), 10, 22., cx).w(px(200.))))
+        .child(item("Slider（按下、拖动）", slider(g, cx)));
     let still = row()
         .child(item("Checkbox · 关 / 开 / 部分 / 不可用", div().flex().gap(px(16.)).child(checkbox(false)).child(checkbox(true)).child(checkbox(false).partial(true)).child(checkbox(true).disabled(true))))
         .child(item("Radio · 关 / 开 / 不可用", div().flex().gap(px(16.)).child(Radio::new(false)).child(Radio::new(true)).child(Radio::new(true).disabled(true))))
         .child(item("Switch · 关 / 开 / 不可用", div().flex().gap(px(16.)).child(switch(false, true)).child(switch(true, true)).child(switch(true, false))))
+        .child(item("Slider · 0 / 40% / 混合 / 不可用", div().w(px(200.)).flex().flex_col().gap(px(16.))
+            .child(Slider::new("sld0", 0.)).child(Slider::new("sld1", 0.4)).child(Slider::new("sld2", 0.7).mixed(true)).child(Slider::new("sld3", 0.6).disabled(true))))
         .child(item("Segmented · 一段不可用", Segmented::new().w(px(260.)).child(Segment::new("sgd0", "低").selected(true)).child(Segment::new("sgd1", "中等")).child(Segment::new("sgd2", "高").disabled(true))));
     two(live, still)
 }

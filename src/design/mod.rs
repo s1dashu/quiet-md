@@ -34,7 +34,7 @@ pub use button::{Button, ButtonSize, ButtonVariant};
 #[allow(unused_imports)]
 pub use card::{Card, Item, Separator, Toast, ToastTone};
 #[allow(unused_imports)]
-pub use control::{Checkbox, Radio, Segment, Segmented, Switch};
+pub use control::{Checkbox, Radio, Segment, Segmented, Slider, Swatch, Switch};
 #[allow(unused_imports)]
 pub use dialog::{Dialog, DialogFocus, scrim};
 #[allow(unused_imports)]

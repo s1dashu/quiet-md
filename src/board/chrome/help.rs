@@ -1,14 +1,17 @@
 //! The help dialog and the clear-canvas confirmation, after Excalidraw
-//! `HelpDialog.tsx`, `ConfirmDialog.tsx`, `Dialog.tsx` / `Modal.tsx` and their
-//! SCSS @ 3a317b5: a modal (`--overlay-bg-color` scrim, 12px-radius island
-//! with `--modal-shadow`, 40px padding) titled "Help" over "Keyboard
-//! shortcuts" in three islands (tools, view, editor; two columns), each row
-//! a label and its keys as `--color-primary-light` chips with "or" between.
+//! `HelpDialog.tsx`, `ConfirmDialog.tsx`, `Dialog.tsx` / `Modal.tsx` @
+//! 3a317b5: "Help" over "Keyboard shortcuts" in three groups (tools, view,
+//! editor; two columns), each row a label and its keys with "or" between.
+//! Looks: a `design::Dialog` (closable, 960 wide, its body scrolling) over the
+//! board's `scrim()`, each group a `Card` of rows parted by `Separator`s, the
+//! keys `design::Kbd`s; the confirmation `Dialog::alert` with outline Cancel
+//! and destructive Confirm.
 //! Differs: no header links (docs, blog, GitHub, YouTube); only the
 //! shortcuts the board has, plus 退出画板 (Esc).
 
 use super::*;
 use crate::board::action::{BoardAction, Tool};
+use crate::design::{Button, Card, Dialog, Kbd, Separator};
 use crate::settings::tr;
 
 /// A row: the label and its alternatives, each a `+`-joined key list
@@ -93,75 +96,61 @@ fn editor() -> Vec<Row> {
     ]
 }
 
-/// `HelpDialog__key`: 10px, `--color-primary-light`, radius 6, padding 8.
-fn key(k: &str) -> Div {
-    let k = if k.chars().count() == 1 { k.to_uppercase() } else { k.to_string() };
-    div().flex_none().p(px(8.)).rounded(px(style::RADIUS_MD)).bg(style::primary_light()).text_size(px(10.)).line_height(px(10.)).whitespace_nowrap().child(k)
-}
+/// A key cap: one letter upper case.
+fn key(k: &str) -> Kbd { Kbd::new(if k.chars().count() == 1 { k.to_uppercase() } else { k.to_string() }) }
 
-/// `ShortcutIsland`: the 16px bold caption 10 above the bordered rows.
+/// `ShortcutIsland`: the caption over a card of rows.
 fn island_rows(caption: &'static str, rows: Vec<Row>) -> Div {
-    let mut list = div().flex().flex_col().rounded(px(style::RADIUS_LG)).border_1().border_color(style::dialog_border());
+    let g = design::geo();
+    let mut list = Card::new(caption);
     let n = rows.len();
     for (i, Row(label, alts, and)) in rows.into_iter().enumerate() {
         let mut keys = div().flex_none().flex().items_center().gap(px(4.));
         for (j, alt) in alts.iter().enumerate() {
-            if j > 0 && !and { keys = keys.child(div().child(tr("或", "or"))); }
+            if j > 0 && !and { keys = keys.child(div().text_size(px(g.text_xs)).text_color(design::color::muted_foreground()).child(tr("或", "or"))); }
             // `split("+")`, keeping a trailing "+" key ("Cmd++")
             let parts: Vec<String> = if let Some(s) = alt.strip_suffix("++") { s.split('+').map(str::to_string).chain(std::iter::once("+".to_string())).collect() } else { alt.split('+').map(str::to_string).collect() };
             for p in parts { keys = keys.child(key(&p)); }
         }
-        list = list.child(div().flex().items_center().justify_between().gap(px(8.)).px(px(12.)).py(px(6.)).text_size(px(14.)).line_height(style::lh(14.))
-            .when(i + 1 < n, |d| d.border_b_1().border_color(style::dialog_border()))
-            .child(div().child(label)).child(keys));
+        list = list.child(div().min_h(px(36.)).flex().items_center().justify_between().gap(px(8.)).px(px(12.)).py(px(6.)).child(div().child(label)).child(keys));
+        if i + 1 < n { list = list.child(Separator::new()); }
     }
-    div().flex().flex_col().child(div().mb(px(10.)).text_size(px(16.)).line_height(style::lh(16.)).font_weight(FontWeight::BOLD).child(caption)).child(list)
+    div().flex().flex_col().gap(px(g.label_gap)).child(div().text_color(design::color::muted_foreground()).child(caption)).child(list)
 }
 
-/// `Modal` + `Dialog`: the scrim, and the island (`max_w`) with its title.
-fn modal(id: &'static str, max_w: f32, title: &'static str, body: impl IntoElement, on_close: impl Fn(&mut BoardView, &mut Context<BoardView>) + Clone + 'static, window: &mut Window, cx: &mut Context<BoardView>) -> impl IntoElement {
-    let _ = window;
-    let close = on_close.clone();
-    // the scrim covers the board (upstream: the Excalidraw container)
-    let dialog = div().id(id).occlude().w_full().max_w(px(max_w)).max_h(relative(1.)).overflow_y_scroll().track_scroll(&crate::design::scroll::handle(id))
-        .bg(style::island_bg()).border_1().border_color(style::dialog_border()).shadow(style::shadow_modal()).rounded(px(12.)).p(px(40.)).text_color(style::text())
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_scroll(|_, _, cx| cx.stop_propagation())
-        .child(div().pb(px(12.)).mb(px(24.)).border_b_1().border_color(style::dialog_border()).text_size(px(20.)).line_height(style::lh(20.)).font_weight(FontWeight::BOLD).child(title))
-        .child(body)
-        // the app's shared scrollbar, its ends clear of the dialog's corners
-        .child(crate::design::scroll::bar(id, &crate::design::scroll::handle(id), 12.));
-    deferred(div().id((id, 1usize)).occlude().absolute().top_0().left_0().size_full().p(px(40.)).bg(style::overlay_bg()).flex().items_center().justify_center()
-        .font_family(style::UI_FONT)
-        .on_mouse_down(MouseButton::Left, cx.listener(move |me, _, _, cx| close(me, cx)))
+/// The scrim over the board and the dialog in it; a press outside closes it.
+fn modal(id: &'static str, dialog: Dialog, on_close: impl Fn(&mut BoardView, &mut Context<BoardView>) + 'static, cx: &mut Context<BoardView>) -> impl IntoElement {
+    deferred(design::scrim().id((id, 1usize)).occlude().p(px(40.))
+        .on_mouse_down(MouseButton::Left, cx.listener(move |me, _, _, cx| on_close(me, cx)))
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .on_scroll(|_, _, cx| cx.stop_propagation())
-        .child(dialog)).with_priority(5)
+        .child(dialog.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).on_scroll(|_, _, cx| cx.stop_propagation()))).with_priority(5)
 }
 
 pub(crate) fn render(window: &mut Window, cx: &mut Context<BoardView>) -> impl IntoElement {
     let wide = window.viewport_size().width >= px(1024.);
     let islands = if wide {
         div().flex().items_start().gap(px(24.))
-            .child(div().flex_1().min_w_0().flex().flex_col().gap(px(32.)).child(island_rows(tr("工具", "Tools"), tools())).child(island_rows(tr("视图", "View"), view())))
+            .child(div().flex_1().min_w_0().flex().flex_col().gap(px(24.)).child(island_rows(tr("工具", "Tools"), tools())).child(island_rows(tr("视图", "View"), view())))
             .child(div().flex_1().min_w_0().child(island_rows(tr("编辑器", "Editor"), editor())))
     } else {
-        div().flex().flex_col().gap(px(32.)).child(island_rows(tr("工具", "Tools"), tools())).child(island_rows(tr("视图", "View"), view())).child(island_rows(tr("编辑器", "Editor"), editor()))
+        div().flex().flex_col().gap(px(24.)).child(island_rows(tr("工具", "Tools"), tools())).child(island_rows(tr("视图", "View"), view())).child(island_rows(tr("编辑器", "Editor"), editor()))
     };
-    let body = div().flex().flex_col()
-        .child(div().mt(px(24.)).mb(px(24.)).text_size(px(18.)).line_height(style::lh(18.)).font_weight(FontWeight::BOLD).child(tr("快捷键列表", "Keyboard shortcuts")))
-        .child(islands);
-    modal("board-help-dialog", 960., tr("帮助", "Help"), body, |me, cx| me.set_help_open(false, cx), window, cx)
+    let handle = design::scroll::handle("board-help");
+    // as tall as it is, up to what the window leaves; the rest scrolls
+    let body = design::scroll::make_room(div().id("board-help-body").flex_initial().min_h_0().overflow_y_scroll().track_scroll(&handle).child(islands)
+        .child(design::scroll::bar("board-help", &handle, 0.)), "board-help", 0.);
+    let dialog = Dialog::new("board-help-dialog").title(tr("帮助", "Help")).description(tr("快捷键列表", "Keyboard shortcuts"))
+        .closable(cx.listener(|me, _, _, cx| me.set_help_open(false, cx))).w(px(960.)).max_w_full().max_h_full().child(body);
+    modal("board-help-dialog", dialog, |me, cx| me.set_help_open(false, cx), cx)
 }
 
-/// `ConfirmDialog` for `actionClearCanvas` ("small", 550): the text, then
-/// Cancel and Confirm (the latter `danger`-filled).
-pub(crate) fn clear_canvas(window: &mut Window, cx: &mut Context<BoardView>) -> impl IntoElement {
-    let button = |id: &'static str, label: &'static str, danger: bool| crate::design::Button::new(id, if danger { crate::design::ButtonVariant::Destructive } else { crate::design::ButtonVariant::Outline }).label(label);
-    let body = div().flex().flex_col().gap(px(24.)).text_size(px(16.)).line_height(style::lh(16.))
-        .child(div().child(tr("这将会清除整个画布。您是否要继续?", "This will clear the whole canvas. Are you sure?")))
-        .child(div().flex().justify_end().gap(px(12.))
-            .child(button("board-clear-cancel", tr("取消", "Cancel"), false).on_click(cx.listener(|_, _, _, cx| set_pop(None, cx))))
-            .child(button("board-clear-confirm", tr("确定", "Confirm"), true).on_click(cx.listener(|me, _, window, cx| { set_pop(None, cx); me.run(BoardAction::ClearCanvas, window, cx) }))));
-    modal("board-clear-dialog", 550., tr("清除画布", "Clear canvas"), body, |_, cx| set_pop(None, cx), window, cx)
+/// `ConfirmDialog` for `actionClearCanvas`: the question, then Cancel and
+/// Confirm (destructive).
+pub(crate) fn clear_canvas(_window: &mut Window, cx: &mut Context<BoardView>) -> impl IntoElement {
+    let footer = div().flex().justify_end().gap(px(8.))
+        .child(Button::outline("board-clear-cancel").label(tr("取消", "Cancel")).on_click(cx.listener(|_, _, _, cx| set_pop(None, cx))))
+        .child(Button::destructive("board-clear-confirm").label(tr("确定", "Confirm")).on_click(cx.listener(|me, _, window, cx| { set_pop(None, cx); me.run(BoardAction::ClearCanvas, window, cx) })));
+    let dialog = Dialog::alert("board-clear-dialog").title(tr("清除画布", "Clear canvas")).description(tr("这将会清除整个画布。您是否要继续?", "This will clear the whole canvas. Are you sure?")).footer(footer);
+    modal("board-clear-dialog", dialog, |_, cx| set_pop(None, cx), cx)
 }

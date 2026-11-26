@@ -163,3 +163,55 @@ impl RenderOnce for Radio {
         d
     }
 }
+
+/// A colour to pick (shadcn has none; ours: the 数据表's option colours and 填色, the board's
+/// colours): `fill` on a square at `rounded-sm` with a 1pt `border` hairline; picked, a 2pt `ring`.
+/// Borders, not a ring in the shadow: GPUI paints a shadow under the box too, and fills may be
+/// translucent. Its children sit on the colour (a ✓, a key, the checker of no colour).
+#[derive(IntoElement)]
+pub struct Swatch { base: Stateful<Div>, fill: Hsla, size: f32, picked: bool }
+element!(Swatch, parent);
+impl Swatch {
+    pub fn new(id: impl Into<ElementId>, fill: Hsla) -> Self { Swatch { base: div().id(id), fill, size: 22., picked: false } }
+    pub fn sized(mut self, s: f32) -> Self { self.size = s; self }
+    pub fn selected(mut self, on: bool) -> Self { self.picked = on; self }
+}
+impl RenderOnce for Swatch {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let (fill, size, picked) = (self.fill, self.size, self.picked);
+        under(self.base, |d| d.flex_none().relative().size(px(size)).rounded(px(geo().menu_row_r)).bg(fill).cursor_pointer()
+            .when(picked, |d| d.border_2().border_color(color::ring())).when(!picked, |d| d.border_1().border_color(color::border())))
+    }
+}
+
+/// shadcn's `Slider`: a 6pt `muted` track, the part up to the value `primary`, a 16pt thumb
+/// (`background` on a `primary` hairline, shadow-sm) with a 4pt `ring/50` halo under the pointer.
+/// It only draws (`value` 0–1); the caller turns presses and drags on it into a value. `mixed`: no
+/// value to show (a selection that differs), so no range.
+#[derive(IntoElement)]
+pub struct Slider { base: Stateful<Div>, value: f32, mixed: bool, disabled: bool }
+element!(Slider);
+impl Slider {
+    pub fn new(id: impl Into<ElementId>, value: f32) -> Self { Slider { base: div().id(id), value: value.clamp(0., 1.), mixed: false, disabled: false } }
+    pub fn mixed(mut self, on: bool) -> Self { self.mixed = on; self }
+    pub fn disabled(mut self, on: bool) -> Self { self.disabled = on; self }
+}
+/// The thumb's size, for a caller turning a pointer's x into a value.
+pub const SLIDER_THUMB: f32 = 16.;
+impl RenderOnce for Slider {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let (v, mixed, off) = (self.value, self.mixed, self.disabled);
+        let t = SLIDER_THUMB;
+        let halo = BoxShadow { color: color::focus_ring(), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(4.), inset: false };
+        let mut thumb_sh = shadow::sm();
+        let mut hover_sh = vec![halo];
+        hover_sh.append(&mut thumb_sh.clone());
+        let group = SharedString::from("design-slider");
+        under(self.base, |d| d.relative().w_full().h(px(t)).flex().items_center().group(group.clone()).when(off, |d| d.opacity(0.5)).when(!off, |d| d.cursor_pointer())
+            .child(div().w_full().h(px(6.)).rounded_full().bg(color::muted()).overflow_hidden()
+                .when(!mixed, |d| d.child(div().h_full().w(relative(v)).bg(color::primary()))))
+            // the thumb's centre runs from half a thumb in to half a thumb short of the end
+            .child(div().absolute().top_0().left(relative(v)).ml(px(-t * v)).size(px(t)).rounded_full().border_1().border_color(color::primary()).bg(color::background())
+                .shadow(std::mem::take(&mut thumb_sh)).when(!off, |d| d.group_hover(group, move |s| s.shadow(hover_sh.clone())))))
+    }
+}

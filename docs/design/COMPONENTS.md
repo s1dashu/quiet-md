@@ -57,6 +57,8 @@
 | `Checkbox` | `Checkbox::new(checked)` | — | `.partial(bool)`（部分选中：实心加横杠）、`.disabled(bool)` | `Styled`（点击由外层可点元素接） |
 | `Radio` | `Radio::new(picked)` | — | `.disabled(bool)` | `Styled`（同上） |
 | `Switch` | `Switch::new(on)` | — | `.disabled(bool)` | `Styled`（同上） |
+| `Swatch` | `Swatch::new(id, fill)` | `.sized(f32)`（默认 22） | `.selected(bool)`（选中：2pt 的 `ring` 环，用边框画；否则 1pt 的 `border` 边）；`.child()` 叠在颜色上（快捷键角标、无色的棋盘格） | 同 `Button` |
+| `Slider` | `Slider::new(id, value)`（0–1） | — | `.mixed(bool)`（多选值不同：只显示轨道和滑块）、`.disabled(bool)`；6pt 的 `muted` 轨道、`primary` 已选段、16pt 白底 `primary` 边的滑块，悬停时 4pt 焦点光晕（shadcn 的 Slider）；拖动由外层元素接，`design::control::SLIDER_THUMB` 是滑块直径 | `Styled` |
 | `Segmented` / `Segment` | `Segmented::new().child(Segment::new(id, label).selected(bool))`；`Segmented::of(id, &[..], picked)` | — | `Segment::selected(bool)`、`Segment::disabled(bool)`、`Segment::icon(name)`（文字为空时是图标分段，如宫格 / 列表切换） | `Segment`：同 `Button` |
 | `Badge` | `Badge::new(s)`（secondary）、`Badge::primary / outline / destructive(s)`、`Badge::chip(s, i)`（第 i 种选项色，9 为灰）、`Badge::colored(s, (底, 字))` | — | `.closable()`（末尾 ×） | `Styled` |
 | `Kbd` | `Kbd::new(s)` | — | — | — |
@@ -145,14 +147,15 @@ shadcn 没有 Toolbar，这里按它已有的零件拼（2026-11-23，维护者�
 
 | 类 | 状态 | 范围 |
 |---|---|---|
-| 数据表 | ✅ | `table::style` 改成转发到组件库（`menu_item`、`primary_btn`、`input_box` 等保留名字，返回新组件）；表格专用的部分（网格尺寸、选项颜色 `tag_colors`、选区、`swatch`、`person`、`inset_list`）留在 `style.rs`。所有 `popover()` 换成 `Popover` |
+| 数据表 | ✅ | `table::style` 改成转发到组件库（`menu_item`、`primary_btn`、`input_box` 等保留名字，返回新组件）；表格专用的部分（网格尺寸、选项颜色 `tag_colors`、选区、`swatch`（2026-11-27 起转发到 `design::Swatch`）、`person`、`inset_list`）留在 `style.rs`。所有 `popover()` 换成 `Popover` |
 | 1. 菜单（应用外壳） | ✅ | 「…」文档菜单和它的子菜单（`docmenu.rs`）、侧栏右键菜单和批量菜单、下载子菜单（`sidebar.rs`）、新建菜单和文件夹右键（`folders.rs`）、本机文件 / 挂载文件夹右键（`local_files.rs`、`local_folders.rs`）、导入和「…」位置菜单（`transfer.rs`）、主页排序（`home.rs`）、回收站右键（`trash.rs`）、编辑 / 阅读模式（`modes.rs`）、引导页语言（`onboarding.rs`）、设置里的主题 / 偏好 / 字体 / 语言下拉（`settings.rs`）。删掉了 `ui::menu_label`、`ui::menu_glyph`、`theme::shadow_s4_down` |
 
 | 2. 全应用（2026-11-22，分支 `claude/swap-all-components-da81f8`） | ✅ | **编辑器菜单**：斜杠、块、转换、工具栏下拉、链接、@ 提及、编号（`overlays.rs`、`link.rs`、`links.rs`、`numbering.rs`），位置计算改用 `menu::{PAD, ROW_H, SEP_H, LABEL_H}`；**按钮**：页头图标按钮（`ui::header_icon` 现在返回 `Button::ghost`）、侧栏和主页的工具按钮、批量工具栏、文件夹卡片上的浮动按钮、各处手写的悬停图标按钮；**对话框**：确认、移动到、导出 Markdown、文档信息、搜索、强制更新、倒计时、表格记录详情（`Dialog` + `scrim()`）；**开关 / 复选框 / 分段 / 单选**：设置、文档菜单、批量勾选（含半选）、主页标签和宫格 / 列表切换、导出范围、倒计时；**输入框**：移动到、查找替换、链接、表情、封面、按钮块设置、提醒、倒计时、设置里的快捷键录制（`Field` + `KbdGroup`）；**卡片**：设置分组、引导页、更新日志（`Card` + `Item` + `Separator`）；**浮层外壳**：版本历史、查找栏、图片 / 附件工具栏、封面和表情面板、画板主菜单和右键菜单（`Popover`）；**提示气泡和 toast**：`ui::Tooltip` 改成 shadcn 的样子，toast 用 `Toast`。删掉了 `ui::popover`、`ui::menu_row`、`ui::MENU_*`、`ui::primary_button`、`ui::secondary_button`、`ui::close_button`、`ui::dialog`、`ui::scrim`、`ui::checkbox`、`ui::pill`、`ui::continuous_surface`、`editor_ui` 里的菜单转发 |
+| 3. 画板外壳（2026-11-27，分支 `feat/board-chrome-refresh`） | ✅ | `board/chrome/`：顶部工具条 `Toolbar` + `Toggle`（按下 = 当前工具，编号角标保留）+ `ButtonGroupSeparator`，「更多工具」下拉 `Popover` 菜单；左上主菜单按钮 ghost `Button` 放在单按钮 `Toolbar` 里；左下缩放 / 撤销重做、右下帮助各一条 `Toolbar` + ghost sm `Button`；属性面板 `Popover`（padded 16、宽 200），选项是 `ButtonGroup` 里的 outline `Toggle`，操作 / 图层 / 对齐是 outline `Button`，透明度新加 `Slider`；颜色选择器用新加的 `Swatch`、`Popover`、`Field`；箭头端点和字体选择器 `Popover` + `Toggle` / `MenuItem` + `MenuLabel` + `Badge`；帮助 `Dialog`（可关、960 宽）+ `Card` + `Separator` + `Kbd`；清空画布 `Dialog::alert`；字体下载提示 `Toolbar` + link `Button`。工具和角落按钮换成 Nucleo 图标（新增 15 个，菱形自己画）。删掉了 `chrome::island`、`outline_button`、`filled_button`、`style` 里 Excalidraw 的界面色和阴影，提示气泡改用 `ui::Tooltip` |
 
 ### 还没换的
 
-- **画板工具栏、属性面板、颜色选择器、帮助对话框外壳**（`board/chrome/`）：照搬 Excalidraw 的样式和图标，工具按钮带编号角标、色块和字号滑块，组件库里没有对应的东西；只换了它的菜单和确认按钮。要不要整体换成 design 风格待定。
+- **画板属性面板里的选项图**（`assets/icons/excalidraw/`）：填充、描边宽度 / 样式、线条风格、边角、箭头、字体、对齐、图层这些按钮里画的是画布上画出来的样子，仍用 Excalidraw 的图；按钮本身已是 `Toggle` / `Button`。Nucleo 授权最多 100 个，换不过来，也没有对应的图。
 - **压在影片背景上的引导页按钮**（跳过、上一步、全选）：深色半透明白字，组件的悬停底色在草地画面上看不清；背景是平的时候已经用 design 按钮。
 - **图片大图查看器的深色控制条**：压在黑色遮罩上的白色图标，ghost 的 `muted` 在上面看不见。
 - **代码块头上的语言 / 复制 / 换行**（`render.rs`）：在块里面、跟文档主题走（文档字体、主题色），不是浮起来的工具条。

@@ -7,7 +7,6 @@ pub use crate::design::icon;
 use crate::design::{Button, ButtonSize, Checkbox, Field, FieldSize, Label, MenuItem, MenuLabel, MenuSeparator, Segment, Segmented, Switch, Badge, chip, color, geo, shadow};
 use crate::table::FieldType;
 use fdl_core::table::RowHeight;
-use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 /// The 数据表's palette under the names its code uses (the app's `Theme` methods), drawn from the
@@ -230,12 +229,7 @@ pub fn close_btn(id: impl Into<ElementId>) -> Button { Button::ghost(id).icon("x
 pub fn seg_track() -> Segmented { Segmented::new() }
 pub fn segment(id: impl Into<ElementId>, on: bool, label: impl Into<SharedString>) -> Segment { Segment::new(id, label).selected(on) }
 
-/// A colour swatch to pick (the option colours, 填色), `size` square: picked, a `ring` round it.
-pub fn swatch(id: impl Into<ElementId>, fill: Hsla, size: f32, picked: bool) -> Stateful<Div> {
-    let r = geo().menu_row_r;
-    div().id(id).flex_none().size(px(size)).rounded(px(r)).bg(fill).cursor_pointer()
-        // borders, not rings in the shadow: GPUI paints a shadow under the box too, and the fills are translucent
-        .when(picked, |d| d.border_2().border_color(color::ring()))
-        .when(!picked, |d| d.border_1().border_color(color::border()))
-}
+/// A colour swatch to pick (the option colours, 填色), `size` square: picked, a `ring` round it
+/// (`design::Swatch`).
+pub fn swatch(id: impl Into<ElementId>, fill: Hsla, size: f32, picked: bool) -> crate::design::Swatch { crate::design::Swatch::new(id, fill).sized(size).selected(picked) }
 
