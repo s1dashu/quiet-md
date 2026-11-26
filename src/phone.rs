@@ -62,8 +62,10 @@ struct Swipe {
 struct Held {
     id: String,
     since: Instant,
-    /// A drawer row's press, the finger still down: moving it carries the row instead (`sidebar_drag.rs`).
+    /// A drawer row's or a card's press, the finger still down: moving it carries the row
+    /// (`sidebar_drag.rs`) or the card (`home_folder.rs`) instead.
     press: Option<Point<Pixels>>,
+    card: bool,
 }
 
 #[derive(Default)]
@@ -78,6 +80,8 @@ pub struct Phone {
     held: Option<Held>,
     /// Each row's bounds, by entry, as last painted.
     rows: Rc<RefCell<HashMap<String, Bounds<Pixels>>>>,
+    /// A phone's page was drawn in the last frame.
+    paged: bool,
 }
 
 fn ease(t: f32) -> f32 { 1. - (1. - t).powi(3) }
@@ -191,7 +195,7 @@ impl Workspace {
         if crate::shared_store::top_of_row(&e.id).is_some() || e.meta.local() {
             self.row_menu = Some(RowMenu { id, pos: at, corner: Anchor::TopLeft, sub: false, batch: false });
         } else {
-            self.phone.held = Some(Held { id, since: Instant::now(), press: None });
+            self.phone.held = Some(Held { id, since: Instant::now(), press: None, card: false });
         }
         cx.notify();
         true
@@ -203,8 +207,70 @@ impl Workspace {
         self.close_swipe(cx);
         haptic(Haptic::Medium);
         self.row_menu = None;
-        self.phone.held = Some(Held { id: id.to_string(), since: Instant::now(), press: Some(at) });
+        self.phone.held = Some(Held { id: id.to_string(), since: Instant::now(), press: Some(at), card: false });
         cx.notify();
+    }
+
+    /// The same for a document's card on a phone's page.
+    pub(crate) fn hold_card(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        haptic(Haptic::Medium);
+        self.row_menu = None;
+        self.phone.held = Some(Held { id: id.to_string(), since: Instant::now(), press: Some(at), card: true });
+        cx.notify();
+    }
+
+    /// A phone's page was drawn last frame: its cards' long presses are menus first.
+    pub(crate) fn phone_paged(&self) -> bool { self.phone.paged }
+
+    /// The rest of a long press that opened a menu with the finger still down.
+    fn held_follow(&mut self, ev: &LongPressEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.phone.held.as_ref().is_some_and(|h| h.card) { return self.on_row_long_press(ev, window, cx) }
+        if let Ok(id) = self.held_moved(ev, cx) { self.lift_home_card(&id, ev.position, cx); }
+    }
+
+    /// A folder's card on a phone's page: a long press is its menu.
+    fn card_hold(&self, id: &str, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let (id, ws) = (id.to_string(), cx.entity());
+        canvas(|b, window, _| window.insert_hitbox(b, HitboxBehavior::Normal), move |_, hitbox, window, _| {
+            window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
+                if phase != DispatchPhase::Bubble || ev.phase != TouchPhase::Started || !hitbox.is_hovered(window) { return }
+                ws.update(cx, |w, cx| { haptic(Haptic::Medium); w.row_menu = None; w.phone.held = Some(Held { id: id.clone(), since: Instant::now(), press: None, card: true }); cx.notify(); });
+                window.prevent_default();
+                cx.stop_propagation();
+            });
+        }).absolute().inset_0()
+    }
+
+    /// A phone's cards, two to a row. Only the rows in or beside the window are built; the
+    /// rest keep their room.
+    fn phone_cards(&mut self, entries: &[Entry], y: f32, view_h: f32, window: &mut Window, cx: &mut Context<Self>) -> (Div, f32) {
+        const COLS: usize = 2;
+        let vw = f32::from(window.viewport_size().width);
+        let mixed = entries.iter().any(|e| e.meta.folder.is_some() && e.note.is_none());
+        let gap = if mixed { 20. } else { 14. };
+        let col_w = (vw - 32. - gap * (COLS - 1) as f32) / COLS as f32;
+        let doc_h = (col_w * 1.2).round();
+        let card_h = if mixed { (doc_h / (1. - crate::home_folder::TAB)).round() } else { doc_h };
+        let row_h = card_h + gap;
+        let rows = entries.len().div_ceil(COLS);
+        let first = (((y - SEARCH_H - TITLE_H - 8.) / row_h).floor() as isize - 1).max(0) as usize;
+        let last = (first + (view_h / row_h).ceil() as usize + 2).min(rows);
+        self.home.thumb_deferred.set(true);
+        let mut grid = div().relative().flex_none().pt(px(8.)).px(px(16.)).child(div().h(px(first as f32 * row_h)));
+        for row in first..last {
+            let mut line = div().h(px(row_h)).pb(px(gap)).flex().gap(px(gap));
+            for e in &entries[row * COLS..((row + 1) * COLS).min(entries.len())] {
+                let cell = div().relative().w(px(col_w)).h(px(card_h)).flex_none();
+                line = line.child(if e.meta.folder.is_some() && e.note.is_none() {
+                    cell.child(self.render_folder_card(e, col_w, card_h, window, cx)).child(self.card_hold(&e.id, cx))
+                } else {
+                    cell.flex().flex_col().justify_end().child(self.render_home_card(e, doc_h, cx))
+                });
+            }
+            grid = grid.child(line);
+        }
+        self.home.thumb_deferred.set(false);
+        (grid.child(div().h(px((rows - last) as f32 * row_h))), 8. + rows as f32 * row_h)
     }
 
     /// The rest of that long press. `Some(id)`: the finger has moved off, the menu is gone
@@ -250,6 +316,7 @@ impl Workspace {
     /// Each frame: a let-go row settles; the drawer's goes with the drawer.
     pub(crate) fn phone_tick(&mut self, window: &mut Window) {
         sheet_tick();
+        self.phone.paged = false;
         if self.phone.swipe.as_ref().is_some_and(|s| s.drawer && !self.sidebar_open) { self.phone.swipe = None; }
         let Some(s) = self.phone.swipe.as_mut() else { return };
         if let Some(a) = s.settle {
@@ -392,10 +459,16 @@ impl Workspace {
             column = column.child(div().h(px(vh - top - BAR_H - SEARCH_H - TITLE_H - 80.)).flex().child(crate::trash::empty_state("illus/empty-list.svg", text)));
         }
         let n = entries.len();
-        let mut rows = div().relative().flex_none().child(self.phone_gestures(cx));
-        for (i, e) in entries.iter().enumerate() { rows = rows.child(self.phone_row(e, i + 1 == n, cx)); }
+        self.phone.paged = true;
+        let (rows, rows_h) = if self.home.phone_list {
+            let mut rows = div().relative().flex_none().child(self.phone_gestures(cx));
+            for (i, e) in entries.iter().enumerate() { rows = rows.child(self.phone_row(e, i + 1 == n, cx)); }
+            (rows, n as f32 * row_h())
+        } else { self.phone_cards(&entries, y, vh - top - BAR_H, window, cx) };
+        // The previews those cards asked for are built between frames.
+        self.pump_thumbs(cx);
         // Tall enough to scroll the search field away however short the list; clear of 新建 and the home indicator.
-        let fill = (vh - top - BAR_H - TITLE_H - n as f32 * row_h()).max(FAB + 32. + bottom);
+        let fill = (vh - top - BAR_H - TITLE_H - rows_h).max(FAB + 32. + bottom);
         column = column.child(rows).child(div().h(px(fill)).flex_none());
         let lead = if folder { self.back_button(cx).unwrap_or_else(|| div().into_any_element()) } else {
             crate::design::Button::ghost("open-sidebar").icon(crate::sidebar::toggle_glyph(false))
@@ -420,9 +493,13 @@ impl Workspace {
             .bg(color::primary()).shadow(theme::shadow_menu()).flex().items_center().justify_center().active(|s| s.opacity(0.7))
             .child(icon("plus", 26., color::primary_foreground()))
             .child(self.home.track("phone-new"))
-            .on_click(cx.listener(move |w, _, window, cx| {
+            // One tap: what to make (文档, Markdown, 画板, 数据表, 文件夹), as a folder's "+" asks on the desktop.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| {
                 haptic(Haptic::Light);
-                w.create_doc(crate::settings::quick_new_markdown(), parent.clone().or_else(|| w.creation_parent()), window, cx);
+                let pos = w.home.anchor("phone-new").map_or(ev.position(), |b| point(b.right(), b.top() - px(8.)));
+                w.create_menu = if w.create_menu.is_some() { None } else { Some((parent.clone(), pos)) };
+                cx.notify();
             }));
         div().relative().flex_1().min_w_0().h_full().flex().flex_col()
             .child(self.phone_bar(lead, title, shown, trail, window))
@@ -438,7 +515,7 @@ impl Workspace {
         // A drawer row's press, the finger still down: its movement is the row's (`sidebar_drag.rs`).
         let follow = held.press.is_some().then(|| { let ws = cx.entity(); canvas(|_, _, _| {}, move |_, _, window, _| {
             window.on_mouse_event(move |ev: &LongPressEvent, phase, window, cx| {
-                if phase == DispatchPhase::Bubble && ev.phase != TouchPhase::Started { ws.update(cx, |w, cx| w.on_row_long_press(ev, window, cx)); }
+                if phase == DispatchPhase::Bubble && ev.phase != TouchPhase::Started { ws.update(cx, |w, cx| w.held_follow(ev, window, cx)); }
             });
         }).absolute().size_0() });
         let Some(e) = self.entries.iter().find(|e| e.id == held.id).cloned() else { self.phone.held = None; return None };
@@ -497,8 +574,8 @@ impl Workspace {
                 .children(follow).child(preview).child(menu))).with_priority(2).into_any_element())
     }
 
-    pub(crate) fn phone_lists(&self, window: &Window) -> bool {
-        self.phone(window) && self.batch.is_none() && !self.home.phone_grid
+    pub(crate) fn phone_pages(&self, window: &Window) -> bool {
+        self.phone(window) && self.batch.is_none()
     }
 }
 
@@ -650,7 +727,7 @@ impl Workspace {
     pub(crate) fn scroll_to_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.view {
             crate::app::View::Doc => if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| { e.list.scroll_to(ListOffset { item_ix: 0, offset_in_item: px(0.) }); cx.notify(); }) },
-            crate::app::View::Home | crate::app::View::Folder if self.phone_lists(window) => {
+            crate::app::View::Home | crate::app::View::Folder if self.phone_pages(window) => {
                 let scroll = self.phone_scroll_handle(self.view == crate::app::View::Folder);
                 let y = -f32::from(scroll.offset().y);
                 // To the large title; from there, on to the search field.

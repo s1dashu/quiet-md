@@ -248,9 +248,9 @@ pub struct Settings {
     /// 主页: list instead of grid, and the sort order ("visited" …).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub home_list: bool,
-    /// A phone shows 主页 as a list whatever `home_list` says; this asks for its grid.
+    /// A phone shows 主页 as cards whatever `home_list` says; this asks for its list.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub home_phone_grid: bool,
+    pub home_phone_list: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_sort: Option<String>,
     /// 升序 / 降序 for `home_sort`; absent in settings from before it existed.

@@ -163,7 +163,7 @@ impl Workspace {
             Place::Home => self.render_home(window, cx),
             Place::Folder(id) => {
                 let shown = self.folder_current.replace(id.clone());
-                let el = if self.phone_lists(window) { self.render_phone_list(true, window, cx) } else { self.render_folder(window, cx) };
+                let el = if self.phone_pages(window) { self.render_phone_list(true, window, cx) } else { self.render_folder(window, cx) };
                 self.folder_current = shown;
                 el
             }

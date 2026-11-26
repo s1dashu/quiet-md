@@ -439,6 +439,12 @@ impl Workspace {
     /// Touch: a long press on a document card picks it up at once (there is
     /// no pointer to move 5pt first). Returns whether it did.
     fn touch_home_press(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        // A phone's page: the card's menu first; the finger moving on carries the card (`phone.rs`).
+        if self.phone_paged() { self.hold_card(id, at, cx); return true; }
+        self.lift_home_card(id, at, cx)
+    }
+
+    pub(crate) fn lift_home_card(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
         self.arm_home_drag(id, at, cx);
         let Some(d) = self.home.folders.drag.as_mut() else { return false };
         d.started = true;

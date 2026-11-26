@@ -175,7 +175,9 @@ impl Workspace {
         // things into it; 主页 and a folder's page have 导入 beside their "+".
         let sidebar_heading = parent.is_none() && self.store.top_folders().len() == 1 && self.home.anchor("create-sidebar").is_some_and(|b| point(b.left(), b.bottom() + px(4.)) == pos);
         let import = (sidebar_heading || parent.as_deref().is_some_and(|p| crate::shared_store::top_of_row(p).is_some())).then(|| self.import_items(parent.clone(), cx));
-        Some(deferred(anchored().anchor(Anchor::TopLeft).position(pos).snap_to_window_with_margin(px(8.)).child(
+        // A phone's 新建 sits at the bottom right: its menu rises from it.
+        let corner = if self.home.anchor("phone-new").is_some_and(|b| point(b.right(), b.top() - px(8.)) == pos) { Anchor::BottomRight } else { Anchor::TopLeft };
+        Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(
             crate::design::Popover::new("create-items").menu().min_w(px(180.))
                 .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.create_menu = None; cx.notify(); }))
                 .child(row("create-document", "doc", tr("文档", "Document")).on_click(cx.listener(move |w, _, window, cx| w.create_doc(false, doc_parent.clone(), window, cx))))

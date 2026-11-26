@@ -2011,7 +2011,8 @@ impl Render for Workspace {
         {
             use std::sync::atomic::{AtomicU8, Ordering};
             static SHOWN: AtomicU8 = AtomicU8::new(u8::MAX);
-            let dark = theme::dark() as u8;
+            // The image viewer is a black room whatever the look.
+            let dark = (theme::dark() || self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).viewer_open())) as u8;
             if SHOWN.swap(dark, Ordering::Relaxed) != dark {
                 gpui_ios::ios::set_status_bar_style(if dark == 1 { gpui_ios::StatusBarContentStyle::Light } else { gpui_ios::StatusBarContentStyle::Dark });
             }
@@ -2122,7 +2123,7 @@ impl Render for Workspace {
                 )
                 .into_any_element(),
             View::Home => self.render_home(window, cx),
-            View::Folder if self.phone_lists(window) => self.render_phone_list(true, window, cx),
+            View::Folder if self.phone_pages(window) => self.render_phone_list(true, window, cx),
             View::Folder => self.render_folder(window, cx),
             View::Trash => self.render_trash(cx),
             View::Settings => self.render_settings(window, cx),

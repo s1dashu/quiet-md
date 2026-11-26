@@ -377,8 +377,15 @@ impl HomeSort {
 pub struct Home {
     pub tab: HomeTab,
     pub grid: bool,
-    /// A phone's own choice: its pages are lists unless the grid is asked for there.
-    pub phone_grid: bool,
+    /// A phone's own choice: its pages are cards, two to a row, unless a list is asked for there.
+    pub phone_list: bool,
+    /// A phone's cards: a preview not built yet is queued here and built between frames
+    /// (`pump_thumbs`), not in the frame that scrolls it into view.
+    pub(crate) thumb_queue: RefCell<Vec<String>>,
+    pub(crate) thumb_deferred: std::cell::Cell<bool>,
+    /// Documents that could not be read (still in iCloud, mid-write) and when: asked for again a little later, not every frame.
+    pub(crate) thumb_failed: RefCell<HashMap<String, web_time::Instant>>,
+    pub(crate) thumb_task: Option<Task<()>>,
     grid_scroll: UniformListScrollHandle,
     list_scroll: ScrollHandle,
     /// A folder's page has its own scroll positions, so 主页 keeps its place.
@@ -404,7 +411,11 @@ impl Default for Home {
         Home {
             tab: HomeTab::Recent,
             grid: true,
-            phone_grid: false,
+            phone_list: false,
+            thumb_queue: Default::default(),
+            thumb_deferred: Default::default(),
+            thumb_failed: Default::default(),
+            thumb_task: None,
             grid_scroll: Default::default(),
             list_scroll: Default::default(),
             folder_grid_scroll: Default::default(),
@@ -657,6 +668,14 @@ impl Workspace {
         // identifies it without rebuilding the whole tree on every frame.
         if let Some((m, t, used)) = self.home.thumbs.borrow_mut().get_mut(&e.id)
             && !t.has_subpages && *m == base_stamp { *used = web_time::Instant::now(); return t.clone(); }
+        // A phone's cards: not read and laid out in the frame that scrolls the card in. What
+        // it showed last (or its title alone) stands in until `pump_thumbs` has built it.
+        if self.home.thumb_deferred.get() {
+            let mut q = self.home.thumb_queue.borrow_mut();
+            let waits = self.home.thumb_failed.borrow().get(&e.id).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2));
+            if !waits && !q.contains(&e.id) { q.push(e.id.clone()); }
+            return self.home.thumbs.borrow().get(&e.id).map(|(_, t, _)| t.clone()).unwrap_or_else(|| Rc::new(ThumbContent { blocks: vec![], eqnos: HashMap::new(), has_subpages: false, tables: vec![] }));
+        }
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
@@ -685,7 +704,8 @@ impl Workspace {
                 }
             }
         }
-        let mut budget = 32;
+        // A phone's card is half a desktop one: what fits on it is all that is laid out.
+        let mut budget = if crate::design::touch() { 8 } else { 32 };
         let mut eqnos = HashMap::new();
         let doc = self.store.load(e.note.as_deref().unwrap_or(&e.id));
         let loaded = doc.as_ref().map(|doc| {
@@ -713,6 +733,31 @@ impl Workspace {
         }
         thumbs.insert(e.id.clone(), (stamp, t.clone(), web_time::Instant::now()));
         t
+    }
+
+    /// Builds the previews a phone's cards asked for, one document a turn, each file read
+    /// off the UI thread first: scrolling never waits for a card's document.
+    pub(crate) fn pump_thumbs(&mut self, cx: &mut Context<Self>) {
+        if self.home.thumb_task.is_some() || self.home.thumb_queue.borrow().is_empty() { return }
+        self.home.thumb_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                // The card asked for last is the one on screen now.
+                let Ok(Some((id, path))) = this.update(cx, |w, _| { let id = w.home.thumb_queue.borrow_mut().pop()?; let path = w.store.file_path(&id); Some((id, path)) }) else { break };
+                // Warms the file for the read below.
+                if let Some(path) = path { cx.background_executor().spawn(async move { let _ = std::fs::read(path); }).await; }
+                let built = this.update(cx, |w, cx| {
+                    let Some(e) = w.entries.iter().find(|e| e.id == id).cloned() else { return };
+                    let was = w.home.thumb_deferred.replace(false);
+                    let _ = w.thumb(&e);
+                    w.home.thumb_deferred.set(was);
+                    if w.home.thumbs.borrow().contains_key(&id) { w.home.thumb_failed.borrow_mut().remove(&id); } else { w.home.thumb_failed.borrow_mut().insert(id.clone(), web_time::Instant::now()); }
+                    cx.notify();
+                });
+                if built.is_err() { break }
+                cx.background_executor().timer(std::time::Duration::from_millis(1)).await;
+            }
+            let _ = this.update(cx, |w, _| w.home.thumb_task = None);
+        }));
     }
 
     fn open_row_menu(&mut self, id: &str, key: &str, cx: &mut Context<Self>) {
@@ -759,9 +804,9 @@ impl Workspace {
     }
 
     /// 主页 and folder pages as cards: the desktop's choice, or a phone's own (its pages
-    /// are lists unless asked, `phone.rs`; 批量管理 there keeps the cards it had).
+    /// are cards unless a list is asked for, `phone.rs`; 批量管理 there keeps the cards it had).
     pub(crate) fn shows_grid(&self, window: &Window) -> bool {
-        if crate::theme::compact(f32::from(window.viewport_size().width)) { self.home.phone_grid || self.batch.is_some() } else { self.home.grid }
+        if crate::theme::compact(f32::from(window.viewport_size().width)) { !self.home.phone_list || self.batch.is_some() } else { self.home.grid }
     }
 
     /// A newly opened folder page starts at its top.
@@ -774,7 +819,7 @@ impl Workspace {
     pub(crate) fn load_home(&mut self) {
         let s = self.store.settings();
         self.home.grid = !s.home_list;
-        self.home.phone_grid = s.home_phone_grid;
+        self.home.phone_list = s.home_phone_list;
         self.home.folders_first = s.home_folders_first;
         self.home.sort = s.home_sort.as_deref().map(HomeSort::of).unwrap_or(HomeSort::Manual);
         // Settings from before directions existed keep the order they used to show.
@@ -785,7 +830,7 @@ impl Workspace {
     fn save_home(&mut self) {
         let mut s = self.store.settings();
         s.home_folders_first = self.home.folders_first;
-        s.home_phone_grid = self.home.phone_grid;
+        s.home_phone_list = self.home.phone_list;
         (s.home_list, s.home_sort) = (!self.home.grid, Some(self.home.sort.key().to_string()));
         s.home_sort_dir = Some(self.home.sort_dir.key().to_string());
         self.store.set_place_by_hand(self.home.sort == HomeSort::Manual);
@@ -793,8 +838,8 @@ impl Workspace {
     }
 
     pub(crate) fn render_home(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        // A phone: an iOS list under a large title (`phone.rs`); its grid and 批量管理 stay here.
-        if self.phone_lists(window) && !self.store.top_folders().is_empty() { return self.render_phone_list(false, window, cx) }
+        // A phone: cards or a list under a large title (`phone.rs`); 批量管理 stays here.
+        if self.phone_pages(window) && !self.store.top_folders().is_empty() { return self.render_phone_list(false, window, cx) }
         // Too narrow for the search box: a search icon beside +, in the same style.
         let search = self.header_search(window, cx);
         // A phone searches and creates from the sidebar's drawer.
@@ -1082,7 +1127,7 @@ impl Workspace {
             }
     }
 
-    fn render_home_card(&self, e: &Entry, card_h: f32, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_home_card(&self, e: &Entry, card_h: f32, cx: &mut Context<Self>) -> AnyElement {
             const RING: f32 = 3.;
             let id = e.id.clone();
             let id2 = e.id.clone();
@@ -1151,14 +1196,14 @@ impl Workspace {
                     .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.home.sort_menu = false; cx.notify(); }));
                 // A phone's toolbar has only this button: 批量管理 and the view come first.
                 if crate::theme::compact(f32::from(window.viewport_size().width)) {
-                    // The phone's own view (a list unless asked): the desktop's choice is left alone.
-                    let grid = self.home.phone_grid;
+                    // The phone's own view (cards unless a list is asked for): the desktop's choice is left alone.
+                    let grid = !self.home.phone_list;
                     menu = menu
                         .child(MenuItem::new("home-menu-batch").icon("batch").label(crate::settings::label(crate::settings::text("批量管理")))
                             .on_click(cx.listener(|w, _, _, cx| { w.batch = Some(vec![]); w.row_menu = None; w.home.sort_menu = false; cx.notify(); })))
                         .child(MenuItem::new("home-menu-view").icon(if grid { "view-list" } else { "view-grid" })
                             .label(if grid { crate::settings::text("切换为列表视图") } else { crate::settings::text("切换为宫格视图") })
-                            .on_click(cx.listener(move |w, _, _, cx| { w.home.phone_grid = !grid; w.save_home(); w.home.sort_menu = false; cx.notify(); })))
+                            .on_click(cx.listener(move |w, _, _, cx| { w.home.phone_list = grid; w.save_home(); w.home.sort_menu = false; cx.notify(); })))
                         .child(MenuSeparator::new());
                 }
                 for (index, order) in [HomeSort::Manual, HomeSort::Visited, HomeSort::Modified, HomeSort::Created, HomeSort::Title].into_iter().enumerate() {

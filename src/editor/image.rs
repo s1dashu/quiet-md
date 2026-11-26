@@ -1534,6 +1534,9 @@ impl Editor {
 
     // ---- lightbox
 
+    /// The viewer is up (iOS: its black room wants the status bar's light text).
+    pub fn viewer_open(&self) -> bool { self.img.lightbox.as_ref().is_some_and(|l| l.closing.is_none()) }
+
     fn open_lightbox(&mut self, id: BlockId, window: &mut Window, cx: &mut Context<Self>) {
         let mut ids = vec![];
         self.core.doc.for_each_block(&mut |b: &Block| {
