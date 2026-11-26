@@ -264,7 +264,9 @@ impl Editor {
             div()
                 .absolute()
                 .top(px(20.))
-                .left_0()
+                // optically flush: the first glyph, not the ghost's box, lines up with the title;
+                // the hover fill may stand out to the left (the ghost's px-2)
+                .left(px(-8.))
                 .h(px(28.))
                 .flex()
                 // A Markdown file has neither.

@@ -460,7 +460,7 @@ impl Home {
 /// The arrow on a sorted column: down for 降序, up for 升序. A chevron turned
 /// over, rather than a second icon, so both directions share one glyph.
 fn sort_glyph(dir: SortDir, size: f32) -> Svg {
-    let g = icon("chevron-down", size, Theme::icon());
+    let g = icon("chevron-down", size, Theme::icon_muted());
     if dir == SortDir::Asc { g.with_transformation(Transformation::rotate(radians(std::f32::consts::PI))) } else { g }
 }
 

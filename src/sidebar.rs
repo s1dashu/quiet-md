@@ -585,7 +585,7 @@ impl Workspace {
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .mr(px(give))
-                .text_color(if heading { Theme::sidebar_section() } else if drop_target || selected { Theme::text() } else { Theme::sidebar_text() })
+                .text_color(if heading { Theme::sidebar_section() } else if drop_target || selected { Theme::sidebar_text_on() } else { Theme::sidebar_text() })
                 .when(heading, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .child(ui_text(display_title(&e.title)))
                 .into_any_element(),
@@ -605,7 +605,7 @@ impl Workspace {
                         w.folder_drag.icon_press = true;
                         w.folder_drag.icon_alt = ev.modifiers.alt;
                     }))
-                    .child(icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::text_caption())))
+                    .child(icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::sidebar_chevron())))
                 .into_any_element()
         } else { title };
         let renaming = self.rename.as_ref().is_some_and(|r| r.id == e.id);

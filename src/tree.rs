@@ -404,7 +404,7 @@ impl Workspace {
                                 .rounded(px(5.))
                                 .when(kids, |d| {
                                     d.hover(|s| s.bg(Theme::fill_hover_strong()))
-                                        .child(icon("tree-triangle", 10., Theme::icon()).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
+                                        .child(icon("tree-triangle", 10., Theme::icon_muted()).when(open, |s| s.with_transformation(Transformation::rotate(radians(std::f32::consts::FRAC_PI_2)))))
                                         .on_click(cx.listener(move |w, _, _, cx| {
                                             cx.stop_propagation();
                                             if let Some(d) = w.move_dlg.as_mut()

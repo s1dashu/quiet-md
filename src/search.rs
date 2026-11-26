@@ -299,7 +299,7 @@ fn extra_segment(glyph: Option<&'static str>, text: String) -> Div {
         .flex_none()
         .flex()
         .items_center()
-        .children(glyph.map(|g| icon(g, 12., Theme::icon()).mr(px(4.))))
+        .children(glyph.map(|g| icon(g, 12., Theme::icon_muted()).mr(px(4.))))
         .child(ui_text(text))
 }
 
@@ -526,7 +526,7 @@ impl Workspace {
                     .size(px(16.))
                     .ml(px(4.))
                     .mr(px(10.))
-                    .child(icon("search", 17.5, Theme::icon()).absolute().top(px(-0.75)).left(px(-0.75))),
+                    .child(icon("search", 17.5, Theme::icon_muted()).absolute().top(px(-0.75)).left(px(-0.75))),
             )
             .child(div().flex_1().min_w_0().pl(px(2.)).flex().child(self.search.clone()))
             .when(has_text, |d| {
