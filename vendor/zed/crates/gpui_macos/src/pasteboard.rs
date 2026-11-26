@@ -163,7 +163,7 @@ impl Pasteboard {
                 }
             });
 
-        Some(ClipboardEntry::String(ClipboardString { text, metadata }))
+        Some(ClipboardEntry::String(ClipboardString { text, metadata, html: None }))
     }
 
     fn data_for_type(&self, kind: &NSString) -> Option<Vec<u8>> {
@@ -194,6 +194,7 @@ impl Pasteboard {
                 let mut combined = ClipboardString {
                     text: String::new(),
                     metadata: None,
+                    html: None,
                 };
 
                 for entry in item.entries {

@@ -105,6 +105,7 @@ This approach copies the entire document at each history step. A historical benc
 | `home.rs` | `Home`, the one root: the top-level folders on 主页 (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
+| `clip_html.rs` | Copied blocks as HTML for other apps, and Windows' CF_HTML envelope (written on copy, unwrapped on paste) |
 | `lang.rs` | Code language table |
 | `spacing.rs` | Where a space goes between 汉字 and Latin letters or digits (盘古之白), for typing with the preference on and Edit › 整理本文空格 |
 | `palette.rs` | RGBA text, background and callout palettes independent of GPUI. `theme.rs` converts them to GPUI colors. |
@@ -139,7 +140,7 @@ Whiteboard and history modules in core:
 | `entries.rs` | `Entries`, the window's pages and folders: read as a slice, changed only through `set` / `edit` / `take`, which move its `generation`; the sidebar's rows and Home's cards are rebuilt when it moves |
 | `shared_store.rs` | The `Home` the windows share: each call goes to the top-level folder a document is in; each folder, one or many, shows as a row of the sidebar tree and a card on Home (`top_row`) |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
-| `clipboard.rs` | System clipboard HTML and the simulated clipboard in script mode |
+| `clipboard.rs` | System clipboard HTML (macOS `public.html`, Windows CF_HTML, Linux `text/html`), our copies' clipboard item, and the simulated clipboard in script mode |
 | `tree_writes.rs` | Sidebar drops, renames and a file name following its title: shown at once, written off the window's thread, one at a time and by id (see the last section) |
 | `sidebar.rs` / `tree.rs` | Sidebar and document tree, including child pages (a folder's own document, see FORMAT.md and core's `subdocs.rs`) and Move to |
 | `home.rs` / `trash.rs` | Home and trash |

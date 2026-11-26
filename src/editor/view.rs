@@ -2022,8 +2022,8 @@ impl Editor {
             }
             self.core.selected_text()
         };
-        let xml = docxml::serialize(&Document { blocks, ..Default::default() });
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        let doc = Document { blocks, ..Default::default() };
+        cx.write_to_clipboard(crate::clipboard::copied(text, docxml::serialize(&doc), &doc.blocks));
         true
     }
 
@@ -2038,7 +2038,7 @@ impl Editor {
             *f = crate::clipboard::FakeClipboard { text: xml, ..Default::default() };
             return true;
         }
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        cx.write_to_clipboard(crate::clipboard::copied(text, xml, &doc.blocks));
         true
     }
 
@@ -2146,7 +2146,7 @@ impl Editor {
         let html = match &fake {
             Some(f) => f.html.clone(),
             None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
-                crate::clipboard::clipboard_html()
+                crate::clipboard::clipboard_html(item.as_ref())
             }
             None => None,
         };
