@@ -1102,6 +1102,8 @@ impl Workspace {
         if let Some(previous) = &self.current
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
+        #[cfg(target_family = "wasm")]
+        if self.current.as_deref() != Some(id) { crate::web_print::cancel(); }
         self.current = Some(id.to_string());
         // Pasted images, 数据表 and 画板 belong to this document's top-level folder, and it has its own look.
         if self.store.set_active(id) { cx.defer(crate::settings::top_switched); }
@@ -1304,6 +1306,8 @@ impl Workspace {
 
     /// Switch the main pane to a page (the default one, 回收站, 设置) or back to the document.
     pub fn show_view(&mut self, view: View, cx: &mut Context<Self>) {
+        #[cfg(target_family = "wasm")]
+        if self.view == View::Doc && view != View::Doc { crate::web_print::cancel(); }
         self.cancel_shortcut_recording(cx);
         self.close_history(cx);
         // 阅读位置: leaving the document with ⌘H or 回收站 also counts.
@@ -2159,7 +2163,7 @@ impl Render for Workspace {
             View::Settings => self.render_settings(cx),
         };
         let move_dlg = self.render_move_dialog(cx);
-        let export_md = self.render_export_md(cx);
+        let export_md = self.render_export_md(window, cx);
         let import_apps = self.render_import_apps(cx);
         // Only the note stands out: a white plane flush with the window's top,
         // right and bottom edges. The sidebar sits sunken on the window

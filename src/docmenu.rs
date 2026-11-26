@@ -38,7 +38,7 @@ enum Page { Doc, Board, BoardFile, Table }
 
 fn items(page: Page, child: bool) -> Vec<Item> {
     use Item::*;
-    let print: &[Item] = if crate::printing::SUPPORTED { &[Print, Rule] } else { &[] };
+    let print: &[Item] = if crate::printing::SUPPORTED || cfg!(target_family = "wasm") { &[Print, Rule] } else { &[] };
     let child: &[Item] = if child { &[Child] } else { &[] };
     let top: &[Item] = if crate::on_top::SUPPORTED { &[OnTop] } else { &[] };
     let top_rule: &[Item] = if crate::on_top::SUPPORTED { &[OnTop, Rule] } else { &[] };
