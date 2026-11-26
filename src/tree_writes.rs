@@ -62,6 +62,9 @@ pub(crate) struct TreeWrites {
 /// What a writer brings back from the background.
 struct Written { result: anyhow::Result<()>, entries: Option<Vec<Entry>>, changes: Vec<FileDelta>, writer: Store, warnings: Vec<String> }
 
+/// What a move into another top-level folder brings back: each library's writer and what it listed.
+struct Crossed { result: anyhow::Result<()>, lists: Vec<(String, u64, Store, Vec<Entry>)>, changes: Vec<FileDelta>, warnings: Vec<String> }
+
 fn move_failed(e: &anyhow::Error) -> String { crate::localized_format!("移动失败：{}", "Could not move document: {}", crate::settings::diagnostic(&e.to_string())) }
 fn rename_failed(e: &anyhow::Error) -> String { crate::localized_format!("重命名失败：{}", "Could not rename: {}", crate::settings::diagnostic(&e.to_string())) }
 fn name_not_followed(e: &anyhow::Error) -> String { crate::localized_format!("未能按标题重命名文件：{}", "Could not rename the file after its title: {}", crate::settings::diagnostic(&e.to_string())) }
@@ -143,6 +146,11 @@ impl Workspace {
     }
 
     pub(crate) fn apply_tree_move(&mut self, movement: &PendingMove) {
+        // Into another top-level folder: the row and all under it are that one's from now on.
+        if let Some((_, to)) = self.store.crossing(&movement.id, movement.parent.as_deref()) {
+            let moved = crate::tree::Tree::new(&self.entries).subtree(&movement.id);
+            for e in self.entries.edit().iter_mut().filter(|e| moved.contains(&e.id)) { e.top = to.clone(); }
+        }
         let tree = crate::tree::Tree::new(&self.entries);
         let mut siblings: Vec<String> = tree.children(movement.parent.as_deref()).iter()
             .filter(|e| e.id != movement.id).map(|e| e.id.clone()).collect();
@@ -175,16 +183,18 @@ impl Workspace {
         }
     }
 
-    /// A move's folder and anchor as the library sees them, once it is known to stay inside one top-level folder (W7).
+    /// A move's folder and anchor as the library sees them (the target's, for a move into another top-level folder).
     fn tree_write_place(&self, write: &TreeWrite) -> anyhow::Result<(Option<String>, Option<String>)> {
         let TreeWrite::Move(m) = write else { return Ok((None, None)) };
-        self.store.same_top(&m.id, m.parent.as_deref())?;
+        if self.store.crossing(&m.id, m.parent.as_deref()).is_none() { self.store.same_top(&m.id, m.parent.as_deref())?; }
         Ok((self.store.real_parent(m.parent.as_deref()).map(str::to_string), self.store.real_parent(m.before.as_deref()).map(str::to_string)))
     }
 
     fn save_next_tree_write(&mut self, cx: &mut Context<Self>) {
         if self.tree_writes.saving { return; }
         let Some(write) = self.tree_writes.pending.front().cloned() else { return self.run_after_tree_writes(cx) };
+        // Asked as it starts: a move queued behind one into another top-level folder finds its pages there.
+        if let TreeWrite::Move(m) = &write && let Some((from, to)) = self.store.crossing(&m.id, m.parent.as_deref()) { return self.save_cross_write(m.clone(), from, to, cx); }
         let Some((key, n, mut writer)) = self.store.tree_writer_at(write.id()) else { self.tree_writes.pending.pop_front(); return self.save_next_tree_write(cx); };
         self.tree_writes.saving = true;
         let (epoch, window, place) = (self.tree_writes.epoch, self.window, self.tree_write_place(&write));
@@ -218,6 +228,71 @@ impl Workspace {
                 });
             });
         }).detach();
+    }
+
+    /// `save_next_tree_write` for a move from top-level folder `from` into `to`: a writer of each
+    /// (`Store::move_across`), both listed afterwards and taken over.
+    fn save_cross_write(&mut self, m: PendingMove, from: String, to: String, cx: &mut Context<Self>) {
+        let mut writers = self.store.writers(&[from.clone(), to.clone()]);
+        if writers.len() != 2 { self.tree_writes.pending.pop_front(); return self.save_next_tree_write(cx); }
+        self.tree_writes.saving = true;
+        let (epoch, window) = (self.tree_writes.epoch, self.window);
+        let (parent, before) = (self.store.real_parent(m.parent.as_deref()).map(str::to_string), self.store.real_parent(m.before.as_deref()).map(str::to_string));
+        let id = m.id.clone();
+        let task = cx.background_executor().spawn(async move {
+            #[cfg(feature = "devtools")]
+            if let Some(ms) = std::env::var("FDL_TREE_WRITE_DELAY").ok().and_then(|v| v.parse().ok()) { std::thread::sleep(Duration::from_millis(ms)); }
+            let (mut b, mut a) = (writers.pop().unwrap(), writers.pop().unwrap());
+            let journal = b.2.track_file_changes();
+            let result = a.2.move_across(&mut b.2, &id, parent.as_deref(), crate::store::Place::Before(before));
+            let mut warnings = vec![];
+            let lists = [a, b].into_iter().map(|(k, n, mut w, )| { let e = w.list(); warnings.extend(w.take_warnings()); (k, n, w, e) }).collect();
+            Crossed { result, lists, changes: journal.take(), warnings }
+        });
+        cx.spawn(async move |this, cx| {
+            let done = task.await;
+            let _ = window.update(cx, |_, _, cx| {
+                let _ = this.update(cx, |w, cx| {
+                    if w.tree_writes.epoch != epoch { return; }
+                    w.tree_writes.pending.pop_front();
+                    w.tree_writes.saving = false;
+                    w.cross_write_done(&m, &from, &to, done, cx);
+                    w.save_next_tree_write(cx);
+                    cx.notify();
+                });
+            });
+        }).detach();
+    }
+
+    /// A move into another top-level folder landed (or failed): both libraries take over what
+    /// their writers read and wrote; the rows are theirs. A failed one's rows are back where they were.
+    fn cross_write_done(&mut self, m: &PendingMove, from: &str, to: &str, done: Crossed, cx: &mut Context<Self>) {
+        let Crossed { result, lists, changes, warnings } = done;
+        for warning in warnings { crate::logging::write(&warning); }
+        for (key, n, writer, entries) in lists { self.entries.set(self.store.adopt_written(&key, n, writer, entries)); }
+        self.store.moved_across();
+        match result {
+            Ok(()) => {
+                self.cross_tree_history(m.history, from, to, &m.id, changes);
+                self.moved_open_document(&m.id, from, to);
+            }
+            Err(e) => {
+                self.forget_file_change(m.history);
+                self.reapply_pending_tree_writes();
+                self.show_toast_kind(ToastKind::Error, &move_failed(&e), cx);
+            }
+        }
+        self.sort();
+        self.sync_sub_pages(cx);
+    }
+
+    /// The open document went to another top-level folder with `id` (itself, or a folder
+    /// it is in): its editor's baseline goes along, and the next look at the file
+    /// (`refresh_external`) takes in what the move rewrote in it.
+    pub(crate) fn moved_open_document(&mut self, id: &str, from: &str, to: &str) {
+        let Some(open) = self.current.clone() else { return };
+        if !crate::tree::Tree::new(&self.entries).subtree(id).contains(&self.row_of(&open)) { return; }
+        self.store.hand_loaded(from, to, &open, self.unsaved);
     }
 
     fn tree_write_done(&mut self, key: &str, n: u64, write: TreeWrite, done: Written, window: &mut Window, cx: &mut Context<Self>) {
@@ -295,6 +370,18 @@ impl Workspace {
         self.tree_writes.saving = false;
         for write in std::mem::take(&mut self.tree_writes.pending) {
             let journal = self.store.track_file_changes();
+            if let TreeWrite::Move(m) = &write && let Some((from, to)) = self.store.crossing(&m.id, m.parent.as_deref()) {
+                let (parent, before) = (self.store.real_parent(m.parent.as_deref()).map(str::to_string), self.store.real_parent(m.before.as_deref()).map(str::to_string));
+                let mut result = self.store.move_across(&from, &to, &m.id, parent.as_deref(), crate::store::Place::Before(before));
+                // The writer on its way made it already: the page is there.
+                if result.is_err() { self.store.list(); if self.store.top_of(&m.id).as_deref() == Some(to.as_str()) { result = Ok(()); } }
+                let changes = journal.take();
+                match result {
+                    Ok(()) => { if !changes.is_empty() { self.cross_tree_history(m.history, &from, &to, &m.id, changes); } self.moved_open_document(&m.id, &from, &to); }
+                    Err(e) => { self.forget_file_change(m.history); self.show_toast_kind(ToastKind::Error, &move_failed(&e), cx); }
+                }
+                continue;
+            }
             let result = self.tree_write_place(&write).and_then(|(parent, before)| self.store.with(Some(write.id()), |s| Self::write_tree(s, &write, parent.as_deref(), before.as_deref())));
             let changes = journal.take();
             match (result, &write) {

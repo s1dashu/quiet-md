@@ -548,6 +548,9 @@ pub const ASSETS: &str = ".assets";
 mod folders;
 #[path = "subdocs.rs"]
 mod subdocs;
+#[path = "across.rs"]
+mod across;
+pub use across::Place;
 
 #[derive(Serialize, Deserialize)]
 struct FormatMarker {

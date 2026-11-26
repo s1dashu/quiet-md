@@ -12,16 +12,7 @@ impl Store {
     pub fn take_warnings(&mut self) -> Vec<String> { std::mem::take(&mut self.warnings) }
 
     /// Where `id` would go in folder `parent`: its name there, numbered when taken.
-    pub(super) fn rel_in(&self, id: &str, parent: Option<&str>) -> String {
-        let m = &self.index[id];
-        let dir = parent.and_then(|p| self.index.get(p)).map(|p| p.rel.clone()).unwrap_or_default();
-        let name = base_name(&m.rel);
-        let ext = m.folder.is_none().then(|| ext_of(m));
-        let stem = if ext.is_some() { stem_of(name) } else { name };
-        // A folder's or Markdown file's name is its title: 「报告 (2).md」 stays that.
-        let base = if m.folder.is_some() || m.named_by_file() { stem } else { layout::unnumbered(stem) };
-        join_rel(&dir, &self.free_name(&dir, base, ext, None))
-    }
+    pub(super) fn rel_in(&self, id: &str, parent: Option<&str>) -> String { self.rel_for(&self.index[id], parent) }
 
     pub(super) fn validate_folder(&self, id: Option<&str>, parent: Option<&str>) -> Result<()> {
         let mut seen = std::collections::HashSet::new();

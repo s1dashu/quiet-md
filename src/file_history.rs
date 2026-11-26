@@ -3,7 +3,18 @@ use gpui::*;
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Clone)]
-struct Record { token: u64, label: &'static str, changes: Vec<FileDelta>, entries: Vec<(Option<Entry>, Option<Entry>)> }
+struct Record { token: u64, label: &'static str, changes: Vec<FileDelta>, entries: Vec<(Option<Entry>, Option<Entry>)>,
+    /// Pages this step moved into another top-level folder: undone by moving them back (`Store::move_across`).
+    across: Vec<Across> }
+
+/// A change as the window's rows have it, at a top-level folder's top level (under its row), not as its library does.
+fn rows_only(c: &FileDelta) -> bool {
+    [&c.before, &c.after].into_iter().flatten().any(|s| s.parent.as_deref().is_some_and(|p| crate::shared_store::top_of_row(p).is_some()))
+}
+
+/// A page (or folder) moved from top-level folder `from` to `to`, with its place in each as that library has it.
+#[derive(Clone)]
+struct Across { id: String, from: String, to: String, before: FileState, after: FileState }
 #[derive(Default)]
 pub(crate) struct FileHistory {
     undo: Vec<Record>, redo: Vec<Record>, next: u64,
@@ -53,6 +64,33 @@ impl Workspace {
         if let Some(record) = self.file_history.undo.iter_mut().chain(self.file_history.redo.iter_mut()).find(|r| r.token == token) { record.changes = merged; record.entries = entries; }
     }
 
+    /// A move into another top-level folder landed: what the target wrote (`changes`) stands for
+    /// what the rows recorded. `id`'s own change becomes a move between the two (undone by
+    /// moving it back); the target's pages numbered anew stay changes of that one.
+    pub(crate) fn cross_tree_history(&mut self, token: u64, from: &str, to: &str, id: &str, changes: Vec<FileDelta>) {
+        let Some(mut merged) = self.file_history.undo.iter().chain(self.file_history.redo.iter()).find(|r| r.token == token).map(|r| r.changes.clone()) else { return };
+        let mut across = None;
+        merged.retain(|c| c.id != id);
+        for delta in changes {
+            if delta.id == id {
+                if let (Some(before), Some(after)) = (delta.before, delta.after) { across = Some(Across { id: id.to_string(), from: from.to_string(), to: to.to_string(), before, after }); }
+                continue;
+            }
+            match merged.iter_mut().find(|c| c.id == delta.id) {
+                Some(c) if rows_only(c) => *c = delta,
+                Some(c) => c.after = delta.after,
+                None => merged.push(delta),
+            }
+        }
+        // What only the rows recorded (a place under a top-level folder's row): the libraries wrote it, in their own terms, above.
+        merged.retain(|c| c.before != c.after && !rows_only(c));
+        let entries = self.file_record_entries(&merged);
+        if let Some(record) = self.file_history.undo.iter_mut().chain(self.file_history.redo.iter_mut()).find(|r| r.token == token) {
+            record.changes = merged; record.entries = entries;
+            if let Some(a) = across { record.across.retain(|x| x.id != a.id); record.across.push(a); }
+        }
+    }
+
     pub(crate) fn remember_tree_move(&mut self, before: Vec<Entry>, label: &'static str) -> u64 {
         let old: HashMap<_, _> = before.into_iter().map(|e| (e.id.clone(), e)).collect();
         let new: HashMap<_, _> = self.entries.iter().map(|e| (e.id.clone(), e.clone())).collect();
@@ -78,7 +116,7 @@ impl Workspace {
         if changes.is_empty() { return 0; }
         self.file_history.next += 1;
         let token = self.file_history.next;
-        self.file_history.undo.push(Record { token, label, changes, entries });
+        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![] });
         if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
         self.file_history.redo.clear(); self.file_history.prefer_files = true;
         token
@@ -153,19 +191,46 @@ impl Workspace {
                 if let Some(parent) = &target.meta.parent { self.expanded.insert(parent.clone()); }
             } else { self.entries.edit().retain(|e| e.id != id); }
         }
-        // What one step changed is in one top-level folder (nothing moves between them).
-        let key = record.changes.iter().find_map(|c| self.store.top_of(&c.id).or_else(|| self.store.trash_top(&c.id)));
-        let Some((key, mut writer)) = key.and_then(|k| Some((k.clone(), self.store.top_writer(&k)?))) else { self.file_history.busy = false; self.entries.set(previous); self.file_history.requests.clear(); return; };
-        let changes = record.changes.clone();
+        // Each change goes to the top-level folder holding its page now (one that holds none, to the
+        // first: it fails there as changed); a move between two, to both.
+        let mut groups: Vec<(String, Vec<FileDelta>)> = vec![];
+        let first = record.changes.iter().find_map(|c| self.store.top_of(&c.id).or_else(|| self.store.trash_top(&c.id)));
+        for c in &record.changes {
+            let Some(k) = self.store.top_of(&c.id).or_else(|| self.store.trash_top(&c.id)).or_else(|| first.clone()) else { continue };
+            match groups.iter_mut().find(|g| g.0 == k) { Some(g) => g.1.push(c.clone()), None => groups.push((k, vec![c.clone()])) }
+        }
+        let across = record.across.clone();
+        let mut keys: Vec<String> = groups.iter().map(|g| g.0.clone()).chain(across.iter().flat_map(|a| [a.from.clone(), a.to.clone()])).collect();
+        keys.dedup();
+        let keys: Vec<String> = keys.iter().enumerate().filter(|(i, k)| !keys[..*i].contains(k)).map(|(_, k)| k.clone()).collect();
+        let writers = self.store.writers(&keys);
+        if writers.is_empty() || writers.len() != keys.len() { self.file_history.busy = false; self.entries.set(previous); self.file_history.requests.clear(); return; }
         let task = cx.background_executor().spawn(async move {
-            let result = writer.apply_file_history(&changes, redo);
-            let entries = writer.list();
-            (result, entries)
+            let mut ws = writers;
+            let at = |ws: &[(String, u64, crate::store::Store)], k: &str| ws.iter().position(|w| w.0 == k).unwrap();
+            // A move between two top-level folders, back (undo) or again (redo), to the numbers it had there.
+            let cross = |ws: &mut [(String, u64, crate::store::Store)], a: &Across| -> anyhow::Result<()> {
+                let (from, to, place) = if redo { (&a.from, &a.to, &a.after) } else { (&a.to, &a.from, &a.before) };
+                let (i, j) = (at(ws, from), at(ws, to));
+                let (x, y) = if i < j { let (l, r) = ws.split_at_mut(j); (&mut l[i], &mut r[0]) } else { let (l, r) = ws.split_at_mut(i); (&mut r[0], &mut l[j]) };
+                x.2.move_across(&mut y.2, &a.id, place.parent.as_deref(), crate::store::Place::At(place.order, place.top_order))
+            };
+            let mut result = Ok(());
+            if redo { for a in &across { result = result.and_then(|_| cross(&mut ws, a)); } }
+            for (k, changes) in &groups { let i = at(&ws, k); result = result.and_then(|_| ws[i].2.apply_file_history(changes, redo)); }
+            if !redo { for a in across.iter().rev() { result = result.and_then(|_| cross(&mut ws, a)); } }
+            let lists: Vec<(String, u64, crate::store::Store, Vec<Entry>)> = ws.into_iter().map(|(k, n, mut w)| { let e = w.list(); (k, n, w, e) }).collect();
+            (result, lists)
         });
         cx.spawn_in(window, async move |this, cx| {
-            let (result, entries) = task.await;
+            let (result, lists) = task.await;
             let _ = this.update_in(cx, |w, window, cx| {
-                let entries = w.store.merge_entries(&key, entries);
+                let mut entries = vec![];
+                for (key, n, writer, listed) in lists { entries = w.store.adopt_written(&key, n, writer, listed); }
+                if !record.across.is_empty() {
+                    w.store.moved_across();
+                    for a in &record.across { let (from, to) = if redo { (&a.from, &a.to) } else { (&a.to, &a.from) }; w.moved_open_document(&a.id, from, to); }
+                }
                 w.file_history.busy = false;
                 match result {
                     Ok(()) => {

@@ -27,6 +27,7 @@ Quiet.md/
     ├── trash/index.json.v5 The FORMAT 5 trash index, kept after the move to 6
     ├── history/<id>/       Document body snapshots
     ├── history-trash/<id>/ Snapshots for trashed documents
+    ├── moving/             A copy on its way in from another top-level folder on another disk, or an original on its way out; whatever is left is removed by the next such move
     └── before-folders-4/   Pre-migration layout backup, removed after 30 days
 ```
 

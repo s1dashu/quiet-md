@@ -341,6 +341,18 @@ impl Home {
 
     pub fn store(&mut self, key: &str) -> Option<&mut Store> { self.folders.iter_mut().find(|r| r.key == key)?.store.as_mut() }
 
+    /// Top-level folders `a` and `b` (two different ones) at once, for a move from one to the other.
+    pub fn pair(&mut self, a: &str, b: &str) -> Option<(&mut Store, &mut Store)> {
+        let (mut x, mut y) = (None, None);
+        for r in self.folders.iter_mut() {
+            if r.key == a { x = r.store.as_mut(); } else if r.key == b { y = r.store.as_mut(); }
+        }
+        Some((x?, y?))
+    }
+
+    /// Pages moved from one top-level folder to another: who holds what is looked up again.
+    pub fn forget_owners(&mut self) { self.owner.clear(); }
+
     /// The top-level folder holding `path`, if one does.
     pub fn folder_of_path(&self, path: &Path) -> Option<&TopFolder> {
         let path = canonical(path);
