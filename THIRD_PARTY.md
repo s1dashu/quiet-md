@@ -10,6 +10,8 @@ Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
 GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive_refineable`, `sum_tree`, `scheduler`, `http_client`, `ztracing` and `ztracing_macro` packages at versions 0.1.0 / 0.2.2 in the table) come from [Zed](https://github.com/zed-industries/zed) under Apache-2.0. The pinned snapshot lives in `vendor/zed/crates`, with the full license in `vendor/zed/LICENSE-APACHE`. Local patches in `vendor/zed/patches` mark changes with `quiet.md:` comments. See [Vendored patches](vendor/PATCHES.md).
 
+`xim-ctext` is vendored in `vendor/xim-ctext` with a rewritten decoder. It comes from [xim-rs](https://github.com/Riey/xim-rs) under MIT, and the license is in `vendor/xim-ctext/LICENSE`.
+
 | Package | Version | License |
 |---|---|---|
 | accesskit | 0.24.1 | MIT OR Apache-2.0 |

@@ -20,8 +20,9 @@ embed-xiaolai = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
 [workspace]
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "vendor/xim-ctext"]
 # vendor/zed holds path dependencies with self-contained manifests, not members.
+# vendor/xim-ctext is a member so its tests run (vendor/xim-ctext/README.md).
 exclude = ["vendor", "tools/vendor-sync"]
 default-members = [".", "crates/core", "crates/cli"]
 
@@ -99,6 +100,12 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gd
 
 # GPUI is vendored from the Zed repository: an upstream snapshot plus our
 # patch series, kept in sync by tools/vendor-sync (vendor/PATCHES.md).
+
+# zed-xim (GPUI's X11 input method client) crashed on any compound text but
+# UTF-8 and JIS, such as Rime's GB2312 through IBus (#465): our copy decodes
+# all of it and never fails (vendor/xim-ctext/README.md).
+[patch.crates-io]
+xim-ctext = { path = "vendor/xim-ctext" }
 
 # Shipped packages (scripts/release.sh and the other packaging scripts) build
 # with `--profile dist` into target/dist: whole-program LTO and no symbol table,
