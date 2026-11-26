@@ -5,10 +5,13 @@
 //! docs/AGENT_INSTALL.md, then the CLI.
 
 use crate::app::Workspace;
-use crate::design::{Badge, Button, ButtonSize, color, geo};
+use crate::design::{Badge, Button, color, geo};
+#[cfg(target_os = "macos")]
+use crate::design::ButtonSize;
 use crate::settings::tr;
 use crate::ui::ToastKind;
 use gpui::{prelude::FluentBuilder, *};
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 
 /// What the agent follows to install the skill and the CLI (`docs/AGENT_INSTALL.md`).
@@ -23,7 +26,8 @@ fn prompt() -> String {
 const SKILL_ADD: &str = "npx skills add s1dashu/quiet-md";
 
 /// The `quiet` beside the app's own binary (in the .app on macOS, the install
-/// folder on Windows, `bin/` on Linux).
+/// folder on Windows, `bin/` on Linux). Only the Mac links it from here.
+#[cfg(target_os = "macos")]
 fn bundled_cli() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let p = exe.parent()?.join(if cfg!(windows) { "quiet.exe" } else { "quiet" });
@@ -89,24 +93,23 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
     let ask = part(tr("让 Agent 帮你安装", "Let your agent set it up"), None, tr("或者把这句话发给你的 Agent。", "Or copy this to your agent."), vec![
         prose("copy-prompt", prompt(), cx).into_any_element(),
     ]);
-    let mut cli_body: Vec<AnyElement> = vec![];
     #[cfg(target_os = "macos")]
-    {
+    let how = {
         let done = linked();
-        cli_body.push(div().flex().items_center().gap(px(10.))
+        div().flex().items_center().gap(px(10.))
             .child(Button::outline("install-cli").sized(ButtonSize::Sm).label(if done { tr("已安装", "Installed") } else { tr("安装命令行工具", "Install Command") }).disabled(done || bundled_cli().is_none())
                 .on_click(cx.listener(|w, _, _, cx| match install_link() {
                     Ok(_) => { w.show_toast_kind(ToastKind::Success, tr("已安装到 ~/.local/bin", "Installed in ~/.local/bin"), cx); cx.notify(); }
                     Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("没有装上：{}", "Could not install: {}", e), cx),
                 })))
             .child(small(tr("装到 ~/.local/bin，不需要管理员密码", "Goes in ~/.local/bin, no password needed")))
-            .into_any_element());
-    }
+            .into_any_element()
+    };
     #[cfg(target_os = "windows")]
-    cli_body.push(small(tr("安装程序已把 quiet 加入 PATH，新开的终端里就能用。", "The installer puts quiet on your PATH; open a new terminal to use it.")).into_any_element());
-    #[cfg(target_os = "linux")]
-    cli_body.push(small(tr("quiet 在安装包的 bin 文件夹里，和 Quiet.md 放在一起。", "quiet is in the package's bin folder, beside Quiet.md.")).into_any_element());
-    cli_body.push(code("copy-cli", tr("quiet ls\nquiet read 文件夹/文档\nquiet help", "quiet ls\nquiet read Folder/Note\nquiet help").into(), cx).into_any_element());
+    let how = small(tr("安装程序已把 quiet 加入 PATH，新开的终端里就能用。", "The installer puts quiet on your PATH; open a new terminal to use it.")).into_any_element();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let how = small(tr("quiet 在安装包的 bin 文件夹里，和 Quiet.md 放在一起。", "quiet is in the package's bin folder, beside Quiet.md.")).into_any_element();
+    let cli_body = vec![how, code("copy-cli", tr("quiet ls\nquiet read 文件夹/文档\nquiet help", "quiet ls\nquiet read Folder/Note\nquiet help").into(), cx).into_any_element()];
     let cli = part("CLI", None, tr("Skill 配套的命令行工具：在终端里用 quiet 命令列出、读写、搜索文档和数据表。", "The command the skill uses: list, read, write and search documents and data tables with quiet."), cli_body);
     let card = |id: &'static str, part: AnyElement| crate::design::Card::new(id).w_full().overflow_hidden().child(part).into_any_element();
     div().w_full().flex().flex_col().gap(px(geo().section_gap))
