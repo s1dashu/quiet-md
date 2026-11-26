@@ -58,7 +58,7 @@
 - **给 Agent：**
   - 配套 skill 在仓库根的 `skills/quiet-md/`（`SKILL.md` 加 `references/guide.md`），用社区通用的 skills CLI 安装：`npx skills add s1dashu/quiet-md`（Claude Code 装到 `~/.claude/skills/`，Codex 装到 `~/.agents/skills/`）。`references/guide.md` 也编进二进制，`quiet guide` 输出它，是唯一来源；原来的 `quiet skill install` 删掉了。SKILL.md 先教 Agent 检查和安装 CLI（见下面「分发」），再教用法，不提 MCP。只有一个 skill，不按功能拆分：触发描述覆盖「笔记、笔记库、周报、待办」等说法，正文是核心用法和在别人库里干活的规矩（先读后写、少改多加、批量改先 dry-run、写完告诉用户改了哪些路径、改错用 history 撤销）。
   - `quiet guide`（完整指南，`quiet skill` 是它的别名）和 `quiet help CMD`
-  - `quiet mcp`（两个工具）
+  - `quiet mcp`：有类型的工具 `list`、`read`、`search`、`create`、`edit`、`table`，加上通用的 `quiet`（一条命令行）和 `quiet_run`（脚本），见「MCP」一节。只作为没有 shell 的 Agent 的备选，skill 和 README 不推荐它。
 - **和应用共存：**
   - 共用 `Store` 的写锁。
   - 每次保存都存版本快照。
@@ -80,6 +80,29 @@
 | `usage.rs` | 匿名用量统计 |
 
 测试在 `crates/cli/tests/cli.rs`，数据表的在 `crates/cli/tests/tables.rs`。
+
+## MCP
+
+`quiet mcp [--library DIR]`（`mcp.rs`）：stdio 上的 MCP 服务，给有 MCP、没有 shell 的 Agent。每个工具都换成命令行会做的那几次 `Session::call`，再提交，不另写读写逻辑；输出和命令行的紧凑文本一样，`json: true` 给全字段。出错时 `isError: true`，正文是 CLI 的 `error[code]: message` 和 `hint:`。
+
+| 工具 | 对应 | 要点 |
+| --- | --- | --- |
+| `list` | `ls` | `folder`、`recursive`、`kind`；不给 folder 列主页下的顶层文件夹 |
+| `read` | `read` / `outline` / `table` / `board` | `doc`、`at`、`section`、`heading`、`as`、`max_chars`（默认 40000）；`outline: true` 给大纲；第一行是路径、类型和 rev；数据表文件给行（默认 100 行），画板给元素 |
+| `search` | `find` | `query`、`in`、`limit` |
+| `create` | `new` | `title`、`md`、`in`、`kind`（doc/md/board/table）、`fields`、`csv`、`dry_run` |
+| `edit` | `insert` / `replace` | `action`：insert（`start`/`end`/`after`/`before`/`into`/`end_of`）、replace（`at`，`section`，`heading: false` 保留标题）、set（整篇，即 `replace --all`）；`expect_rev`、`dry_run` |
+| `table` | `table` / `table add|update|delete` | `action`：query（`view`/`where`/`any`/`sort`/`group`/`fields`/`stats`/`as`/`limit`/`offset`）、add（`rows`）、update（`row`+`set`、`where`+`set` 或带 `_id` 的 `rows`）、delete（`rows` 或 `where`）。字段、视图、多表的结构改动走 `quiet` 工具，描述里写明 |
+| `quiet` | 任意一条命令行 | `args`、`stdin` |
+| `quiet_run` | `quiet run` | `code`、`dry_run`、`timeout` |
+
+`initialize` 返回的 instructions：先 `list`，路径从主页算起，长文档先看大纲，写入带上读到的 rev，遇到 `stale_rev` / `stale_ref` / `conflict` 重读再改，这是用户自己的笔记（少改多加、大改先 dry_run、说清改了哪些路径）。
+
+配置：
+
+- Claude Code：`claude mcp add quiet -- quiet mcp`
+- Codex：`~/.codex/config.toml` 里 `[mcp_servers.quiet]`，`command = "quiet"`，`args = ["mcp"]`。Codex 默认每次调用 MCP 工具都要确认；`codex exec` 配 `approval_policy = "never"` 时会直接拒绝，要加 `default_tools_approval_mode = "approve"`（实测）。`list`、`read`、`search` 带 `readOnlyHint`。
+- 通用 JSON：`{"mcpServers": {"quiet": {"command": "quiet", "args": ["mcp"]}}}`
 
 ## 分发
 
@@ -130,7 +153,7 @@ CLI 能做应用里数据表的大部分事：读视图、按条件查、改字�
 | 搜索太原始 | 只能整串匹配，结果没有排序 | 多个词同时出现才算命中（AND），标题命中和整串命中排在前面，命中多的排在前面 | ✅ |
 | 一次读整篇大文档 | 输出可能几万字，浪费上下文 | `read` 默认最多 40k 字符，超出时提示按章节读。`--max-chars 0` 不限。 | ✅ |
 | 没有逐命令帮助 | Agent 要读整份指南 | `quiet help CMD` | ✅ |
-| 没有 shell 的 Agent 用不了 | Claude Desktop 之类只能用 MCP | `quiet mcp`：stdio MCP 服务，只有两个工具：`quiet`（命令行）和 `quiet_run`（脚本），schema 很小 | ✅ |
+| 没有 shell 的 Agent 用不了 | Claude Desktop 之类只能用 MCP | `quiet mcp`：stdio MCP 服务。最初只有 `quiet`（命令行）和 `quiet_run`（脚本）；后来加了有类型的 `list`、`read`、`search`、`create`、`edit`、`table`（见「MCP」一节） | ✅ |
 | 没装到 PATH | 用户拿不到 `quiet` | 见「分发」 | ✅（打包脚本） |
 | 不知道 Agent 用得好不好 | 设计没验证 | 用模拟文档库和一组真实任务，让不同档位的模型只看 `quiet guide`（当时叫 `quiet skill`）去完成，记录成功率、调用次数和卡住的地方，再据此改 | ✅ |
 | Windows 没编过 | QuickJS 是 C 代码 | 在 sida-windows 上编译并跑测试 | ✅ |

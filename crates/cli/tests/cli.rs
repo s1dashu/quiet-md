@@ -306,31 +306,83 @@ fn every_command_has_help() {
     assert!(ok(&lib, &["insert", "--help"]).contains("--after"));
 }
 
-#[test]
-fn serves_mcp() {
+/// `quiet mcp` on stdio: each message a line, each reply a line (none for a notification).
+fn mcp(lib: &Path, msgs: &[serde_json::Value]) -> Vec<serde_json::Value> {
     use std::io::Write;
-    let lib = library(&[("Plan", PLAN)]);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_quiet")).env("QUIET_NO_TELEMETRY", "1").args(["mcp", "--library"]).arg(&lib)
+    let mut child = Command::new(env!("CARGO_BIN_EXE_quiet")).env("QUIET_NO_TELEMETRY", "1").args(["mcp", "--library"]).arg(lib)
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
-    let msgs = [
-        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}"#,
-        r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
-        r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
-        r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"quiet","arguments":{"args":["outline","Plan"]}}}"#,
-        r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"quiet_run","arguments":{"code":"lib.doc('Plan').append('via mcp'); return 1"}}}"#,
-        r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"quiet","arguments":{"args":["read","Nope"]}}}"#,
-    ];
-    child.stdin.as_mut().unwrap().write_all((msgs.join("\n") + "\n").as_bytes()).unwrap();
+    let text: String = msgs.iter().map(|m| format!("{m}\n")).collect();
+    child.stdin.as_mut().unwrap().write_all(text.as_bytes()).unwrap();
     drop(child.stdin.take());
     let out = String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap();
-    let replies: Vec<serde_json::Value> = out.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert_eq!(replies.len(), 5, "the notification gets no reply: {out}");
+    out.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+#[test]
+fn serves_mcp() {
+    use serde_json::json;
+    let lib = library(&[("Plan", PLAN)]);
+    ok(&lib, &["new", "Books", "--kind", "table", "--fields", "Title,State"]);
+    let calls = [
+        ("quiet", json!({ "args": ["outline", "Plan"] })),
+        ("quiet", json!({ "args": ["read", "Nope"] })),
+        ("quiet_run", json!({ "code": "lib.doc('Plan').prepend('via mcp'); return 1" })),
+        ("quiet_run", json!({ "code": "lib.doc('Nope')" })),
+        ("list", json!({})),
+        ("list", json!({ "folder": "Nope" })),
+        ("search", json!({ "query": "guide" })),
+        ("search", json!({})),
+        ("read", json!({ "doc": "Plan", "outline": true })),
+        ("read", json!({ "doc": "Plan", "at": "Tasks", "section": true })),
+        ("read", json!({ "doc": "Nope" })),
+        ("create", json!({ "title": "Note", "md": "See [[Plan]]" })),
+        ("create", json!({ "title": "Sheet", "kind": "table" })),
+        ("edit", json!({ "doc": "Plan", "action": "insert", "end_of": "Tasks", "md": "- [ ] ship it" })),
+        ("edit", json!({ "doc": "Note", "action": "set", "md": "# Fresh\nbody" })),
+        ("edit", json!({ "doc": "Plan", "action": "replace", "at": "Notes", "section": true, "heading": false, "md": "Replaced." })),
+        ("edit", json!({ "doc": "Plan", "action": "insert", "md": "x", "expect_rev": "0000" })),
+        ("edit", json!({ "doc": "Plan", "action": "replace", "md": "x" })),
+        ("table", json!({ "doc": "Books", "action": "add", "rows": [{ "Title": "Dune", "State": "reading" }, { "Title": "Emma", "State": "to read" }] })),
+        ("table", json!({ "doc": "Books", "action": "update", "where": ["State = reading"], "set": { "State": "done" } })),
+        ("table", json!({ "doc": "Books", "where": ["State = done"], "as": "md" })),
+        ("table", json!({ "doc": "Books", "action": "delete", "rows": ["r999"] })),
+        ("table", json!({ "doc": "Plan" })),
+    ];
+    let mut msgs = vec![
+        json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-06-18", "capabilities": {} } }),
+        json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+    ];
+    msgs.extend(calls.iter().enumerate().map(|(i, (name, args))| json!({ "jsonrpc": "2.0", "id": i + 2, "method": "tools/call", "params": { "name": name, "arguments": args } })));
+    let replies = mcp(&lib, &msgs);
+    assert_eq!(replies.len(), calls.len() + 2, "the notification gets no reply");
     assert_eq!(replies[0]["result"]["serverInfo"]["name"], "quiet");
-    assert_eq!(replies[1]["result"]["tools"].as_array().unwrap().len(), 2);
-    assert!(replies[2]["result"]["content"][0]["text"].as_str().unwrap().contains("Goals"));
-    assert_eq!(replies[3]["result"]["isError"], false);
-    assert!(ok(&lib, &["read", "Plan"]).contains("via mcp"));
-    assert_eq!(replies[4]["result"]["isError"], true);
+    assert!(replies[0]["result"]["instructions"].as_str().unwrap().contains("expect_rev"));
+    let tools = replies[1]["result"]["tools"].as_array().unwrap();
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["list", "read", "search", "create", "edit", "table", "quiet", "quiet_run"]);
+    assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && !t["description"].as_str().unwrap().is_empty()));
+    assert!(tools[..3].iter().all(|t| t["annotations"]["readOnlyHint"] == true) && tools[4]["annotations"]["readOnlyHint"] == false);
+    let text = |i: usize| replies[i + 2]["result"]["content"][0]["text"].as_str().unwrap().to_string();
+    for (i, (name, args)) in calls.iter().enumerate() {
+        // Every second call is the failing one, except where a tool has several successes in a row.
+        let failed = replies[i + 2]["result"]["isError"].as_bool().unwrap();
+        let want = matches!(i, 1 | 3 | 5 | 7 | 10 | 12 | 16 | 17 | 21 | 22);
+        assert_eq!(failed, want, "{name} {args}: {}", text(i));
+        if failed { assert!(text(i).starts_with("error["), "{name}: errors carry the CLI's code: {}", text(i)); }
+    }
+    assert!(text(0).contains("Goals"));
+    assert!(text(4).contains("Plan.xml") && text(4).contains("Books.sqlite"));
+    assert!(text(6).contains("1 documents match"));
+    assert!(text(8).contains("## Tasks") && text(8).contains("rev "));
+    assert!(text(9).lines().next().unwrap().contains(" rev ") && text(9).contains("measure agents") && !text(9).contains("Notes"));
+    assert!(text(10).contains("error[not_found]") && text(10).contains("hint:"));
+    assert!(text(16).contains("error[stale_rev]"));
+    assert!(text(20).contains("| Dune | done |") && !text(20).contains("Emma"));
+    let plan = ok(&lib, &["read", "Plan"]);
+    assert!(plan.contains("via mcp") && plan.contains("- [ ] ship it") && plan.contains("Replaced.") && !plan.contains("Nothing yet"));
+    assert!(plan.find("ship it").unwrap() < plan.find("# Notes").unwrap(), "end_of puts it at the end of the section: {plan}");
+    assert_eq!(ok(&lib, &["read", "Note"]).trim(), "# Fresh\n\nbody");
 }
 
 #[test]
@@ -727,4 +779,12 @@ fn wiki_links_look_in_their_own_folder_first() {
     assert!(err.contains("error[ambiguous]") && err.contains("Attic/A/Box.xml") && err.contains("Attic/B/Box.xml") && !err.contains("Home/Box"), "{err}");
     // From Work, Box is only elsewhere, in two top-level folders.
     assert!(String::from_utf8_lossy(&folders_run(&file, &["insert", "Notes", "--md", "[[Box]]"]).stderr).contains("other top-level folders match"));
+}
+
+#[test]
+fn replace_all_sets_the_whole_body() {
+    let lib = library(&[("Plan", PLAN)]);
+    assert!(!quiet(&lib, &["replace", "Plan", "--md", "x"]).status.success(), "replace without --all still needs a block");
+    ok(&lib, &["replace", "Plan", "--all", "--md", "# Only\nthis"]);
+    assert_eq!(ok(&lib, &["read", "Plan"]).trim(), "# Only\n\nthis");
 }

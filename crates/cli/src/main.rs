@@ -38,7 +38,7 @@ pub struct Args {
     flags: Vec<String>,
 }
 
-const FLAGS: &[&str] = &["force", "json", "dry-run", "section", "no-heading", "recursive", "done", "undone", "markdown", "start", "end", "help", "version", "replace", "full", "any", "create-fields", "two-way", "single", "stats"];
+const FLAGS: &[&str] = &["force", "json", "dry-run", "section", "no-heading", "recursive", "done", "undone", "markdown", "start", "end", "help", "version", "replace", "full", "any", "create-fields", "two-way", "single", "stats", "all"];
 
 pub fn parse(raw: Vec<String>) -> R<Args> {
     let a = parse_as(raw.clone(), false)?;
@@ -302,7 +302,7 @@ fn to_calls(cmd: &str, a: &mut Args, input: &mut Input) -> R<(Vec<(String, Value
             v["md"] = json!(input.value(a, "md")?.ok_or_else(|| fail("usage", "insert needs --md TEXT (or --md - to read stdin)"))?);
             "insert"
         }
-        ("replace", _) => { with_doc(&mut v, true)?; v["md"] = json!(input.value(a, "md")?.ok_or_else(|| fail("usage", "replace needs --md TEXT (or --md - to read stdin)"))?); "replace" }
+        ("replace", _) => { with_doc(&mut v, !a.has("all"))?; if a.has("all") { v["all"] = json!(true); } v["md"] = json!(input.value(a, "md")?.ok_or_else(|| fail("usage", "replace needs --md TEXT (or --md - to read stdin)"))?); "replace" }
         ("delete", _) => { with_doc(&mut v, true)?; "remove" }
         ("move", _) => { with_doc(&mut v, true)?; place(&mut v); "move" }
         ("set", _) => { with_doc(&mut v, true)?; put(&mut v, "text", input.value(a, "text")?); put(&mut v, "kind", a.get("kind")); put(&mut v, "done", done(a)); "set" }
@@ -372,8 +372,14 @@ pub fn execute(raw: Vec<String>, mut input: Input, out: &mut String) -> R<()> {
         return Ok(());
     }
     let (calls, write) = to_calls(&cmd, &mut a, &mut input)?;
+    apply(&mut s, &calls, write, dry, json_out, out)
+}
+
+/// Operations on an open session, then the commit when they write; their
+/// compact text (or JSON) and the commit's report into `out`.
+pub fn apply(s: &mut Session, calls: &[(String, Value)], write: bool, dry: bool, json_out: bool, out: &mut String) -> R<()> {
     let mut results = vec![];
-    for (op, args) in &calls {
+    for (op, args) in calls {
         let v = s.call(op, args)?;
         if !json_out { *out += &output::text(op, &v); }
         results.push(v);

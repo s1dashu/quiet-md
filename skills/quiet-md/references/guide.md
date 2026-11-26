@@ -58,7 +58,7 @@ quiet check                                    unreadable files, broken links, e
 quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table] [--fields A,B | --csv TEXT|-]
 quiet mkdir NAME [--in FOLDER]
 quiet insert DOC [--after|--before|--into|--end-of REF | --start | --end] --md TEXT|-
-quiet replace DOC#REF [--section] --md TEXT|-
+quiet replace DOC#REF [--section] --md TEXT|-   (DOC --all: the whole body)
 quiet delete DOC#REF [--section]
 quiet move DOC#REF --after|--before|--into|--end-of REF | --start | --end [--section]
 quiet set DOC#REF [--text TEXT] [--done|--undone] [--kind text|h1..h6|bullet|ordered|todo|quote|code]

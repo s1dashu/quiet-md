@@ -17,7 +17,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet new TITLE [--in FOLDER] [--md TEXT|-] [--kind doc|md|board|table]
   quiet mkdir NAME [--in FOLDER]
   quiet insert DOC [--after|--before|--into|--end-of REF | --start | --end] --md TEXT|-
-  quiet replace DOC#REF [--section] --md TEXT|-
+  quiet replace DOC#REF [--section] --md TEXT|-   (DOC --all: the whole body)
   quiet delete DOC#REF [--section]
   quiet move DOC#REF --after|--before|--into REF [--section]
   quiet set DOC#REF [--text TEXT] [--done|--undone] [--kind K]
@@ -122,8 +122,10 @@ there: ambiguous; write [[id]]).
   quiet insert 周报 --after '#3~k7f2' --md '- [ ] 补测试'
   quiet insert 方案 --end-of 风险 --md '- 许可证需要审核，见 [[法务/清单]]'"),
     (&["replace"], "quiet replace DOC#REF [--section] --md TEXT|-
+quiet replace DOC --all --md TEXT|-
 
-The block (--section: the heading and its section) replaced by the Markdown."),
+The block (--section: the heading and its section) replaced by the Markdown;
+--all: the whole body."),
     (&["delete"], "quiet delete DOC#REF [--section]"),
     (&["move"], "quiet move DOC#REF --after|--before|--into|--end-of REF | --start | --end [--section]
 
@@ -267,9 +269,18 @@ document as \"doc\" and a block as \"at\".
   quiet call blocks '{\"doc\": \"周报\", \"kind\": \"todo\", \"done\": false}'"),
     (&["mcp"], "quiet mcp [--library DIR]
 
-An MCP server on stdin/stdout with two tools: `quiet` (a command line) and
-`quiet_run` (a script). For agents that speak MCP but have no shell. E.g. in
-an MCP client's settings: {\"command\": \"quiet\", \"args\": [\"mcp\"]}"),
+An MCP server on stdin/stdout, for agents that speak MCP but have no shell.
+Tools: list, read (outline: true for the headings), search, create, edit
+(insert, replace or set, with expect_rev and dry_run) and table (query, add,
+update, delete rows), each as the matching command does it; quiet (any
+command line, e.g. table fields and views) and quiet_run (a script) for the
+rest. Errors come back with isError and the CLI's code, message and hint.
+--library DIR serves that folder alone.
+
+  Claude Code:  claude mcp add quiet -- quiet mcp
+  Codex:        ~/.codex/config.toml: [mcp_servers.quiet] command = \"quiet\" args = [\"mcp\"]
+                (default_tools_approval_mode = \"approve\" lets it call them without asking)
+  Other:        {\"mcpServers\": {\"quiet\": {\"command\": \"quiet\", \"args\": [\"mcp\"]}}}"),
     (&["telemetry"], "quiet telemetry [on|off|status]
 
 quiet counts how often its commands run: per day, how many ran and failed and

@@ -48,7 +48,8 @@ pub fn text(op: &str, v: &Value) -> String {
             }
         }
         "outline" | "open" => {
-            o += &format!("{}  [{}] rev {}  {} blocks, {} chars\n", s(v, "path"), s(v, "kind"), s(v, "rev"), s(v, "block_count"), size(v["chars"].as_u64().unwrap_or(0)));
+            let chars = v["chars"].as_u64().map(|c| format!(", {} chars", size(c))).unwrap_or_default();
+            o += &format!("{}  [{}] rev {}  {} blocks{chars}\n", s(v, "path"), s(v, "kind"), s(v, "rev"), s(v, "block_count"));
             for h in list(v, "headings") {
                 let l = h["level"].as_u64().unwrap_or(1) as usize;
                 o += &format!("{:<12} {}{} {}  ({})\n", s(h, "ref"), "  ".repeat(l.saturating_sub(1)), "#".repeat(l), s(h, "text"), size(h["chars"].as_u64().unwrap_or(0)));

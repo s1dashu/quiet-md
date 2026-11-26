@@ -405,6 +405,8 @@ impl Session {
     }
 
     fn target(&self, i: usize, a: &Value, key: &str) -> R<Vec<BlockId>> {
+        // `all`: the whole body, every top-level block.
+        if flag(a, "all") && arg(a, key).is_none() { return Ok(self.docs[i].doc.blocks.iter().map(|b| b.id).collect()); }
         let id = blocks::resolve(&self.docs[i].doc, need(a, key)?)?;
         if !flag(a, "section") { return Ok(vec![id]); }
         let mut ids = blocks::section(&self.docs[i].doc, id);
