@@ -848,7 +848,7 @@ impl R<'_> {
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = b.folded;
         let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
-        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        let mermaid = !folded && lang == crate::mermaid::LANG;
         // A Mermaid block shows its diagram, under the code while the caret is in it.
         let reveal = editing && !self.ed.read_only;
         let diagram = if mermaid && !show_code { self.diagram(b, reveal, 36., 16., cx) } else { None };
@@ -1178,7 +1178,7 @@ impl Editor {
     /// The row of a Mermaid block the caret is in shows its code too.
     fn diagram_nonce(&self, focused: bool) -> Option<(BlockId, u64)> {
         let id = self.core.sel.head.block;
-        let on = crate::mermaid::SUPPORTED && focused && !self.read_only
+        let on = focused && !self.read_only
             && matches!(self.core.kind_of(id), Some(BlockKind::Code { lang, show_code: false, .. }) if lang == crate::mermaid::LANG);
         on.then(|| (id, 0x6d65_726d_u64.wrapping_mul(id.0 | 1)))
     }
@@ -2396,7 +2396,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = b.folded;
         let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
-        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        let mermaid = !folded && lang == crate::mermaid::LANG;
         // A Mermaid block shows its diagram, under the code while the caret is in it.
         let reveal = editing && !self.ed.read_only;
         let diagram = if mermaid && !show_code { self.diagram(b, reveal, 40., 20., cx) } else { None };

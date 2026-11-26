@@ -1,12 +1,12 @@
 //! Mermaid diagrams (#23). A code block whose language is Mermaid shows its
 //! diagram unless switched to its code (`show_code`, saved as `view="code"`).
-//! The bundled mermaid.js (assets/mermaid, v11.17.2, stored deflated) runs in
-//! an off-screen web view — WKWebView on macOS, WebView2 on Windows, as for
-//! printing (printing.rs) — and returns SVG drawn without `<foreignObject>`
-//! (`htmlLabels: false`), which `img()` shows through GPUI's resvg. Nothing
-//! goes over the network. Results are kept by source and theme, in memory and
-//! under the app's local data folder (`quiet.md/mermaid`, never the library).
-//! Linux and the web build keep showing the code.
+//! merman (pure Rust, following mermaid 12.3) parses, lays out and writes the
+//! SVG on a background thread, in Mermaid's `base` theme coloured from the
+//! Theme tokens and in the interface font; text is measured by GPUI's SVG
+//! renderer, the resvg that then draws it (`img()`), so labels fit their
+//! boxes. Its resvg-safe pipeline turns HTML labels into SVG text. Nothing
+//! goes over the network; every platform draws. Results are kept in memory
+//! by source and theme.
 
 use gpui::*;
 use rustc_hash::FxHashMap;
@@ -14,15 +14,12 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-pub const SUPPORTED: bool = cfg!(any(target_os = "macos", target_os = "windows"));
 /// The code block language (`lang::LANGS`) drawn as a diagram.
 pub const LANG: &str = "Mermaid";
-/// The bundled mermaid.js: part of the cache key, so an upgrade draws anew.
-const VERSION: &str = "11.17.2";
-/// Cached diagrams in memory before the oldest half is dropped, and files on disk.
+/// The renderer: part of the cache key, so an upgrade draws anew.
+const VERSION: &str = "merman 0.11.0";
+/// Cached diagrams before the oldest half is dropped.
 const MEMORY: usize = 256;
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-const DISK: usize = 400;
 
 /// A drawn diagram: the SVG at twice its size (so the 1× rasterization GPUI
 /// gives an SVG `Image` is sharp on Retina) and its size in points.
@@ -41,18 +38,20 @@ pub enum Look {
     Failed(String, Option<Diagram>),
 }
 
-/// The cache key of `source` drawn in the light or dark theme.
-pub fn key(source: &str, dark: bool) -> u64 {
+/// The cache key of `source` drawn with `style` (`Style::config`).
+pub fn key(source: &str, style: &str) -> u64 {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(VERSION.as_bytes());
-    h.update([0, dark as u8]);
+    h.update([0]);
+    h.update(style.as_bytes());
+    h.update([0]);
     h.update(source.as_bytes());
     u64::from_le_bytes(h.finalize()[..8].try_into().unwrap())
 }
 
-/// The size in points of an SVG made by `DRIVER` (its root's width and
-/// height are twice that).
+/// The size in points of a diagram SVG (its root's width and height are
+/// twice that, see `doubled`).
 pub fn size_of(svg: &str) -> Option<(f32, f32)> {
     let start = svg.find("<svg")?;
     let root = &svg[start..start + svg[start..].find('>')?];
@@ -64,16 +63,135 @@ pub fn size_of(svg: &str) -> Option<(f32, f32)> {
     (w.is_finite() && h.is_finite() && w > 0. && h > 0.).then_some((w, h))
 }
 
+/// merman's root is `width="100%"` with a `max-width` style; sized here at
+/// twice its viewBox instead.
+fn doubled(svg: &str) -> Option<String> {
+    let start = svg.find("<svg")?;
+    let end = start + svg[start..].find('>')?;
+    let root = &svg[start..end];
+    let attr = |name: &str| -> Option<(usize, usize)> {
+        let i = root.find(&format!(" {name}=\""))?;
+        let close = i + name.len() + 3 + root[i + name.len() + 3..].find('"')?;
+        Some((i, close + 1))
+    };
+    let (vb0, vb1) = attr("viewBox")?;
+    let vb: Vec<f32> = root[vb0 + 10..vb1 - 1].split([' ', ',']).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+    let [_, _, w, h] = vb[..] else { return None };
+    let mut cut: Vec<(usize, usize)> = ["width", "height", "style"].iter().filter_map(|n| attr(n)).collect();
+    cut.sort();
+    let mut out = String::with_capacity(svg.len() + 40);
+    out.push_str(&svg[..start]);
+    let mut at = 0;
+    for (a, b) in cut {
+        out.push_str(&root[at..a]);
+        at = b;
+    }
+    out.push_str(&root[at..]);
+    out.push_str(&format!(" width=\"{}\" height=\"{}\"", 2. * w, 2. * h));
+    out.push_str(&svg[end..]);
+    Some(out)
+}
+
+/// How diagrams look now: Mermaid's site config, made on the main thread
+/// (the Theme tokens follow its light / dark state), and the font it names.
+#[derive(Clone)]
+pub struct Style {
+    pub config: String,
+    pub font: String,
+}
+
+/// `c` as an opaque `#rrggbb`, laid over `under` when translucent.
+fn hex(c: Hsla, under: Hsla) -> String {
+    let (c, u) = (Rgba::from(c), Rgba::from(under));
+    let ch = |x: f32, y: f32| ((x * c.a + y * (1. - c.a)).clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", ch(c.r, u.r), ch(c.g, u.g), ch(c.b, u.b))
+}
+
+/// A font list resvg finds: the interface font (the platform's own sans is
+/// a name only the system text stack knows) and a CJK sans for fallback.
+fn font() -> String {
+    let ui = crate::theme::ui_family();
+    let own = if cfg!(target_os = "macos") { "\"Helvetica Neue\", \"PingFang SC\"" } else if cfg!(target_os = "windows") { "\"Segoe UI\", \"Microsoft YaHei\"" } else { "\"Noto Sans\", \"Noto Sans CJK SC\"" };
+    if ui == crate::theme::SYSTEM_FONT || ui.starts_with('.') { format!("{own}, sans-serif") } else { format!("\"{}\", {own}, sans-serif", ui.replace('"', "")) }
+}
+
+pub fn style() -> Style {
+    use crate::theme::Theme;
+    let dark = crate::theme::dark();
+    let page = Theme::code_bg();
+    let x = |c: Hsla| hex(c, page);
+    let (text, caption, accent) = (x(Theme::text()), x(Theme::text_caption()), Theme::primary());
+    let node = x(accent.opacity(0.08));
+    let border = x(accent.opacity(0.5));
+    let gray = x(Theme::fill_hover_strong());
+    let line = x(Theme::line_sheet());
+    let soft = x(Theme::bg_overlay());
+    let note = x(crate::theme::block_bg("yellow").unwrap_or(page));
+    let note_border = x(crate::theme::callout_border("yellow").unwrap_or(page));
+    let font = font();
+    // Series colours (pie slices, git branches, mindmap and timeline
+    // sections, journey sections): the block colours' swatches.
+    let hues = ["blue", "green", "orange", "purple", "red", "yellow", "gray", "blue"];
+    let mut vars = serde_json::json!({
+        "darkMode": dark, "background": x(page), "fontFamily": font, "fontSize": "14px",
+        "primaryColor": node, "primaryTextColor": text, "primaryBorderColor": border,
+        "secondaryColor": gray, "secondaryTextColor": text, "secondaryBorderColor": line,
+        "tertiaryColor": soft, "tertiaryTextColor": text, "tertiaryBorderColor": line,
+        "mainBkg": node, "nodeBorder": border, "nodeTextColor": text, "textColor": text, "titleColor": text,
+        "lineColor": caption, "defaultLinkColor": caption, "edgeLabelBackground": x(page),
+        "clusterBkg": soft, "clusterBorder": line,
+        "noteBkgColor": note, "noteBorderColor": note_border, "noteTextColor": text,
+        "actorBkg": node, "actorBorder": border, "actorTextColor": text, "actorLineColor": caption,
+        "signalColor": caption, "signalTextColor": text, "labelBoxBkgColor": node, "labelBoxBorderColor": border,
+        "labelTextColor": text, "loopTextColor": text, "activationBkgColor": soft, "activationBorderColor": border,
+        "classText": text, "labelColor": text, "attributeBackgroundColorOdd": x(page), "attributeBackgroundColorEven": soft,
+        "pieTitleTextColor": text, "pieSectionTextColor": text, "pieLegendTextColor": text,
+        "pieStrokeColor": x(page), "pieOuterStrokeColor": line,
+        "quadrant1Fill": node, "quadrant2Fill": soft, "quadrant3Fill": node, "quadrant4Fill": soft,
+        "quadrant1TextFill": text, "quadrant2TextFill": text, "quadrant3TextFill": text, "quadrant4TextFill": text,
+        "quadrantPointFill": x(accent), "quadrantPointTextFill": text, "quadrantTitleFill": text,
+        "quadrantXAxisTextFill": text, "quadrantYAxisTextFill": text,
+        "quadrantExternalBorderStrokeFill": line, "quadrantInternalBorderStrokeFill": line,
+        "sectionBkgColor": soft, "altSectionBkgColor": x(page), "sectionBkgColor2": node,
+        "taskBkgColor": node, "taskBorderColor": border, "taskTextColor": text, "taskTextOutsideColor": text, "taskTextLightColor": text,
+        "taskTextDarkColor": text, "activeTaskBkgColor": x(accent.opacity(0.2)), "activeTaskBorderColor": x(accent),
+        "doneTaskBkgColor": gray, "doneTaskBorderColor": line, "critBkgColor": x(Theme::danger().opacity(0.15)), "critBorderColor": x(Theme::danger()),
+        "gridColor": line, "todayLineColor": x(Theme::danger()),
+        "git0": x(accent), "commitLabelColor": text, "commitLabelBackground": soft, "tagLabelColor": text, "tagLabelBackground": soft, "tagLabelBorder": line,
+    });
+    if let Some(map) = vars.as_object_mut() {
+        let solids: Vec<String> = hues[..6].iter().map(|h| x(crate::theme::callout_border(h).unwrap_or(accent))).collect();
+        map.insert("xyChart".into(), serde_json::json!({
+            "backgroundColor": "transparent", "titleColor": text, "plotColorPalette": solids.join(","),
+            "xAxisLabelColor": caption, "xAxisTitleColor": text, "xAxisTickColor": caption, "xAxisLineColor": caption,
+            "yAxisLabelColor": caption, "yAxisTitleColor": text, "yAxisTickColor": caption, "yAxisLineColor": caption,
+        }));
+        for i in 0..12 {
+            let h = hues[i % hues.len()];
+            map.insert(format!("cScaleInv{i}"), x(crate::theme::callout_border(h).unwrap_or(accent)).into());
+            if i >= hues.len() { map.insert(format!("cScale{i}"), x(crate::theme::block_bg(&format!("medium-{h}")).unwrap_or(page)).into()); map.insert(format!("cScaleLabel{i}"), text.clone().into()); }
+        }
+        for (i, h) in hues.iter().enumerate() {
+            let fill = x(crate::theme::block_bg(&format!("medium-{h}")).unwrap_or(page));
+            let solid = x(crate::theme::callout_border(h).unwrap_or(accent));
+            map.insert(format!("cScale{i}"), fill.clone().into());
+            map.insert(format!("cScaleLabel{i}"), text.clone().into());
+            map.insert(format!("pie{}", i + 1), fill.into());
+            if i > 0 { map.insert(format!("git{i}"), solid.clone().into()); }
+            map.insert(format!("gitBranchLabel{i}"), text.clone().into());
+            map.insert(format!("gitInv{i}"), solid.into());
+        }
+    }
+    let config = serde_json::json!({
+        "theme": "base", "darkMode": dark, "fontFamily": font, "htmlLabels": false,
+        "flowchart": { "htmlLabels": false }, "themeVariables": vars,
+    });
+    Style { config: config.to_string(), font }
+}
+
 enum Done {
     Ready(Diagram),
     Failed(String),
-}
-
-struct Job {
-    block: u64,
-    key: u64,
-    source: String,
-    dark: bool,
 }
 
 #[derive(Default)]
@@ -83,14 +201,9 @@ struct State {
     order: VecDeque<u64>,
     /// The last diagram each block drew, kept while a new one draws or fails.
     last: FxHashMap<u64, Diagram>,
-    queue: VecDeque<Job>,
-    /// The key being drawn now.
-    drawing: Option<u64>,
-    running: bool,
-    /// The web view could not start (no WebView2 runtime): every block says so.
-    broken: Option<String>,
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-    pruned: bool,
+    /// The key each block is drawing now: typing asks again per keystroke,
+    /// a newer source only starts once the one in flight is back.
+    drawing: FxHashMap<u64, u64>,
 }
 
 thread_local! {
@@ -100,11 +213,6 @@ static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 
 /// Changes whenever a drawing finishes: rows with diagrams measure again.
 pub fn generation() -> u64 { GENERATION.load(std::sync::atomic::Ordering::Relaxed) }
-
-fn finished(cx: &mut AsyncApp) {
-    GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    cx.update(|cx| cx.refresh_windows());
-}
 
 impl State {
     fn insert(&mut self, key: u64, d: Done) {
@@ -119,22 +227,14 @@ impl State {
     }
 }
 
-fn diagram(svg: Vec<u8>) -> Option<Diagram> {
-    let size = size_of(std::str::from_utf8(&svg).ok()?)?;
-    Some(Diagram { image: Arc::new(Image::from_bytes(ImageFormat::Svg, svg)), size })
-}
-
 /// What block `block` (its id) shows for `source` in the current theme;
-/// starts drawing it when nothing is known yet. Only when `SUPPORTED`.
+/// starts drawing it in the background when nothing is known yet.
 pub fn look(block: u64, source: &str, cx: &mut App) -> Look {
-    let dark = crate::theme::dark();
-    let key = key(source, dark);
+    let style = style();
+    let key = key(source, &style.config);
     let start = STATE.with(|s| {
         let mut s = s.borrow_mut();
         let last = s.last.get(&block).cloned();
-        if let Some(msg) = &s.broken {
-            return Err(Look::Failed(msg.clone(), last));
-        }
         match s.done.get(&key) {
             Some(Done::Ready(d)) => {
                 let d = d.clone();
@@ -144,420 +244,221 @@ pub fn look(block: u64, source: &str, cx: &mut App) -> Look {
             Some(Done::Failed(m)) => return Err(Look::Failed(m.clone(), last)),
             None => {}
         }
-        // Already on its way (asked again every frame until it arrives).
-        if s.drawing == Some(key) || s.queue.iter().any(|j| j.key == key && j.block == block) {
+        // One drawing per block at a time; the row asks again when it lands.
+        if s.drawing.contains_key(&block) {
             return Err(Look::Pending(last));
         }
-        if let Some(d) = disk::read(key).and_then(diagram) {
-            s.insert(key, Done::Ready(d.clone()));
-            s.last.insert(block, d.clone());
-            return Err(Look::Ready(d));
-        }
-        // Typing replaces the block's waiting source rather than queueing each keystroke.
-        s.queue.retain(|j| j.block != block);
-        s.queue.push_back(Job { block, key, source: source.to_string(), dark });
-        Ok((!std::mem::replace(&mut s.running, true), last))
+        s.drawing.insert(block, key);
+        Ok(last)
     });
     match start {
         Err(look) => look,
-        Ok((spawn, last)) => {
-            if spawn {
-                cx.spawn(async move |cx| work(cx).await).detach();
-            }
+        Ok(last) => {
+            let (source, renderer) = (source.to_string(), cx.svg_renderer());
+            let task = cx.background_executor().spawn(async move { draw(&source, &style, &renderer) });
+            cx.spawn(async move |cx| {
+                let done = match task.await {
+                    Ok(d) => Done::Ready(d),
+                    Err(m) => Done::Failed(m),
+                };
+                STATE.with(|s| {
+                    let mut s = s.borrow_mut();
+                    s.drawing.remove(&block);
+                    if let Done::Ready(d) = &done {
+                        s.last.insert(block, d.clone());
+                    }
+                    s.insert(key, done);
+                });
+                GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                cx.update(|cx| cx.refresh_windows());
+            })
+            .detach();
             Look::Pending(last)
         }
     }
 }
 
-/// Draws the queue in one web view, closed again after a quiet spell.
-async fn work(cx: &mut AsyncApp) {
-    let mut view: Option<backend::View> = None;
-    let mut n = 0;
-    loop {
-        let Some(job) = STATE.with(|s| s.borrow_mut().queue.pop_front()) else {
-            if view.is_none() {
-                STATE.with(|s| s.borrow_mut().running = false);
-                return;
-            }
-            // Idle: new work wakes it within 50ms; after 30s the view closes.
-            let idle = web_time::Instant::now();
-            while STATE.with(|s| s.borrow().queue.is_empty()) && idle.elapsed() < std::time::Duration::from_secs(30) {
-                cx.background_executor().timer(std::time::Duration::from_millis(50)).await;
-            }
-            if STATE.with(|s| s.borrow().queue.is_empty()) {
-                view = None;
-            }
-            continue;
-        };
-        if view.is_none() {
-            match backend::View::open(cx).await {
-                Ok(v) => view = Some(v),
-                Err(msg) => {
-                    log::warn!("mermaid: {msg}");
-                    STATE.with(|s| {
-                        let mut s = s.borrow_mut();
-                        s.broken = Some(msg);
-                        s.queue.clear();
-                        s.running = false;
-                    });
-                    finished(cx);
-                    return;
-                }
-            }
+/// Text measured per diagram, in bytes, before it gives up (a pasted novel).
+const TEXT_BUDGET: usize = 1 << 20;
+
+/// `source` as a diagram (any thread).
+pub fn draw(source: &str, style: &Style, renderer: &SvgRenderer) -> Result<Diagram, String> {
+    let svg = render(source, style, renderer)?;
+    let svg = doubled(&svg).ok_or_else(|| crate::settings::tr("图表没有尺寸", "The diagram has no size").to_string())?;
+    let size = size_of(&svg).ok_or_else(|| crate::settings::tr("图表没有尺寸", "The diagram has no size").to_string())?;
+    Ok(Diagram { image: Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes())), size })
+}
+
+/// merman's SVG for `source`, its text measured in `style.font` by
+/// `renderer` (memoized; past `TEXT_BUDGET` the drawing is cancelled).
+fn render(source: &str, style: &Style, renderer: &SvgRenderer) -> Result<String, String> {
+    use merman::svg::{DeterministicTextMeasurer, MeasurementProfileId, SvgPipeline, TextMeasurementPolicy, TextMeasurementProfile, TextMeasurementProfileIdentity};
+    use std::sync::Mutex;
+    let control = merman::OperationControl::new();
+    let widths: Arc<Mutex<(FxHashMap<(String, u64, Option<String>, Option<String>), f64>, usize)>> = Arc::new(Mutex::new((FxHashMap::default(), 0)));
+    let measure = {
+        let (renderer, family, control, widths) = (renderer.clone(), style.font.clone(), control.clone(), widths.clone());
+        move |text: &str, st: &merman::svg::TextStyle| -> f64 {
+            let k = (text.to_string(), st.font_size.to_bits(), st.font_weight.clone(), st.font_style.clone());
+            let mut w = widths.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(v) = w.0.get(&k) { return *v; }
+            w.1 += 64 + text.len();
+            if w.1 > TEXT_BUDGET { control.cancel(); return 0.; }
+            let font = SvgTextFont { family: &family, size: st.font_size as f32, weight: st.font_weight.as_deref().unwrap_or("normal"), style: st.font_style.as_deref().unwrap_or("normal") };
+            let v = renderer.measure_text_width(text, &font).map(f64::from).unwrap_or(0.);
+            w.0.insert(k, v);
+            v
         }
-        let Some(v) = view.as_ref() else { continue };
-        n += 1;
-        STATE.with(|s| s.borrow_mut().drawing = Some(job.key));
-        let done = match ask(v, n, &job.source, job.dark, cx).await {
-            Ok(svg) => match diagram(svg.clone().into_bytes()) {
-                Some(d) => {
-                    disk::write(job.key, &d);
-                    Done::Ready(d)
-                }
-                None => {
-                    log::warn!("mermaid: no size in {}", &svg[..svg.len().min(300)]);
-                    Done::Failed(crate::settings::tr("图表没有尺寸", "The diagram has no size").into())
-                }
-            },
-            Err(msg) => Done::Failed(msg),
-        };
-        STATE.with(|s| {
-            let mut s = s.borrow_mut();
-            s.drawing = None;
-            if let Done::Ready(d) = &done {
-                s.last.insert(job.block, d.clone());
-            }
-            s.insert(job.key, done);
-        });
-        finished(cx);
+    };
+    let id = |s: &str| TextMeasurementProfileIdentity::new(MeasurementProfileId::new(s).map_err(|e| e.to_string())?, "1").map_err(|e| e.to_string());
+    let profile = TextMeasurementProfile::new(id("quiet-md.svg-renderer")?, DeterministicTextMeasurer::default().with_width_callback(measure));
+    let config = merman::SourcePresentationConfig::from_value(serde_json::from_str(&style.config).map_err(|e| e.to_string())?);
+    let request = merman::SvgRequest {
+        environment: merman::SvgEnvironment::deterministic().with_text_measurement_policy(TextMeasurementPolicy::uniform(profile)),
+        pipeline: Some(SvgPipeline::resvg_safe()),
+        ..Default::default()
+    };
+    let renderer = merman::Renderer::new().with_presentation_engine(merman::MermaidEngine::new().with_site_config(config));
+    let out = renderer.render(merman::RenderRequest::svg(source, control.clone(), request));
+    if widths.lock().map(|w| w.1 > TEXT_BUDGET).unwrap_or(false) {
+        return Err(crate::settings::tr("图表文字太多", "The diagram has too much text").into());
     }
-}
-
-/// Inflates mermaid.js into the page the web view loads.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-fn page() -> Result<String, String> {
-    let z = crate::assets::get("mermaid/mermaid.min.js.zlib").ok_or("mermaid.js is not bundled")?;
-    let js = miniz_oxide::inflate::decompress_to_vec_zlib(z).map_err(|e| format!("mermaid.js: {e:?}"))?;
-    let js = String::from_utf8(js).map_err(|e| e.to_string())?;
-    Ok(format!("<!doctype html><html><head><meta charset=\"utf-8\"></head><body><script>{js}</script><script>{DRIVER}</script></body></html>"))
-}
-
-/// Runs in the page: `qmdRender(n, source, dark)` posts `ok:n:<SVG>` or
-/// `err:n:<message>` to the app (`INBOX`), as does `ready` once loaded.
-/// Fonts both WebKit (which measures the labels) and resvg (which draws them)
-/// find; the root is sized at 2× its viewBox.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-const DRIVER: &str = r#"
-const FONT = '"Helvetica Neue", Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif';
-function send(s) {
-  if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.qmd) window.webkit.messageHandlers.qmd.postMessage(s);
-  else if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(s);
-}
-async function qmdRender(n, src, dark) {
-  let out;
-  try {
-    mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default', fontFamily: FONT,
-      htmlLabels: false, flowchart: { htmlLabels: false }, suppressErrorRendering: true });
-    const { svg } = await mermaid.render('qmd' + n, src);
-    const root = new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement;
-    if (root.querySelector('foreignObject')) throw new Error('This diagram type needs HTML labels, which cannot be drawn here.');
-    const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
-    const w = vb[2] || parseFloat(root.getAttribute('width')), h = vb[3] || parseFloat(root.getAttribute('height'));
-    root.setAttribute('width', 2 * w);
-    root.setAttribute('height', 2 * h);
-    root.removeAttribute('style');
-    out = 'ok:' + n + ':' + new XMLSerializer().serializeToString(root);
-  } catch (e) {
-    out = 'err:' + n + ':' + String((e && e.message) || e);
-  }
-  for (const id of ['dqmd' + n, 'qmd' + n]) document.getElementById(id)?.remove();
-  send(out);
-}
-send('ready');
-"#;
-
-thread_local! {
-    /// What the page posted, in order (delivered on the main thread).
-    static INBOX: RefCell<VecDeque<String>> = RefCell::default();
-}
-
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-fn post(message: String) { INBOX.with(|i| i.borrow_mut().push_back(message)); }
-
-/// Waits up to `limit` for a message `f` accepts; others are stale and dropped.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-async fn receive<T>(limit: std::time::Duration, cx: &mut AsyncApp, mut f: impl FnMut(&str) -> Option<T>) -> Option<T> {
-    let started = web_time::Instant::now();
-    while started.elapsed() < limit {
-        while let Some(m) = INBOX.with(|i| i.borrow_mut().pop_front()) {
-            if let Some(v) = f(&m) { return Some(v); }
-        }
-        cx.background_executor().timer(std::time::Duration::from_millis(10)).await;
-    }
-    None
-}
-
-/// Reads the page's answer to request `n`.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-fn answer(message: &str, n: u64) -> Option<Result<String, String>> {
-    if let Some(svg) = message.strip_prefix(&format!("ok:{n}:")) {
-        return Some(Ok(svg.to_string()));
-    }
-    message.strip_prefix(&format!("err:{n}:")).map(|m| Err(m.trim().to_string()))
-}
-
-/// Sends request `n` and waits for its answer.
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-async fn ask(view: &backend::View, n: u64, source: &str, dark: bool, cx: &mut AsyncApp) -> Result<String, String> {
-    view.run(&format!("qmdRender({n}, {}, {dark})", serde_json::to_string(source).unwrap_or_default()));
-    receive(std::time::Duration::from_secs(15), cx, |m| answer(m, n)).await
-        .unwrap_or_else(|| Err(crate::settings::tr("绘制图表超时", "Drawing the diagram timed out").into()))
-}
-
-/// The diagrams on disk, under the app's local data folder.
-mod disk {
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    fn dir() -> std::path::PathBuf {
-        dirs::data_local_dir().unwrap_or_else(fdl_core::vfs::temp_dir).join("quiet.md").join("mermaid")
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    pub fn read(key: u64) -> Option<Vec<u8>> { std::fs::read(dir().join(format!("{key:016x}.svg"))).ok() }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub fn read(_: u64) -> Option<Vec<u8>> { None }
-
-    /// Best effort; the first write of a session trims the folder to the newest `DISK`.
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    pub fn write(key: u64, d: &super::Diagram) {
-        let dir = dir();
-        if std::fs::create_dir_all(&dir).is_err() { return; }
-        let tmp = dir.join(format!("{key:016x}.{}.part", fdl_core::vfs::process_id()));
-        if std::fs::write(&tmp, &d.image.bytes).is_ok() { let _ = std::fs::rename(&tmp, dir.join(format!("{key:016x}.svg"))); }
-        if super::STATE.with(|s| std::mem::replace(&mut s.borrow_mut().pruned, true)) { return; }
-        let Ok(entries) = std::fs::read_dir(&dir) else { return };
-        let mut files: Vec<_> = entries.flatten().filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
-        if files.len() <= super::DISK { return; }
-        files.sort();
-        for (_, p) in &files[..files.len() - super::DISK * 3 / 4] { let _ = std::fs::remove_file(p); }
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    pub fn write(_: u64, _: &super::Diagram) {}
-}
-
-#[cfg(target_os = "macos")]
-mod backend {
-    use crate::printing::native::{close, ns_string, offscreen};
-    use gpui::AsyncApp;
-    use objc::declare::ClassDecl;
-    use objc::runtime::{Class, Object, Sel};
-    use objc::{class, msg_send, sel, sel_impl};
-
-    /// The page's `webkit.messageHandlers.qmd`.
-    extern "C" fn received(_: &Object, _: Sel, _: *mut Object, message: *mut Object) {
-        unsafe {
-            let body: *mut Object = msg_send![message, body];
-            if body.is_null() { return; }
-            let is_string: bool = msg_send![body, isKindOfClass: class!(NSString)];
-            if !is_string { return; }
-            let p: *const std::os::raw::c_char = msg_send![body, UTF8String];
-            if !p.is_null() { super::post(std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()); }
-        }
-    }
-
-    fn handler_class() -> &'static Class {
-        if let Some(c) = Class::get("FDLMermaidHandler") { return c; }
-        let mut decl = ClassDecl::new("FDLMermaidHandler", class!(NSObject)).expect("FDLMermaidHandler");
-        unsafe {
-            decl.add_method(sel!(userContentController:didReceiveScriptMessage:), received as extern "C" fn(&Object, Sel, *mut Object, *mut Object));
-        }
-        decl.register()
-    }
-
-    pub struct View {
-        holder: *mut Object,
-        web: *mut Object,
-    }
-
-    impl View {
-        pub async fn open(cx: &mut AsyncApp) -> Result<View, String> {
-            let page = cx.background_executor().spawn(async { super::page() }).await?;
-            super::INBOX.with(|i| i.borrow_mut().clear());
-            let (holder, web) = offscreen(1200., &page, |conf| unsafe {
-                let ucc: *mut Object = msg_send![conf, userContentController];
-                let handler: *mut Object = msg_send![handler_class(), new];
-                let _: () = msg_send![ucc, addScriptMessageHandler: handler name: ns_string("qmd")];
-                let _: () = msg_send![handler, release];
-            });
-            let view = View { holder, web };
-            match super::receive(std::time::Duration::from_secs(20), cx, |m| (m == "ready").then_some(())).await {
-                Some(()) => Ok(view),
-                None => Err("mermaid.js did not load".into()),
-            }
-        }
-
-        pub fn run(&self, js: &str) {
-            unsafe {
-                let nil: *mut Object = std::ptr::null_mut();
-                let _: () = msg_send![self.web, evaluateJavaScript: ns_string(js) completionHandler: nil];
-            }
-        }
-    }
-
-    impl Drop for View {
-        fn drop(&mut self) {
-            unsafe {
-                // The controller holds the handler (and the page's view of it) until removed.
-                let conf: *mut Object = msg_send![self.web, configuration];
-                let ucc: *mut Object = msg_send![conf, userContentController];
-                let _: () = msg_send![ucc, removeScriptMessageHandlerForName: ns_string("qmd")];
-            }
-            close(self.holder, self.web);
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-mod backend {
-    use crate::printing::webview2::{controller, file_url};
-    use gpui::AsyncApp;
-    use std::time::Duration;
-    use webview2_com::Microsoft::Web::WebView2::Win32::*;
-    use webview2_com::{ExecuteScriptCompletedHandler, WebMessageReceivedEventHandler};
-    use windows::Win32::Foundation::{HWND, RECT};
-    use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP};
-    use windows::core::{HSTRING, PCWSTR, PWSTR, w};
-
-    pub struct View {
-        host: HWND,
-        controller: Option<ICoreWebView2Controller>,
-        web: Option<ICoreWebView2>,
-        page: std::path::PathBuf,
-    }
-
-    impl View {
-        pub async fn open(cx: &mut AsyncApp) -> Result<View, String> {
-            let page = cx.background_executor().spawn(async { super::page() }).await?;
-            super::INBOX.with(|i| i.borrow_mut().clear());
-            // NavigateToString stops at 2 MB; mermaid.js alone is more.
-            let path = fdl_core::vfs::temp_dir().join(format!("quiet-md-mermaid-{}.html", fdl_core::vfs::process_id()));
-            std::fs::write(&path, page).map_err(|e| e.to_string())?;
-            let host = unsafe {
-                CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, w!("STATIC"), PCWSTR::null(), WS_POPUP, -20000, -20000, 1200, 1000, None, None, None, None)
-            };
-            let Ok(host) = host else {
-                let _ = std::fs::remove_file(&path);
-                return Err("no window for WebView2".into());
-            };
-            // Dropped on any early return: closes what was made so far.
-            let mut view = View { host, controller: None, web: None, page: path };
-            let fail = || "WebView2 did not start".to_string();
-            let (_env, controller) = controller(host, cx).await.map_err(|e| e.unwrap_or_else(fail))?;
-            let web = unsafe { controller.CoreWebView2() }.map_err(|_| fail())?;
-            view.controller = Some(controller.clone());
-            view.web = Some(web.clone());
-            let mut token = 0i64;
-            unsafe {
-                let _ = controller.SetBounds(RECT { left: 0, top: 0, right: 1200, bottom: 1000 });
-                let _ = controller.SetIsVisible(true);
-                web.add_WebMessageReceived(
-                    &WebMessageReceivedEventHandler::create(Box::new(|_, args| {
-                        if let Some(a) = args {
-                            let mut m = PWSTR::null();
-                            if a.TryGetWebMessageAsString(&mut m).is_ok() { super::post(webview2_com::take_pwstr(m)); }
-                        }
-                        Ok(())
-                    })),
-                    &mut token,
-                )
-                .map_err(|_| fail())?;
-                web.Navigate(&HSTRING::from(file_url(&view.page))).map_err(|_| fail())?;
-            }
-            match super::receive(Duration::from_secs(20), cx, |m| (m == "ready").then_some(())).await {
-                Some(()) => Ok(view),
-                None => Err("mermaid.js did not load".into()),
-            }
-        }
-
-        pub fn run(&self, js: &str) {
-            if let Some(web) = &self.web {
-                unsafe {
-                    let _ = web.ExecuteScript(&HSTRING::from(js), &ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(()))));
-                }
-            }
-        }
-    }
-
-    impl Drop for View {
-        fn drop(&mut self) {
-            unsafe {
-                if let Some(c) = &self.controller { let _ = c.Close(); }
-                let _ = DestroyWindow(self.host);
-            }
-            let _ = std::fs::remove_file(&self.page);
-        }
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-mod backend {
-    use gpui::AsyncApp;
-
-    pub struct View;
-
-    impl View {
-        pub async fn open(_: &mut AsyncApp) -> Result<View, String> { Err("no web view on this system".into()) }
-        pub fn run(&self, _: &str) {}
+    match out.map_err(|e| e.to_string())? {
+        merman::RenderOutput::Svg(Some(svg)) => Ok(svg.svg().to_string()),
+        _ => Err(crate::settings::tr("不是 Mermaid 图表", "Not a Mermaid diagram").into()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that brings in gpui's own `test` attribute.
-    use super::{answer, key, size_of};
+    use super::{doubled, key, size_of};
 
     #[test]
-    fn keys_follow_source_and_theme() {
+    fn keys_follow_source_and_style() {
         let src = "flowchart LR\n  A --> B";
-        assert_eq!(key(src, false), key(src, false));
-        assert_ne!(key(src, false), key(src, true), "light and dark draw differently");
-        assert_ne!(key(src, false), key("flowchart LR\n  A --> C", false));
-        assert_ne!(key("ab", false), key("a b", false));
-        // On disk across runs and builds: pinned, not a std hash.
-        assert_eq!(format!("{:016x}", key("", false)), format!("{:016x}", key("", false)));
-        assert_eq!(key("graph TD", true), {
+        assert_eq!(key(src, "light"), key(src, "light"));
+        assert_ne!(key(src, "light"), key(src, "dark"), "light and dark draw differently");
+        assert_ne!(key(src, "light"), key("flowchart LR\n  A --> C", "light"));
+        assert_ne!(key("ab", "x"), key("a", "bx"), "source and style don't run together");
+        // Pinned, not a std hash.
+        assert_eq!(key("graph TD", "s"), {
             use sha2::{Digest, Sha256};
-            let d = Sha256::new().chain_update(b"11.17.2").chain_update([0u8, 1]).chain_update(b"graph TD").finalize();
+            let d = Sha256::new().chain_update(b"merman 0.11.0").chain_update([0u8]).chain_update(b"s").chain_update([0u8]).chain_update(b"graph TD").finalize();
             u64::from_le_bytes(d[..8].try_into().unwrap())
         });
     }
 
     #[test]
-    fn size_is_half_the_root() {
-        let svg = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" aria-roledescription="flowchart-v2" width="361.5" height="174" viewBox="0 0 180.75 87"><rect width="5" height="5"/></svg>"#;
-        assert_eq!(size_of(svg), Some((180.75, 87.)));
+    fn roots_are_sized_at_twice_their_view_box() {
+        let svg = r#"<svg id="m" width="100%" xmlns="http://www.w3.org/2000/svg" style="max-width: 180.75px;" viewBox="0 0 180.75 87" role="graphics-document"><style>#m{}</style></svg>"#;
+        let d = doubled(svg).unwrap();
+        assert_eq!(d, r#"<svg id="m" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180.75 87" role="graphics-document" width="361.5" height="174"><style>#m{}</style></svg>"#);
+        assert_eq!(size_of(&d), Some((180.75, 87.)));
+        assert_eq!(doubled(r#"<svg width="10"/>"#), None, "no viewBox");
         assert_eq!(size_of(r#"<svg width="100%" viewBox="0 0 1 1"/>"#), None);
-        assert_eq!(size_of("<svg/>"), None);
         assert_eq!(size_of("not svg"), None);
     }
 
+    fn renderer() -> gpui::SvgRenderer { gpui::SvgRenderer::new(std::sync::Arc::new(crate::assets::Assets)) }
+
+    /// One of each supported family: parsed, laid out, drawable by resvg, in both looks.
     #[test]
-    fn answers_match_their_request() {
-        assert_eq!(answer("ok:3:<svg/>", 3), Some(Ok("<svg/>".into())));
-        assert_eq!(answer("ok:3:<svg/>", 4), None, "a stale answer is not this one");
-        assert_eq!(answer("ok:13:<svg/>", 1), None);
-        assert_eq!(answer("err:4:Parse error 语法\n", 4), Some(Err("Parse error 语法".into())));
-        assert_eq!(answer("ready", 1), None);
+    fn every_family_draws() {
+        let r = renderer();
+        for (name, src) in SAMPLES {
+            for dark in [false, true] {
+                let d = super::draw(src, &crate::theme::with_dark(dark, super::style), &r).unwrap_or_else(|e| panic!("{name}: {e}"));
+                let svg = std::str::from_utf8(&d.image.bytes).unwrap();
+                assert!(!svg.contains("<foreignObject"), "{name}: resvg can't draw HTML labels");
+                assert!(d.size.0 > 20. && d.size.1 > 20., "{name}: {:?}", d.size);
+                r.parse_svg(svg.as_bytes()).unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
+        }
     }
 
-    /// The bundled mermaid.js inflates, and the page loads it before the driver.
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    /// Colours come from the Theme tokens, so light and dark differ and both keys stay apart.
     #[test]
-    fn page_bundles_mermaid() {
-        let page = super::page().unwrap();
-        assert!(page.len() > 3_000_000);
-        assert!(page.find(r#"globalThis["mermaid"]"#).unwrap() < page.find("qmdRender").unwrap());
-        assert_eq!(page.matches("</script>").count(), 2, "mermaid.js never closes its own script element");
+    fn styles_follow_the_theme() {
+        let (light, dark) = (crate::theme::with_dark(false, super::style), crate::theme::with_dark(true, super::style));
+        assert_ne!(light.config, dark.config);
+        assert!(light.config.contains("\"theme\":\"base\""));
+        let r = renderer();
+        let src = SAMPLES[0].1;
+        let (a, b) = (super::draw(src, &light, &r).unwrap(), super::draw(src, &dark, &r).unwrap());
+        assert_ne!(a.image.bytes, b.image.bytes);
     }
+
+    #[test]
+    fn syntax_errors_say_why() {
+        let r = renderer();
+        let e = super::draw("flowchart TD\n  A --> B[[[ oops\n", &super::style(), &r).err().unwrap();
+        assert!(e.contains("parse error"), "{e}");
+        assert!(super::draw("hello there", &super::style(), &r).is_err());
+        assert!(super::draw("sequenceDiagram\n  A->>", &super::style(), &r).is_err());
+    }
+
+    /// `FDL_MERMAID_TIMES=1 cargo test --release mermaid::tests::timing -- --nocapture`
+    #[test]
+    fn timing() {
+        let r = renderer();
+        let style = super::style();
+        // The system font list GPUI's SVG text loads once per run, whatever draws text first.
+        let t = web_time::Instant::now();
+        let _ = r.measure_text_width("x", &gpui::SvgTextFont { family: &style.font, size: 14., weight: "normal", style: "normal" });
+        let fonts = t.elapsed();
+        let t = web_time::Instant::now();
+        super::draw(FLOW20, &style, &r).unwrap();
+        let first = t.elapsed();
+        let t = web_time::Instant::now();
+        for _ in 0..10 { super::draw(FLOW20, &style, &r).unwrap(); }
+        let warm = t.elapsed() / 10;
+        if std::env::var_os("FDL_MERMAID_TIMES").is_some() {
+            println!("fonts {fonts:?}; 20-node flowchart: first {first:?}, then {warm:?}");
+            for (name, src) in SAMPLES {
+                let t = web_time::Instant::now();
+                super::draw(src, &style, &r).unwrap();
+                println!("{name}: {:?}", t.elapsed());
+            }
+        }
+    }
+
+    const FLOW20: &str = "flowchart TD
+  A[开始] --> B{已登录?}
+  B -- 是 --> C[读取文档库]
+  B -- 否 --> D[登录页]
+  D --> E[输入账号] --> F{校验}
+  F -- 失败 --> D
+  F -- 成功 --> C
+  C --> G[加载侧栏]
+  C --> H[加载最近文档]
+  G --> I[(索引)]
+  H --> I
+  I --> J[渲染列表]
+  J --> K{有更新?}
+  K -- 有 --> L[同步]
+  L --> M[合并冲突]
+  M --> N[写回磁盘]
+  K -- 无 --> O[空闲]
+  N --> O
+  O --> P((结束))
+  E --> Q[忘记密码]
+  Q --> R[发送邮件] --> S[重置] --> D
+  J --> T[预览]";
+
+    pub(super) const SAMPLES: &[(&str, &str)] = &[
+        ("flowchart", "flowchart LR\n  A[开始] --> B{检查}\n  B -- 是 --> C[完成]\n  B -- 否 --> D[重试] --> B"),
+        ("sequence", "sequenceDiagram\n  participant U as 用户\n  U->>App: 打开\n  alt 命中\n    App-->>U: 304\n  else\n    App-->>U: 200\n  end\n  Note over U,App: 同步\n  loop 每 30 秒\n    App->>App: 心跳\n  end"),
+        ("class", "classDiagram\n  class Animal {\n    +String name\n    +eat() void\n  }\n  Animal <|-- Dog\n  Animal <|-- Cat"),
+        ("state", "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running : start\n  Running --> Idle : stop\n  Running --> [*]"),
+        ("er", "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  CUSTOMER {\n    string name\n  }"),
+        ("gantt", "gantt\n  title 计划\n  dateFormat YYYY-MM-DD\n  section 开发\n  解析 :a1, 2026-01-01, 7d\n  布局 :after a1, 10d"),
+        ("pie", "pie title 时间\n  \"写作\" : 45\n  \"阅读\" : 30\n  \"整理\" : 25"),
+        ("mindmap", "mindmap\n  root((Quiet.md))\n    编辑\n      块\n    导出\n      PDF"),
+        ("journey", "journey\n  title 写笔记\n  section 开始\n    打开应用: 5: 我\n    输入: 3: 我"),
+        ("timeline", "timeline\n  title 历史\n  2024 : 原型\n  2025 : 公测 : 插件"),
+        ("gitGraph", "gitGraph\n  commit\n  branch dev\n  commit\n  checkout main\n  merge dev"),
+        ("quadrantChart", "quadrantChart\n  title Reach\n  x-axis Low --> High\n  y-axis Low --> High\n  A: [0.3, 0.6]\n  B: [0.45, 0.23]"),
+        ("xychart", "xychart-beta\n  title \"Sales\"\n  x-axis [jan, feb, mar]\n  y-axis \"Revenue\" 0 --> 100\n  bar [30, 60, 90]\n  line [20, 50, 80]"),
+    ];
 }

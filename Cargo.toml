@@ -47,6 +47,9 @@ markup5ever_rcdom = "0.3"
 base64 = "0.22"
 # the board's 复制为 PNG rasterizes its SVG (the same resvg GPUI draws SVGs with)
 resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+# Mermaid diagrams (src/mermaid.rs): parsed, laid out and written as SVG in
+# Rust. Not the default features: those add ELK (EPL-2.0) and every family.
+merman = { version = "0.11.0", default-features = false, features = ["svg", "layout-cytoscape", "diagram-flowchart", "diagram-sequence", "diagram-class", "diagram-state", "diagram-er", "diagram-gantt", "diagram-pie", "diagram-mindmap", "diagram-journey", "diagram-timeline", "diagram-git-graph", "diagram-quadrant-chart", "diagram-xychart"] }
 # the board's Xiaolai font is stored deflated (src/board/fonts.rs)
 miniz_oxide = "0.9"
 # 设置's font lists read what each installed family is (src/font_classes.rs)
