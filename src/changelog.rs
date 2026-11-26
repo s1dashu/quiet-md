@@ -25,6 +25,8 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("深色模式更清晰，可以在「显示」菜单里切换", "Clearer dark mode, switched from the View menu"),
         ("全新的菜单、按钮、滚动条和图标", "New menus, buttons, scrollbars and icons"),
         ("回收站可以设置几天后自动删除", "Choose how many days the Trash keeps deleted pages"),
+        ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Move pages and folders into another top-level folder; Favorites fold into Pinned"),
+        ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Pasting keeps formatting on Windows and Linux; any shortcut can be cleared"),
         ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Mermaid diagrams, Keep Window on Top, spaces between Chinese and English"),
     ]),
     ("0.1.14", &[

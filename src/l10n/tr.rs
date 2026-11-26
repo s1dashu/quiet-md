@@ -1524,4 +1524,14 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("全新的菜单、按钮、滚动条和图标", "Yeni menüler, düğmeler, kaydırma çubukları ve simgeler"),
     ("回收站可以设置几天后自动删除", "Çöp Kutusu'nun silinen sayfaları kaç gün tutacağını seçin"),
     ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "SiYuan'dan içe aktarma; alt sayfalar, Mermaid diyagramları, Pencereyi önde tut, Çince ile İngilizce arasında boşluk"),
+    ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Sayfaları ve klasörleri başka bir üst düzey klasöre taşıyın; Sık Kullanılanlar Sabitlenenler’e katıldı"),
+    ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Windows ve Linux’ta yapıştırma biçimi korur; her kısayol temizlenebilir"),
+    // 移到另一个顶层文件夹
+    ("已在这个文件夹里", "Zaten bu klasörde"),
+    ("已存在同名文件：{}", "Bu adda bir dosya zaten var: {}"),
+    ("文档或文件夹不存在", "Bu sayfa ya da klasör artık yok"),
+    ("旧格式的文档库没有真实文件夹", "Önce kitaplığı gerçek klasörlere dönüştürün"),
+    ("本机文件不能移入文档库的文件夹", "Bu bilgisayardaki dosyalar kitaplığa kopyalanır, taşınmaz"),
+    ("目标位置已改变，请重试", "Klasör değişti. Yeniden deneyin."),
+    ("目标文件夹里已有相同编号的文档", "Hedef klasörde bu kimliğe sahip bir sayfa zaten var"),
 ];

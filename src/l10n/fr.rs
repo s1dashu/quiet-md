@@ -1524,4 +1524,14 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("全新的菜单、按钮、滚动条和图标", "Nouveaux menus, boutons, barres de défilement et icônes"),
     ("回收站可以设置几天后自动删除", "Choisissez combien de jours la corbeille garde les pages supprimées"),
     ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "Import depuis SiYuan ; sous-pages, diagrammes Mermaid, Garder la fenêtre au premier plan, espace entre chinois et latin"),
+    ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Déplacez pages et dossiers vers un autre dossier de premier niveau ; les favoris rejoignent les épinglés"),
+    ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Le collage garde la mise en forme sous Windows et Linux ; tout raccourci peut être effacé"),
+    // 移到另一个顶层文件夹
+    ("已在这个文件夹里", "Déjà dans ce dossier"),
+    ("已存在同名文件：{}", "Un fichier de ce nom existe déjà : {}"),
+    ("文档或文件夹不存在", "Cette page ou ce dossier n’est plus là"),
+    ("旧格式的文档库没有真实文件夹", "Convertissez d’abord la bibliothèque en vrais dossiers"),
+    ("本机文件不能移入文档库的文件夹", "Les fichiers de cet ordinateur se copient dans la bibliothèque, sans être déplacés"),
+    ("目标位置已改变，请重试", "Le dossier a changé. Réessayez."),
+    ("目标文件夹里已有相同编号的文档", "Ce dossier contient déjà une page avec cet identifiant"),
 ];

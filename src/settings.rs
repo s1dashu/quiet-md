@@ -2658,6 +2658,14 @@ fn diagnostic_for(message: &str, english: bool) -> String {
         ("这篇文档还在从 iCloud 下载，请稍后再打开", "This document is still downloading from iCloud. Open it again in a moment."),
         ("恢复文档 {} 失败，已恢复的文档保留在文档库", "Could not restore document {}. Documents already restored remain in Documents."),
         ("文档已恢复，回收站索引清理失败：{}", "Document restored, but the Trash index could not be cleaned up: {}"),
+        // 移到另一个顶层文件夹（core across.rs）
+        ("已在这个文件夹里", "Already in this folder"),
+        ("已存在同名文件：{}", "A file with this name is already there: {}"),
+        ("文档或文件夹不存在", "This page or folder is no longer here"),
+        ("旧格式的文档库没有真实文件夹", "Move the library to real folders first"),
+        ("本机文件不能移入文档库的文件夹", "Files on this computer are copied into the library, not moved"),
+        ("目标位置已改变，请重试", "The folder changed. Try again."),
+        ("目标文件夹里已有相同编号的文档", "That folder already has a page with this ID"),
     ];
     for (source, target) in TEMPLATES {
         let parts: Vec<_> = source.split("{}").collect();
@@ -2717,6 +2725,8 @@ mod localization_tests {
         assert_eq!(diagnostic_for(source, false), source);
         assert_eq!(diagnostic_for(source, true), "Could not remove expired Trash document 我的笔记.xml: Permission denied");
         assert_eq!(diagnostic_for("文档索引已损坏，已从备份恢复（原文件保留为 index.json.bad）", true), "Document index was damaged and restored from backup (original retained as index.json.bad).");
+        assert_eq!(diagnostic_for("已存在同名文件：项目/甲.xml", true), "A file with this name is already there: 项目/甲.xml");
+        assert_eq!(diagnostic_for("目标位置已改变，请重试", true), "The folder changed. Try again.");
         assert_eq!(diagnostic_for("unknown OS error", true), "unknown OS error");
     }
 
