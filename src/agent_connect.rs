@@ -5,7 +5,9 @@
 //! docs/AGENT_INSTALL.md, then the CLI.
 
 use crate::app::Workspace;
-use crate::design::{Badge, Button, ButtonSize, color, geo};
+use crate::design::{Badge, Button, color, geo};
+#[cfg(target_os = "macos")]
+use crate::design::ButtonSize;
 use crate::settings::tr;
 use crate::ui::ToastKind;
 use gpui::{prelude::FluentBuilder, *};
@@ -23,7 +25,8 @@ fn prompt() -> String {
 const SKILL_ADD: &str = "npx skills add s1dashu/quiet-md";
 
 /// The `quiet` beside the app's own binary (in the .app on macOS, the install
-/// folder on Windows, `bin/` on Linux).
+/// folder on Windows, `bin/` on Linux). Only the Mac links it into the PATH.
+#[cfg(target_os = "macos")]
 fn bundled_cli() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let p = exe.parent()?.join(if cfg!(windows) { "quiet.exe" } else { "quiet" });
@@ -89,6 +92,7 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
     let ask = part(tr("让 Agent 帮你安装", "Let your agent set it up"), None, tr("或者把这句话发给你的 Agent。", "Or copy this to your agent."), vec![
         prose("copy-prompt", prompt(), cx).into_any_element(),
     ]);
+    #[allow(clippy::vec_init_then_push)] // what goes first depends on the platform
     let mut cli_body: Vec<AnyElement> = vec![];
     #[cfg(target_os = "macos")]
     {
