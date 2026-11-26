@@ -1085,4 +1085,5 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("拷贝链接", "Copiar enlace"),
     ("在“文件”中打开", "Abrir en Archivos"),
     ("分享…", "Compartir…"),
+    ("拖动即可移动画布，双指捏合缩放。", "Arrastra para mover el lienzo, pellizca para ampliar"),
 ];

@@ -1138,4 +1138,5 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("拷贝链接", "Bağlantıyı kopyala"),
     ("在“文件”中打开", "Dosyalar’da aç"),
     ("分享…", "Paylaş…"),
+    ("拖动即可移动画布，双指捏合缩放。", "Tuvali taşımak için sürükleyin, yakınlaştırmak için sıkıştırın"),
 ];

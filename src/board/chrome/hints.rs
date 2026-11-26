@@ -84,6 +84,10 @@ fn hints(me: &BoardView) -> Vec<Hint> {
             return one(Hint(tr("按住{{shortcut}}禁用吸附", "Hold {{shortcut}} to disable snapping"), vec![k("CtrlOrCmd")]));
         }
     }
+    // Touch: fingers move and zoom the canvas; there is no wheel or space bar to hold.
+    if sel.is_empty() && crate::design::touch() {
+        return one(Hint(tr("拖动即可移动画布，双指捏合缩放。", "Drag to move the canvas, pinch to zoom"), vec![]));
+    }
     if sel.is_empty() {
         return one(Hint(tr("要移动画布，请按住{{shortcut_1}}或{{shortcut_2}}同时拖拽鼠标，或使用抓手工具。", "To move canvas, hold {{shortcut_1}} or {{shortcut_2}} while dragging, or use the hand tool"), vec![tr("鼠标滚轮", "Scroll wheel").into(), k("Space")]));
     }
