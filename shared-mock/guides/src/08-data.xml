@@ -17,7 +17,7 @@
 ├── Ideas.xml
 ├── .assets/           Images and attachments (hidden)
 └── .quiet/            Quiet.md's own data (hidden)
-    ├── index.json     Pins, favorites, order and dates
+    ├── index.json     Pins, order and dates
     ├── trash/         Deleted documents
     ├── history/       Earlier versions of each document
     ├── themes/        Custom CSS themes

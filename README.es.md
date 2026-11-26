@@ -69,7 +69,7 @@ Las pizarras son un tablero portado de Excalidraw: formas, flechas que siguen un
 
 ### Organiza en carpetas de verdad
 
-El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas y márcalas como favoritas, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
+El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas en la barra lateral, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
 
 ### Trae tus notas
 

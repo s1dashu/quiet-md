@@ -17,7 +17,7 @@
 ├── 想法.xml
 ├── .assets/           图片和附件（隐藏）
 └── .quiet/            Quiet.md 自己的数据（隐藏）
-    ├── index.json     置顶、收藏、排序和日期
+    ├── index.json     置顶、排序和日期
     ├── trash/         已删除的文档
     ├── history/       每篇文档的历史版本
     ├── themes/        自定义 CSS 主题

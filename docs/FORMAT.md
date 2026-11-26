@@ -40,7 +40,7 @@ One list for the whole app, in `crates/core/src/shown.rs`; a folder added from a
 - **Attachments** (`shown::ATTACHMENTS`: png, jpg, jpeg, gif, webp, bmp, pdf) are what a document previews in place. A folder does not list them; the list is there for the day it does.
 - **Folders not gone into** (`shown::skips_dir`): by ecosystem, version control (`.git`, `.hg`, `.svn`); JavaScript (`node_modules`, `bower_components`, `jspm_packages`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `.parcel-cache`, `.vite`, `.angular`, `.nyc_output`, `storybook-static`); C / C++ (`CMakeFiles`, `cmake-build-*`); Python (`__pycache__`, `.venv`, `venv`, `.tox`, `.nox`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.ipynb_checkpoints`, `*.egg-info`, `.eggs`, `site-packages`); JVM and Apple (`.gradle`, `.idea`, `DerivedData`, `Pods`, `Carthage`, `.build`, `xcuserdata`); others (`.dart_tool`, `.pub-cache`, `elm-stuff`, `.terraform`, `.bundle`, `.cache`, `.sass-cache`, `.docusaurus`, `.expo`, `.serverless`); the system's (`.Trash`, `.Trashes`, `.Spotlight-V100`, `.fseventsd`, `$RECYCLE.BIN`, `System Volume Information`, `Library/Caches`). Names a person may give a folder of notes are skipped only beside the project file that makes them build output: `target` (Cargo.toml, pom.xml, build.sbt), `build` (package.json, Gradle, CMakeLists.txt, setup.py, pyproject.toml, pubspec.yaml, Package.swift, `*.xcodeproj`, meson.build), `out` (package.json, tsconfig.json, Gradle, CMakeLists.txt, `*.xcodeproj`, `*.iml`), `dist` (package.json, tsconfig.json, pyproject.toml, setup.py, setup.cfg), `env` (pyproject.toml, setup.py, setup.cfg, requirements.txt, Pipfile), `vendor` (go.mod, composer.json, Gemfile, Cargo.toml), `coverage` (package.json, pyproject.toml, setup.py, Cargo.toml, go.mod). A folder called `build` with no such file beside it shows as usual.
 - **`.gitignore`**: every one at any level, and `.git/info/exclude` beside a `.git`, a deeper file having the last word. Supported: `#` comments, `!` to take a path back, a trailing `/` for folders only, a pattern with a `/` in it relative to its file's folder (else a name at any depth), `*`, `?`, `[a-z]` / `[!a-z]`, `**` and `\` escapes. Not read: git's global excludes file. As in git, nothing inside an ignored folder can be taken back.
-- **Folders** show when something listed is in them, at any depth, or when the user made them: made in Quiet.md (its id is not the one its path gives, `meta::path_id`), renamed there, pinned or starred. Folders found empty are not written down.
+- **Folders** show when something listed is in them, at any depth, or when the user made them: made in Quiet.md (its id is not the one its path gives, `meta::path_id`), renamed there or pinned. Folders found empty are not written down.
 - **Entries written before** (by an older build) that these rules now hide stay in `meta/` as they were and in memory, only not listed: nothing is read again for them, and a file that shows again (its project file gone, the `.gitignore` line removed) comes back with its id and settings.
 
 Nothing that is not shown gets an entry, so adding a code checkout writes a few hundred entries, not one per folder of `node_modules`. `.quiet/` itself is still made when a folder is added.
@@ -148,7 +148,7 @@ In FORMAT 4 keys are relative paths. Folder keys end in a slash (e.g. `"Work/"`)
 | `id` | Runtime ID for the editor, windows and undo. Links use paths. | Required |
 | `created` / `modified` | Unix time in seconds | Required |
 | `pinned` | Pinned | false |
-| `starred` | Time starred, or 0 if unstarred | 0 |
+| `starred` | Older builds' favorites: read as `pinned` (below), never written | 0 |
 | `order` | Sibling order within a folder | 0 (automatic) |
 | `root_order` | Top-level sibling order | Automatic |
 | `width` | Page width, `standard` (820), `wide` (1020) or `full` | standard |
@@ -157,7 +157,9 @@ In FORMAT 4 keys are relative paths. Folder keys end in a slash (e.g. `"Work/"`)
 | `info` | Document information line, `{hidden, created, modified}` | Show modification time only |
 | `refs_hidden` | Hide references | false |
 
-The path supplies the parent folder, name and Markdown status. Deleting the index preserves content, structure and links but loses metadata such as pins, stars and manual order. New fields must use `#[serde(default)]` and be omitted when they hold their default value.
+The path supplies the parent folder, name and Markdown status. Deleting the index preserves content, structure and links but loses metadata such as pins and manual order. New fields must use `#[serde(default)]` and be omitted when they hold their default value.
+
+**Favorites became pins** (2026-11). Older builds had 收藏 (`starred`) beside 置顶 (`pinned`); there is only 置顶 now. A `starred` above 0 is read as `pinned: true` (`Meta::take_star`), and since `starred` is no longer written, this device's next write records `pinned: true` and, in FORMAT 5 and 6, `starred: null`. Every newer device reads the same either way, and two writing it write the same values; once written, an unpin stays, while a star an older build sets later pins the document again. `store::FORMAT` stayed 6: an older build reads such a library correctly, only with no favorites. The pin order is not new: 置顶 lists its documents in the order the lists below it use, so the former favorites take their place among the pins by that order, not after them.
 
 ### Migrating the old layout (FORMAT 3 → 4)
 

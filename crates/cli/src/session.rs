@@ -562,7 +562,6 @@ impl Session {
         let mut list = tops;
         list.extend(out.iter().map(|e| {
             let mut v = json!({ "path": self.label(e), "id": e.id, "title": e.title, "kind": kind_of(e), "modified": date(e.meta.modified) });
-            if e.meta.starred > 0 { v["starred"] = json!(true); }
             if e.meta.pinned { v["pinned"] = json!(true); }
             v
         }));

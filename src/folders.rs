@@ -132,7 +132,6 @@ impl Workspace {
         if let Some(meta) = self.store.touch(id) && let Some(entry) = self.entries.edit().iter_mut().find(|e| e.id == id) { entry.meta = meta; }
         self.schedule_view_state(cx);
         if self.manual_home_sort() { self.prepare_manual_order(cx); }
-        // 只看收藏 belongs to the page it was turned on in.
         self.folder_current = Some(id.to_string());
         self.view = View::Folder;
         self.row_menu = None;

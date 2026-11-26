@@ -316,7 +316,6 @@ GitHub 模式（`remote::engine`，合并用 `DocMerger` 调 `merge_file`）的�
       "path":     ["Work/周报.xml",            1763800000123],
       "created":  [1763700000,                 1763700000000],
       "pinned":   [true,                       1763800000456],
-      "starred":  [1763800000,                 1763800000456],
       "order":    ["a0V",                      1763800001000],
       "width":    ["wide",                     1763700000000]
     },

@@ -1273,20 +1273,6 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 收藏 / 取消收藏.
-    pub fn toggle_star(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) else { return };
-        let on = e.meta.starred == 0;
-        if let Ok(t) = self.store.set_starred(id, on) {
-            e.meta.starred = t;
-        }
-        self.row_menu = None;
-        self.doc_menu = false;
-        self.doc_sub = None;
-        self.show_toast(if on { crate::settings::text("已添加到“收藏”") } else { crate::settings::text("已从“收藏”中移除") }, cx);
-        cx.notify();
-    }
-
     /// 退出 on a standalone 画板: save it, close it, and show the folder it
     /// is in (the default page at the top).
     fn leave_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -21,7 +21,7 @@
 <callout emoji="💡" background-color="light-blue" border-color="blue"><p>粘贴用 <code>|</code> 分隔的 Markdown 表格，会直接生成表格。初始列宽随内容而定：内容短的列保持紧凑，文字多的列会分到更多空间。之后仍可拖动列的边线调整宽度。导出 Markdown 时，表格也会写成这种格式。</p></callout>
 <h1>分栏</h1><p>在斜杠菜单中选择“分栏”，再选择一到五栏。每一栏都是独立的区域，里面可以放其他块。</p>
 <h2>两栏做对比</h2><grid><column width-ratio="0.5"><callout emoji="👍" background-color="light-green" border-color="green"><p><b>做得好的地方</b></p><ul><li>本地文件，离线可用</li><li>文档可以自己备份</li><li>原生的书写界面</li></ul></callout></column><column width-ratio="0.5"><callout emoji="🤔" background-color="light-orange" border-color="orange"><p><b>需要提前考虑的地方</b></p><ul><li>没有内置的多设备同步</li><li>备份需要自己负责</li><li>目前支持 macOS</li></ul></callout></column></grid>
-<h2>三栏梳理流程</h2><grid><column width-ratio="0.3333"><h3>记录</h3><p>按 <code>⌘ ⇧ N</code> 打开一个新的笔记窗口，把想法记下来。</p></column><column width-ratio="0.3333"><h3>整理</h3><p>把相关页面归到一起，置顶最常用的，收藏有用的参考资料。</p></column><column width-ratio="0.3334"><h3>回顾</h3><p>用 <code>⌘ J</code> 搜索，顺着反向引用找到相关笔记。</p></column></grid>
+<h2>三栏梳理流程</h2><grid><column width-ratio="0.3333"><h3>记录</h3><p>按 <code>⌘ ⇧ N</code> 打开一个新的笔记窗口，把想法记下来。</p></column><column width-ratio="0.3333"><h3>整理</h3><p>把相关页面归到一起，置顶最常用的页面和参考资料。</p></column><column width-ratio="0.3334"><h3>回顾</h3><p>用 <code>⌘ J</code> 搜索，顺着反向引用找到相关笔记。</p></column></grid>
 <h2>调整宽度</h2><p>拖动两栏之间的空隙即可。宽度接近等分或简单比例时，会轻轻吸附上去。</p>
 <grid><column width-ratio="0.3"><p><b>项目</b></p><p><b>周期</b></p><p><b>目标</b></p></column><column width-ratio="0.7"><p>Quiet.md</p><p>2026 年 10 月至 12 月</p><p>一款安静、可靠的书写工具，让笔记始终掌握在你自己手里</p></column></grid>
 <h2>增加或删除栏</h2><ul><li>把指针移到两栏之间，点击加号即可新增一栏，最多十栏。</li><li>清空某一栏的全部内容，这一栏就会被删除。只剩一栏时，分栏会还原成普通的块。</li></ul>

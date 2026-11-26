@@ -69,7 +69,7 @@ Boards are a whiteboard ported from Excalidraw: shapes, arrows that stay attache
 
 ### Organize in real folders
 
-Home shows each folder as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin and favorite notes, search every title and line with `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
+Home shows each folder as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin notes to the sidebar, search every title and line with `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
 
 ### Bring your notes
 

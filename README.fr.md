@@ -69,7 +69,7 @@ Les tableaux sont un tableau blanc porté d'Excalidraw : formes, flèches qui re
 
 ### Ranger dans de vrais dossiers
 
-L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes, ajoutez-les aux favoris, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
+L'accueil montre chaque dossier comme une pile de ses pages. Maintenez une note au-dessus d'un dossier et il s'ouvre tout seul ; les dossiers s'imbriquent, et les déplacements s'annulent. Épinglez des notes dans la barre latérale, cherchez dans tous les titres et toutes les lignes avec `⌘ J`, et faites des rechercher-remplacer dans une note, expressions régulières comprises. Les notes supprimées attendent dans la corbeille. Les fichiers et dossiers Markdown situés ailleurs sur votre ordinateur s'ouvrent sous **Fichiers de cet ordinateur** et se modifient sur place.
 
 ### Apporter vos notes
 

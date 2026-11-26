@@ -28,7 +28,7 @@
 <tr><td><p>{{doc:code}}</p></td><td><p>语法高亮、代码块名称、自动换行和 LaTeX 公式</p></td></tr>
 <tr><td><p>{{doc:media}}</p></td><td><p>图片、裁剪、附件、文档图标和封面</p></td></tr>
 <tr><td><p>{{doc:boards}}</p></td><td><p>在画板上画图形、连接箭头、便签和草图</p></td></tr>
-<tr><td><p>{{doc:organize}}</p></td><td><p>文件夹、置顶、收藏、反向链接、搜索、阅读模式和回收站</p></td></tr>
+<tr><td><p>{{doc:organize}}</p></td><td><p>文件夹、置顶、反向链接、搜索、阅读模式和回收站</p></td></tr>
 <tr><td><p>{{doc:data}}</p></td><td><p>导入、导出、打印、备份和迁移文档</p></td></tr>
 <tr><td><p>{{doc:personalize}}</p></td><td><p>主题、自定义 CSS、快捷键、快速笔记和界面语言</p></td></tr>
 </tbody></table>

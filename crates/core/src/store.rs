@@ -54,8 +54,9 @@ pub struct Meta {
     /// back to `created`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub order: u64,
-    /// 收藏时间 (0: not starred).
-    #[serde(default, skip_serializing_if = "is_zero")]
+    /// 收藏时间 of older builds (0: none), read but never written: `take_star`
+    /// turns it into `pinned` as it is read, 收藏 being 置顶 now.
+    #[serde(default, skip_serializing)]
     pub starred: u64,
     /// 阅读模式, remembered per document like the page width.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -95,6 +96,9 @@ impl Meta {
     /// Titled by its file name, not by a title inside it: Markdown and
     /// everything that is not a document.
     pub fn named_by_file(&self) -> bool { self.markdown || !self.kind.is_doc() }
+    /// An older build's 收藏 is 置顶 (the maintainer, 2026-11-26): the next
+    /// write says `pinned` and drops `starred`, so taking it again changes nothing.
+    pub(crate) fn take_star(&mut self) { if self.starred > 0 { self.pinned = true; self.starred = 0; } }
 }
 
 /// What a library file holds. Whatever is not a document still lives in the
@@ -593,11 +597,12 @@ type DiskIndex = BTreeMap<String, Attached>;
 
 impl Attached {
     fn of(id: &str, m: &Meta) -> Self {
-        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: m.starred, order: m.order, top_order: m.top_order,
+        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, order: m.order, top_order: m.top_order,
             width: m.width, catalogue_closed: m.catalogue_closed, reading: m.reading, info: m.info, refs_hidden: m.refs_hidden }
     }
+    /// `starred` is read (`take_star`), and `of` writes it no more: saving drops it from the disk.
     fn meta(&self) -> Meta {
-        Meta { created: self.created, modified: self.modified, pinned: self.pinned, starred: self.starred, order: self.order, top_order: self.top_order,
+        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, order: self.order, top_order: self.top_order,
             width: self.width, catalogue_closed: self.catalogue_closed, reading: self.reading, info: self.info, refs_hidden: self.refs_hidden, ..Default::default() }
     }
 }
@@ -1421,6 +1426,7 @@ impl Store {
             v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
+            store.index.values_mut().for_each(Meta::take_star);
             store.flat_folders()?;
         } else if v5 {
             let mut warnings = vec![];
@@ -1798,6 +1804,7 @@ impl Store {
             // Folders opened in place before top-level folders are top-level folders of their own now.
             if index.contains_key(id) || m.path.is_none() || m.folder.is_some() || m.parent.is_some() { continue; }
             let mut m = m.clone();
+            m.take_star();
             m.opened = local.opened.get(id).copied().unwrap_or(m.opened);
             index.insert(id.clone(), m);
         }
@@ -2056,7 +2063,7 @@ impl Store {
                 self.reclaim_open(before);
             }
         } else if self.flat {
-            if let Some(index) = reread(&self.index_file()) { self.index = index; }
+            if let Some(index) = reread::<HashMap<String, Meta>>(&self.index_file()) { self.index = index; self.index.values_mut().for_each(Meta::take_star); }
         } else if let Some(disk) = reread::<DiskIndex>(&self.index_file()) {
             let before = std::mem::take(&mut self.index);
             let local = self.read_local();
@@ -2529,8 +2536,8 @@ impl Store {
         keys.extend(found.docs.iter().cloned());
         keys.extend(found.pending.iter().cloned());
         // A folder with nothing listed in it shows only when the user made it here (or
-        // pinned, starred or renamed it): a found one has the id its path gives.
-        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned || a.starred > 0;
+        // pinned or renamed it): a found one has the id its path gives.
+        let users = |k: &str, a: &Attached| !self.v5 || a.id != meta::path_id(k) || a.pinned;
         for d in &found.empty {
             let k = format!("{d}/");
             if !disk.get(&k).is_some_and(|a| users(&k, a)) { continue }
@@ -3762,17 +3769,6 @@ impl Store {
         Ok(self.index[id].clone())
     }
 
-    /// 收藏 / 取消收藏; returns the new 收藏时间 (0: not starred).
-    pub fn set_starred(&mut self, id: &str, on: bool) -> Result<u64> {
-        let _lock = self.begin_write()?;
-        let t = if on { now() } else { 0 };
-        if let Some(m) = self.index.get_mut(id) {
-            m.starred = t;
-        }
-        self.save_index()?;
-        Ok(t)
-    }
-
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> {
         let _lock = self.begin_write()?;
         if let Some(m) = self.index.get_mut(id) {
@@ -4748,12 +4744,12 @@ mod tests {
         // Another device writes its file: the next write here sees it.
         meta::commit(&lib.0, &dev("bbbb"), &Default::default(), vec![(x.clone(), "pinned".into(), true.into())], &mut vec![]).unwrap();
         assert_eq!(meta::cached(&lib.0, "aaaa", &first, &mut vec![]).get(&x, "pinned"), Some(&serde_json::Value::Bool(true)));
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // Its own write keeps the view current, and a later one by another device still shows.
         meta::commit(&lib.0, &dev("bbbb"), &Default::default(), vec![(x.clone(), "pinned".into(), false.into())], &mut vec![]).unwrap();
-        a.set_starred(&x, false).unwrap();
+        a.set_width(&x, PageWidth::Standard).unwrap();
         assert!(!a.list().into_iter().find(|e| e.id == x).unwrap().meta.pinned);
     }
 
@@ -4774,8 +4770,8 @@ mod tests {
         a.list();
         assert_eq!(loads(), n, "nothing changed: nothing read again");
         // This device's own writes keep memory and the disk together.
-        a.set_starred(&x, true).unwrap();
-        assert!(a.list().into_iter().find(|e| e.id == x).unwrap().meta.starred > 0);
+        a.set_width(&x, PageWidth::Wide).unwrap();
+        assert!(a.list().into_iter().find(|e| e.id == x).unwrap().meta.width == PageWidth::Wide);
         assert_eq!(loads(), n, "its own write: nothing read again");
         // Another device writes: the next look reads again, and only that once.
         other_pins(&lib, "bbbb", &x, true);
@@ -4864,7 +4860,7 @@ mod tests {
         a.list();
         assert_eq!(loads(), n, "only its file is missing: nothing read again");
         // This device's writes keep it out of memory and leave its entry on disk.
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         a.list();
         assert_eq!(loads(), n);
         assert_eq!(meta::load(&lib.0, "aaaa", &mut vec![]).get("far", "pinned"), Some(&serde_json::Value::Bool(true)));
@@ -4888,12 +4884,12 @@ mod tests {
         // Written there while this device saves without listing first: the save
         // takes it in and does not put the old value back.
         other_pins(&lib, "bbbb", &x, false);
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let merged = meta::load(&lib.0, "aaaa", &mut vec![]);
         assert_eq!(merged.get(&x, "pinned"), Some(&serde_json::Value::Bool(false)));
-        assert!(merged.get(&x, "starred").is_some());
+        assert!(merged.get(&x, "width").is_some());
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(!m.pinned && m.starred > 0);
+        assert!(!m.pinned && m.width == PageWidth::Wide);
         // And a change by this device afterwards still goes on top of it.
         a.set_pinned(&x, true).unwrap();
         assert_eq!(meta::load(&lib.0, "aaaa", &mut vec![]).get(&x, "pinned"), Some(&serde_json::Value::Bool(true)));
@@ -4989,14 +4985,14 @@ mod tests {
         let x = a.create_from(&doc("甲")).unwrap();
         let y = a.create_from(&doc("乙")).unwrap();
         let file = |d: &str| meta::dir(&lib.0).join(format!("{d}.json"));
-        // "eeee": wins x's pinned and y's width, loses x's starred to a later write here,
+        // "eeee": wins x's pinned and y's width, loses x's width to a later write here,
         // and ties "dddd" on y's width (it wins that tie by its id).
         let t = crate::time::now_ms();
         crate::vfs::write(file("eeee"), serde_json::to_vec(&serde_json::json!({ "v": 1, "device": { "id": "eeee", "name": "旧电脑", "platform": "windows" },
-            "items": { (x.clone()): { "pinned": [true, t], "starred": [5, 1] }, (y.clone()): { "width": ["wide", t] } } })).unwrap()).unwrap();
+            "items": { (x.clone()): { "pinned": [true, t], "width": ["full", 1] }, (y.clone()): { "width": ["wide", t] } } })).unwrap()).unwrap();
         crate::vfs::write(file("dddd"), serde_json::to_vec(&serde_json::json!({ "v": 1, "device": { "id": "dddd" },
             "items": { (y.clone()): { "width": ["full", t] } } })).unwrap()).unwrap();
-        a.set_starred(&x, true).unwrap();
+        a.set_width(&x, PageWidth::Wide).unwrap();
         let view = || {
             let m = meta::load(&lib.0, "aaaa", &mut vec![]);
             m.items.into_iter().map(|(i, f)| (i, f.into_iter().map(|(k, w)| (k, w.v)).collect::<BTreeMap<_, _>>())).collect::<BTreeMap<_, _>>()
@@ -5012,7 +5008,7 @@ mod tests {
         assert!(!file("eeee").fs_exists() && file("dddd").fs_exists());
         assert!(!a.devices().iter().any(|d| d.device.id == "eeee"));
         let m = a.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 5);
+        assert!(m.pinned && m.width == PageWidth::Wide);
     }
 
     #[test]
@@ -5039,7 +5035,7 @@ mod tests {
         let f = s.create_folder("夹", None).unwrap();
         let b = s.create_from_in(&doc("乙"), Some(&f)).unwrap();
         s.set_pinned(&a, true).unwrap();
-        s.set_starred(&b, true).unwrap();
+        s.set_width(&b, PageWidth::Wide).unwrap();
         let mut st = s.settings();
         st.set_history_limit(7);
         st.scroll_top.insert(a.clone(), [3., 12.5]);
@@ -5054,7 +5050,7 @@ mod tests {
         assert!(meta::dir(&lib.0).join(device().id).fs_is_dir() && lib.0.join(".quiet/index.json.v4").fs_is_file() && !lib.0.join(".quiet/index.json").fs_exists());
         let list = s.list();
         let by = |id: &str| list.iter().find(|e| e.id == id).unwrap().meta.clone();
-        assert!(by(&a).pinned && by(&b).starred > 0 && by(&b).parent.as_deref() == Some(f.as_str()));
+        assert!(by(&a).pinned && by(&b).width == PageWidth::Wide && by(&b).parent.as_deref() == Some(f.as_str()));
         assert_eq!(s.settings().history_limit(), 7);
         assert_eq!(s.scroll_top(&a), Some((3, 12.5)));
         assert_eq!(Store::look_at(&lib.0).theme.as_deref(), Some("墨"));
@@ -5204,7 +5200,7 @@ mod tests {
         a.set_pinned(&p[1], true).unwrap();
         let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("bbbb")).unwrap();
         b.list();
-        b.set_starred(&p[2], true).unwrap();
+        b.set_width(&p[2], PageWidth::Wide).unwrap();
         b.move_in_tree(&p[5], Some(&f), Some(&p[1])).unwrap();
         b.set_pinned(&p[1], false).unwrap();
         a.delete(&p[3], None).unwrap();
@@ -5221,7 +5217,7 @@ mod tests {
         let lib = Lib::new("to-shards");
         let (f, p) = whole_file_library(&lib);
         let before = view(&lib);
-        assert!(before[&p[4]].contains_key("purged") && before[&p[3]].contains_key("trashed") && before[&p[2]].contains_key("starred"));
+        assert!(before[&p[4]].contains_key("purged") && before[&p[3]].contains_key("trashed") && before[&p[2]].contains_key("width"));
         // What a third device lists, before and after.
         let listed = |lib: &Lib| {
             let mut c = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
@@ -5482,7 +5478,7 @@ mod tests {
         let v = clean();
         assert!(v["items"].get("gone-1").is_some() && v["items"].get("empty").is_some(), "bbbb has not seen them: {v}");
         // Once bbbb writes again, it has.
-        write(0, "bbbb", vec![("b", "starred", 1.into())]);
+        write(0, "bbbb", vec![("b", "reading", true.into())]);
         meta::CLOCK.with(|c| c.set(None));
         let v = clean();
         assert!(v["items"].get("gone-1").is_none() && v["items"].get("empty").is_none(), "{v}");
@@ -5504,7 +5500,7 @@ mod tests {
         write(40, "bbbb", "x", "pinned", true.into());
         write(35, "aaaa", "x", "pinned", serde_json::Value::Null);
         let other = (0..).map(|n| format!("别片-{n}")).find(|z| meta::shard_of(z) != meta::shard_of("x")).unwrap();
-        write(1, "bbbb", &other, "starred", 1.into());
+        write(1, "bbbb", &other, "reading", true.into());
         meta::CLOCK.with(|c| c.set(None));
         meta::clean_all(&lib.0, &dev("aaaa"), &mut vec![]).unwrap();
         assert!(lib.dev_items("aaaa")["items"]["x"]["pinned"].is_array(), "the null keeps bbbb's true down");
@@ -5575,6 +5571,112 @@ mod tests {
         assert_eq!(i < j, start[0] < other);
     }
 
+    /// An older build's 收藏 (`starred`) by device `by`.
+    fn old_star(lib: &Lib, by: &str, id: &str) {
+        meta::commit(&lib.0, &dev(by), &Default::default(), vec![(id.to_string(), "starred".into(), 1_700_000_000_000u64.into())], &mut vec![]).unwrap();
+    }
+    /// What the device files say of `id`'s `pinned` and `starred`.
+    fn pin_star(lib: &Lib, id: &str) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
+        let m = meta::load(&lib.0, "", &mut vec![]);
+        (m.get(id, "pinned").cloned(), m.get(id, "starred").cloned())
+    }
+
+    /// 收藏 is 置顶 now (the maintainer, 2026-11-26): an older build's star
+    /// reads as a pin, the next write says so and drops the star, and the
+    /// star is not taken again: an unpin afterwards stays.
+    #[test]
+    fn an_older_builds_star_is_a_pin() {
+        let lib = Lib::new("star-pin");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let [x, y, z] = ["只收藏", "置顶又收藏", "别的"].map(|t| a.create_from(&doc(t)).unwrap());
+        a.set_pinned(&y, true).unwrap();
+        old_star(&lib, "bbbb", &x);
+        old_star(&lib, "bbbb", &y);
+        assert!(pinned(&mut a, &x) && pinned(&mut a, &y) && !pinned(&mut a, &z));
+        assert!(a.list().iter().all(|e| e.meta.starred == 0));
+        // Any write by this device writes it down.
+        a.set_width(&z, PageWidth::Wide).unwrap();
+        for id in [&x, &y] { assert_eq!(pin_star(&lib, id), (Some(true.into()), None), "{id}"); }
+        let fresh = |lib: &Lib| Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
+        assert!(pinned(&mut fresh(&lib), &x) && pinned(&mut fresh(&lib), &y));
+        // Unpinned here, it stays unpinned: on reopening and for another device.
+        a.set_pinned(&x, false).unwrap();
+        drop(a);
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        assert!(!pinned(&mut a, &x) && !pinned(&mut fresh(&lib), &x));
+        // Taken again, it changes nothing.
+        let before = view(&lib);
+        a.set_width(&z, PageWidth::Full).unwrap();
+        let after = view(&lib);
+        assert_eq!(before.iter().filter(|(k, _)| **k != z).collect::<Vec<_>>(), after.iter().filter(|(k, _)| **k != z).collect::<Vec<_>>());
+        // An older build starring it again pins it again.
+        old_star(&lib, "bbbb", &x);
+        assert!(pinned(&mut a, &x));
+    }
+
+    /// Two older builds star a page each, two newer ones take the stars in
+    /// and write: they write the same, and every device reads both pinned.
+    #[test]
+    fn stars_from_two_devices_are_taken_in_by_two() {
+        let lib = Lib::new("star-two");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let [x, y, z] = ["甲", "乙", "丙"].map(|t| a.create_from(&doc(t)).unwrap());
+        old_star(&lib, "bbbb", &x);
+        old_star(&lib, "cccc", &y);
+        let mut d = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("dddd")).unwrap();
+        assert!(pinned(&mut a, &x) && pinned(&mut a, &y) && pinned(&mut d, &x) && pinned(&mut d, &y));
+        a.set_width(&z, PageWidth::Wide).unwrap();
+        d.set_width(&z, PageWidth::Full).unwrap();
+        for id in [&x, &y] { assert_eq!(pin_star(&lib, id), (Some(true.into()), None), "{id}"); }
+        let mut e = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("eeee")).unwrap();
+        assert!(pinned(&mut e, &x) && pinned(&mut e, &y) && !pinned(&mut e, &z));
+        // Once each has written, neither has anything more to write.
+        let before = view(&lib);
+        a.set_pinned(&x, true).unwrap();
+        d.set_pinned(&y, true).unwrap();
+        assert_eq!(view(&lib), before);
+    }
+
+    /// FORMAT 4's `index.json` (one file, no device stamps): the same.
+    #[test]
+    fn a_format_4_star_is_a_pin() {
+        let lib = Lib::new("star-v4");
+        STAY_4.with(|k| k.set(true));
+        let mut s = lib.open();
+        let [x, z] = ["甲", "乙"].map(|t| s.create_from(&doc(t)).unwrap());
+        drop(s);
+        let file = lib.0.join(".quiet/index.json");
+        let mut disk: serde_json::Value = reread(&file).unwrap();
+        for (_, e) in disk.as_object_mut().unwrap() { if e["id"] == x.as_str() { e["starred"] = 5.into(); } }
+        crate::vfs::write(&file, serde_json::to_vec(&disk).unwrap()).unwrap();
+        let mut s = lib.open();
+        assert!(pinned(&mut s, &x) && !pinned(&mut s, &z));
+        s.set_width(&z, PageWidth::Wide).unwrap();
+        let text = String::from_utf8(crate::vfs::read(&file).unwrap()).unwrap();
+        assert!(!text.contains("starred") && text.contains("pinned"), "{text}");
+        STAY_4.with(|k| k.set(false));
+    }
+
+    /// The old layout's `index.json` (FORMAT 3), moved to real folders: the same.
+    #[test]
+    fn a_format_3_star_is_a_pin() {
+        let lib = Lib::new("star-v3");
+        let mut old = Old::new(&lib, 3);
+        let [x, y, z] = ["甲", "乙", "丙"].map(|t| old.doc(t, Meta::default()));
+        old.index.get_mut(&y).unwrap().pinned = true;
+        old.write();
+        // `Meta` writes no `starred` any more: put it in as an older build had it.
+        let file = lib.0.join("index.json");
+        let mut index: serde_json::Value = reread(&file).unwrap();
+        for id in [&x, &y] { index[id.as_str()]["starred"] = 5.into(); }
+        crate::vfs::write(&file, serde_json::to_vec(&index).unwrap()).unwrap();
+        let mut s = lib.migrated();
+        let list = s.list();
+        let by = |t: &str| list.iter().find(|e| e.title == t).unwrap().meta.pinned;
+        assert!(by("甲") && by("乙") && !by("丙"));
+        let _ = z;
+    }
+
     #[test]
     fn devices_merge_field_by_field() {
         let lib = Lib::new("devices");
@@ -5584,23 +5686,23 @@ mod tests {
         assert!(b.list().iter().any(|e| e.id == x));
         // Different fields of one document: both stay.
         a.set_pinned(&x, true).unwrap();
-        b.set_starred(&x, true).unwrap();
+        b.set_width(&x, PageWidth::Wide).unwrap();
         let mut c = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("cccc")).unwrap();
         let m = c.list().into_iter().find(|e| e.id == x).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // One field: the later write wins, and the earlier device's file drops it on its next write.
         b.set_pinned(&x, false).unwrap();
         assert!(!c.list().into_iter().find(|e| e.id == x).unwrap().meta.pinned);
-        a.set_starred(&x, false).unwrap();
+        a.set_width(&x, PageWidth::Standard).unwrap();
         let file = |d: &str| lib.dev_text(d);
         assert!(!file("aaaa").contains("pinned") && file("bbbb").contains("pinned"));
         // A store that read before another device wrote does not undo it with what it read.
         let y = a.create_from(&doc("另一篇")).unwrap();
         b.list();
         a.set_pinned(&y, true).unwrap();
-        b.set_starred(&y, true).unwrap();
+        b.set_width(&y, PageWidth::Wide).unwrap();
         let m = c.list().into_iter().find(|e| e.id == y).unwrap().meta;
-        assert!(m.pinned && m.starred > 0);
+        assert!(m.pinned && m.width == PageWidth::Wide);
         // The top-level folder's own settings, each field on its own.
         let mut st = a.settings();
         st.set_history_limit(9);
@@ -5680,7 +5782,7 @@ mod tests {
         s.set_pinned(&id, true).unwrap();
         // The second write left the first (pinned: false) as the backup;
         // one more makes the backup pinned too.
-        s.set_starred(&id, true).unwrap();
+        s.set_width(&id, PageWidth::Wide).unwrap();
         let shard = lib.dev_file(&device().id, &id);
         crate::vfs::write(&shard, b"{ not json").unwrap();
         let mut s = lib.open();
@@ -5955,12 +6057,12 @@ mod tests {
         let one = a.create_from(&doc("一")).unwrap();
         let two = b.create_from(&doc("二")).unwrap();
         a.set_pinned(&one, true).unwrap();
-        b.set_starred(&two, true).unwrap();
+        b.set_width(&two, PageWidth::Wide).unwrap();
         let mut c = lib.open();
         let list = c.list();
         assert_eq!(list.len(), 2);
         assert!(list.iter().find(|e| e.id == one).unwrap().meta.pinned, "b kept a's entry");
-        assert!(list.iter().find(|e| e.id == two).unwrap().meta.starred > 0, "a kept b's entry");
+        assert!(list.iter().find(|e| e.id == two).unwrap().meta.width == PageWidth::Wide, "a kept b's entry");
     }
 
     #[test]

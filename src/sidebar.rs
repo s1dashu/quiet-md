@@ -708,7 +708,7 @@ impl Workspace {
         // file for what concerns the page, the folder for 移动到, 重命名 and 删除.
         let doc = self.note_or(&m.id);
         let child = !m.batch && self.takes_children(&m.id);
-        let Some((pinned, starred)) = self.entries.iter().find(|e| e.id == doc).map(|e| (e.meta.pinned, e.meta.starred > 0)) else { return vec![] };
+        let Some(pinned) = self.entries.iter().find(|e| e.id == doc).map(|e| e.meta.pinned) else { return vec![] };
         let item = |id: &'static str, ic: &'static str, label: &'static str| MenuItem::new(id).icon(ic).label(crate::settings::label(label));
         let divider = MenuSeparator::new;
         if m.batch {
@@ -740,7 +740,7 @@ impl Workspace {
                 }
             })
         };
-        let (dup, mv, path, pin, star, dl, ren, del) = (doc.clone(), m.id.clone(), doc.clone(), doc.clone(), doc.clone(), doc.clone(), m.id.clone(), m.id.clone());
+        let (dup, mv, path, pin, dl, ren, del) = (doc.clone(), m.id.clone(), doc.clone(), doc.clone(), doc.clone(), m.id.clone(), m.id.clone());
         let pdf = doc.clone();
         let new_window = doc.clone();
         let sub_doc = m.id.clone();
@@ -795,11 +795,6 @@ impl Workspace {
                 item("rm-pin", if pinned { "pin-off" } else { "pin" }, if pinned { crate::settings::text("从“置顶”移除") } else { crate::settings::text("添加到“置顶”") })
                     .on_hover(set_sub(false))
                     .on_click(cx.listener(move |w, _, _, cx| w.toggle_pin(&pin, cx))),
-            )
-            .child(
-                item("rm-star", if starred { "star-off" } else { "star" }, if starred { crate::settings::text("取消收藏") } else { crate::settings::tr("收藏", "Add to favorites") })
-                    .on_hover(set_sub(false))
-                    .on_click(cx.listener(move |w, _, _, cx| w.toggle_star(&star, cx))),
             )
             .child(divider())
             .child(

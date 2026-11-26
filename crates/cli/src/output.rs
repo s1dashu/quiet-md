@@ -30,7 +30,7 @@ pub fn text(op: &str, v: &Value) -> String {
     let mut o = String::new();
     match op {
         "ls" => for e in v.as_array().into_iter().flatten() {
-            let mark = format!("{}{}", if e.get("pinned").is_some() { " pinned" } else { "" }, if e.get("starred").is_some() { " starred" } else { "" });
+            let mark = if e.get("pinned").is_some() { " pinned" } else { "" };
             if e.get("top").is_some() {
                 // A top-level folder on 主页: where it is on disk, and whether it opens.
                 let state = match e.get("documents") { Some(n) => format!("{n} documents{}", if e.get("default").is_some() { ", new documents go here" } else { "" }), None => format!("unavailable: {}", s(e, "error")) };

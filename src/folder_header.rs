@@ -112,7 +112,7 @@ impl Workspace {
             .on_click(cx.listener(|w, _, _, cx| { if w.home.sort == HomeSort::Manual { return; } w.home.folders_first = !w.home.folders_first; w.save_home(); w.home.view_menu = false; cx.notify(); })))
     }
 
-    /// 显示 (Finder's and Notion's view options): 视图 and 排序 in one menu; 只看收藏 stays out, a star of its own.
+    /// 显示 (Finder's and Notion's view options): 视图 and 排序 in one menu.
     pub(crate) fn view_menu(&self, cx: &mut Context<Self>) -> Popover {
         let view = |id: &'static str, ic: &'static str, label: &'static str, grid: bool| MenuItem::new(id).icon(ic).label(label).checked(self.home.grid == grid)
             .on_click(cx.listener(move |w, _, _, cx| { w.home.grid = grid; w.save_home(); w.home.view_menu = false; cx.notify(); }));
