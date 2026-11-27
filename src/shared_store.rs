@@ -357,7 +357,8 @@ impl SharedStore {
         for e in &mut fresh { e.top = key.to_string(); }
         let mut sh = self.0.borrow_mut();
         let order: Vec<String> = sh.tops.folders.iter().map(|r| r.key.clone()).collect();
-        match sh.entries.iter_mut().find(|(k, _)| k == key) { Some((_, v)) => *v = fresh, None => sh.entries.push((key.to_string(), fresh)) }
+        // (the list replaced freed off the main thread: thousands of entries take milliseconds)
+        match sh.entries.iter_mut().find(|(k, _)| k == key) { Some((_, v)) => fdl_core::drop_later::drop_later(std::mem::replace(v, fresh)), None => sh.entries.push((key.to_string(), fresh)) }
         let mut out = vec![];
         for k in order { if let Some((_, v)) = sh.entries.iter().find(|(x, _)| *x == k) { out.extend(v.iter().cloned()); } }
         drop(sh);

@@ -9,6 +9,7 @@ pub mod changes;
 pub mod clip_html;
 pub mod data_images;
 pub mod diff;
+pub mod drop_later;
 pub mod docxml;
 pub mod editor;
 pub mod emoji;

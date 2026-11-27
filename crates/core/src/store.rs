@@ -2835,18 +2835,23 @@ impl Store {
     /// document's file holds. Safe whatever was written meanwhile: whether
     /// the next write reads the device files again is decided from the disk.
     pub fn adopt(&mut self, mut from: Store) {
-        use std::mem::take;
-        (self.index, self.foreign, self.trash) = (take(&mut from.index), take(&mut from.foreign), take(&mut from.trash));
-        for (id, c) in from.parsed.drain() { self.parsed.entry(id).or_insert(c); }
+        use std::mem::{replace, take};
+        // What is replaced is freed off this thread (`drop_later`); the writer, emptied, here
+        // (its `Drop` writes what it kept of the views).
+        let old = (replace(&mut self.index, take(&mut from.index)), replace(&mut self.foreign, take(&mut from.foreign)), replace(&mut self.trash, take(&mut from.trash)));
+        let mut spare = vec![];
+        for (id, c) in from.parsed.drain() { match self.parsed.entry(id) { std::collections::hash_map::Entry::Vacant(v) => { v.insert(c); } _ => spare.push(c) } }
         self.checked.extend(from.checked.drain());
         self.inodes.extend(std::mem::take(&mut from.inodes));
         from.inodes_due.set(false);
         self.inodes_due.set(true);
-        (self.seen, self.merged, self.synced, self.seen_trash, self.here) = (take(&mut from.seen), take(&mut from.merged), take(&mut from.synced), take(&mut from.seen_trash), take(&mut from.here));
+        let old_meta = (replace(&mut self.seen, take(&mut from.seen)), replace(&mut self.merged, take(&mut from.merged)), replace(&mut self.synced, take(&mut from.synced)),
+            replace(&mut self.seen_trash, take(&mut from.seen_trash)), replace(&mut self.here, take(&mut from.here)));
         self.clock.set(self.clock.get().max(from.clock.get()));
         // A writer that began before this one (a listing, another window's move) read an older
         // library: taking it over afterwards would put the old paths back.
         self.writes.set(self.writes.get() + 1);
+        crate::drop_later::drop_later((old, old_meta, spare));
     }
 
     /// FORMAT 6: the files `list` found here noted in `meta::Here` (a

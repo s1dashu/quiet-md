@@ -596,7 +596,13 @@ impl Workspace {
                     // puts its own back (its pasted images, its look).
                     if let Some(id) = this.current.clone().or_else(|| this.folder_current.clone()) && this.store.set_active(&id) { cx.defer(crate::settings::top_switched); }
                     // A write of the tree on its way holds the library's lock, and lists it when it lands.
-                    if !this.store.file_task_busy() && !this.store.loading() && !this.tree_writes_pending() { this.entries.set(this.store.list()); this.sort(); this.refresh_external(Some(window.window_handle().window_id()), cx); }
+                    // Listed off the main thread, as the 2 s look lists (`relist`): listing here took 40 ms
+                    // in a library of 15,000 notes, the first frames after coming forward dropped.
+                    if !this.store.file_task_busy() && !this.store.loading() && !this.tree_writes_pending() {
+                        let keys = this.store.top_keys_dirs().into_iter().map(|(k, _)| k).collect();
+                        this.relist(keys, cx);
+                        this.refresh_external(Some(window.window_handle().window_id()), cx);
+                    }
                     // An attachment another program wrote meanwhile: its card says so.
                     if let Some(ed) = this.editor.clone() { ed.update(cx, |e, cx| e.files_changed(cx)); }
                     crate::update::check_if_stale(cx); crate::usage::opened(); cx.notify();
@@ -916,7 +922,16 @@ impl Workspace {
     pub(crate) fn sort(&mut self) {
         let _s = crate::devtools::span("sort");
         self.reapply_pending_tree_writes();
-        self.entries.edit().sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified).then_with(|| a.id.cmp(&b.id)));
+        // The places sorted, then the entries moved once: sorting 15,000 entries in place moved
+        // each (a few hundred bytes) a dozen times, 2-3 ms; a list already in order is left as is.
+        let list = &self.entries;
+        let mut at: Vec<u32> = (0..list.len() as u32).collect();
+        at.sort_by(|&a, &b| { let (a, b) = (&list[a as usize], &list[b as usize]); b.meta.modified.cmp(&a.meta.modified).then_with(|| a.id.cmp(&b.id)) });
+        if at.iter().enumerate().any(|(i, &j)| i as u32 != j) {
+            let list = self.entries.edit();
+            let mut old: Vec<Option<crate::store::Entry>> = std::mem::take(list).into_iter().map(Some).collect();
+            *list = at.into_iter().map(|j| old[j as usize].take().expect("each place once")).collect();
+        }
         self.sync_note_rows();
     }
 
