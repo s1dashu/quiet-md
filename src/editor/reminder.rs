@@ -337,7 +337,7 @@ impl Editor {
     pub(super) fn open_reminder(&mut self, p: Pos, cx: &mut Context<Self>) {
         let Some(r) = self.core.reminder_at(p) else { return };
         if self.read_only {
-            return self.toast(crate::settings::text("当前为阅读模式，请切换为编辑模式后重试"), cx);
+            return self.read_only_toast(cx);
         }
         self.hide_button_card(cx);
         self.hide_link_card(cx);
@@ -377,7 +377,7 @@ impl Editor {
     fn apply_reminder(&mut self, f: impl FnOnce(&InlineReminder) -> InlineReminder, window: &mut Window, cx: &mut Context<Self>) {
         let Some(at_) = self.rm.panel.as_ref().map(|p| p.at) else { return };
         let Some(old) = self.core.reminder_at(at_) else {
-            self.toast(crate::settings::text("该提醒已被删除。"), cx);
+            self.toast(crate::settings::tr("该提醒已删除", "This reminder was deleted"), cx);
             return self.close_reminder(window, cx);
         };
         let r = f(&old);

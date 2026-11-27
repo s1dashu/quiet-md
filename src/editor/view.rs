@@ -39,8 +39,6 @@ pub enum EditorEvent {
     Mode(bool),
     /// 选择要展示的文档信息 / 隐藏文档信息 changed the info row.
     Info(crate::store::InfoRow),
-    /// The editor showed a toast (the workspace drops its own).
-    Toast,
     /// A 创建副本 button was clicked.
     Duplicate,
     /// A standalone 画板 was closed (退出 / Esc): go back to where it is.
@@ -549,7 +547,7 @@ impl Editor {
             col_anim: HashMap::default(),
             tables: Default::default(),
             captions: HashMap::new(),
-            img: super::image::ImageUi::new(cx),
+            img: super::image::ImageUi::new(window.window_handle(), cx),
             file: super::file::FileUi::new(),
             heading_orders: Default::default(),
             size_pick: (0, 0),
@@ -2084,8 +2082,8 @@ impl Editor {
     fn on_space_cjk(&mut self, _: &k::SpaceCjk, window: &mut Window, cx: &mut Context<Self>) {
         if !self.guard(window, cx) || self.read_only { return; }
         let n = self.core.space_document();
-        if n == 0 { return self.toast(crate::settings::tr("没有需要加空格的地方", "No spaces to add"), cx); }
-        self.toast(&crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
+        if n == 0 { return self.toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("空格都已加好", "Spacing is already right"), cx); }
+        self.toast_kind(crate::editor_ui::ToastKind::Success, &crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
         self.changed_preserving_viewport(window, cx);
     }
 

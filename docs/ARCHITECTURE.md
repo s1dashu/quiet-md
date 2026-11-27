@@ -147,8 +147,8 @@ Whiteboard and history modules in core:
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
 | `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, type scale and note panel dimensions |
-| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card` the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
-| `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints, toasts and single-line input |
+| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card`, `toast` (each window's stack of toasts) the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
+| `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints and single-line input |
 | `highlight.rs` | Code highlighting |
 | `mermaid.rs` | Mermaid code blocks drawn as diagrams: merman (pure Rust) writes the SVG on a background thread, coloured from the Theme tokens, text measured by GPUI's resvg; cached in memory by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |

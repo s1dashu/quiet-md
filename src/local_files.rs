@@ -62,7 +62,7 @@ impl Workspace {
         for p in &md {
             match self.store.open_local(p) {
                 Ok(id) => last = Some(id),
-                Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
+                Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("打开文件失败", "Opening the file failed")).description(crate::settings::diagnostic(&e.to_string())), cx),
             }
         }
         self.entries.set(self.store.list());
@@ -86,7 +86,7 @@ impl Workspace {
                 // This window is being updated: the others are looked through once it is done.
                 cx.defer(move |cx| crate::quick_note::show_document(id, cx));
             }
-            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
+            Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("打开文件失败", "Opening the file failed")).description(crate::settings::diagnostic(&e.to_string())), cx),
         }
         cx.notify();
     }
@@ -149,7 +149,7 @@ impl Workspace {
             }
         };
         let Some(path) = path.fs_canonicalize().ok().filter(|p| p.fs_exists()) else {
-            self.show_toast_kind(ToastKind::Error, tr("文件不存在", "File not found"), cx);
+            self.show_toast_kind(ToastKind::Error, tr("文件已移走或删除", "The file was moved or deleted"), cx);
             return;
         };
         let existing = self.entries.iter().find(|e| self.store.file_path(&e.id)

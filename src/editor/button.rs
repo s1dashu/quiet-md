@@ -256,7 +256,7 @@ impl Editor {
                 if is_link_input(src) {
                     crate::editor::link::open(cx, &normalize(src));
                 } else {
-                    self.toast_kind(ToastKind::Error, crate::settings::text("超链接不合法，请重新输入"), cx);
+                    self.toast_kind(ToastKind::Error, crate::settings::tr("请输入有效的链接", "Enter a valid link"), cx);
                 }
             }
             ButtonAction::DuplicatePage => cx.emit(EditorEvent::Duplicate),

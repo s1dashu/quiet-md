@@ -65,9 +65,9 @@ struct Written { result: anyhow::Result<()>, entries: Option<Vec<Entry>>, change
 /// What a move into another top-level folder brings back: each library's writer and what it listed.
 struct Crossed { result: anyhow::Result<()>, lists: Vec<(String, u64, Store, Vec<Entry>)>, changes: Vec<FileDelta>, warnings: Vec<String> }
 
-fn move_failed(e: &anyhow::Error) -> String { crate::localized_format!("移动失败：{}", "Could not move document: {}", crate::settings::diagnostic(&e.to_string())) }
-fn rename_failed(e: &anyhow::Error) -> String { crate::localized_format!("重命名失败：{}", "Could not rename: {}", crate::settings::diagnostic(&e.to_string())) }
-fn name_not_followed(e: &anyhow::Error) -> String { crate::localized_format!("未能按标题重命名文件：{}", "Could not rename the file after its title: {}", crate::settings::diagnostic(&e.to_string())) }
+fn move_failed(e: &anyhow::Error) -> String { crate::localized_format!("移动失败：{}", "Moving the document failed: {}", crate::settings::diagnostic(&e.to_string())) }
+fn rename_failed(e: &anyhow::Error) -> String { crate::localized_format!("重命名失败：{}", "Renaming failed: {}", crate::settings::diagnostic(&e.to_string())) }
+fn name_not_followed(e: &anyhow::Error) -> String { crate::localized_format!("按标题重命名文件失败：{}", "Renaming the file after its title failed: {}", crate::settings::diagnostic(&e.to_string())) }
 
 impl Workspace {
     pub(crate) fn tree_writes_pending(&self) -> bool { self.tree_writes.saving || !self.tree_writes.pending.is_empty() }

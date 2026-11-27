@@ -357,7 +357,7 @@ pub fn font_changed(cx: &mut App) {
     }
     if !c.ok {
         if pending.is_some() && let Some(w) = ws {
-            let msg = crate::localized_format!("{} 下载失败，仍用原来的字体：{}", "Could not download {}; the font in use stays: {}", e.name(), c.error.clone().unwrap_or_default());
+            let msg = crate::localized_format!("{} 下载失败，继续使用原来的字体：{}", "Downloading {} failed; the current font stays: {}", e.name(), c.error.clone().unwrap_or_default());
             let _ = w.update(cx, |ws, _, cx| ws.show_toast_kind(ui::ToastKind::Error, &msg, cx));
         }
         return;
@@ -1285,12 +1285,12 @@ impl Workspace {
         use crate::font_downloads as fd;
         let Some(e) = fd::entry(id) else { return };
         if let Err(err) = fd::delete(id) {
-            return self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {err}", tr("删除失败", "Could not delete")), cx);
+            return self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {err}", tr("删除失败", "Deleting failed")), cx);
         }
         if prefs().doc_family.eq_ignore_ascii_case(&e.family) { self.set_pref(|p| p.doc_family.clear(), cx); }
-        let msg = if id == fd::XIAOLAI { tr("已删除。画板需要中文手写字体时会重新下载。", "Deleted. Boards download the handwriting font again when they need it.").to_string() }
-            else { crate::localized_format!("已删除 {}", "Deleted {}", e.name()) };
-        self.show_toast_kind(ui::ToastKind::Success, &msg, cx);
+        let t = if id == fd::XIAOLAI { crate::design::Toast::new(ui::ToastKind::Success, tr("已删除", "Deleted")).description(tr("画板需要中文手写字体时会重新下载", "Boards download the handwriting font again when they need it")) }
+            else { crate::design::Toast::new(ui::ToastKind::Success, crate::localized_format!("已删除 {}", "Deleted {}", e.name())) };
+        self.show_toast_with(t, cx);
     }
 
     /// Keys while a 通用 dropdown is open; true when used.
@@ -1382,7 +1382,7 @@ impl Workspace {
         let mut p = old.clone();
         f(&mut p);
         if let Err(e) = save(&p) {
-            self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {e}", tr("设置保存失败", "Could not save settings")), cx);
+            self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {e}", tr("设置保存失败", "Saving settings failed")), cx);
             return;
         }
         // 匿名使用统计 off: forget the app's id and waiting days.
@@ -1782,7 +1782,7 @@ impl Workspace {
                         cx.spawn(async move |this, cx| {
                             let sweep = cx.background_executor().spawn(async move { crate::store::Store::unused_assets_at(root, live, outside) }).await;
                             let _ = this.update(cx, |w, cx| match sweep {
-                                Ok(files) if files.is_empty() => w.show_toast(crate::settings::text("没有未使用资源"), cx),
+                                Ok(files) if files.is_empty() => w.show_toast_kind(ui::ToastKind::Info, crate::settings::text("资源都在使用中"), cx),
                                 Ok(files) => { w.confirm = Some(crate::app::Confirm::RemoveUnused(files)); cx.notify(); }
                                 Err(e) => w.sweep_failed(&e, cx),
                             });
@@ -2107,13 +2107,13 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "总字数" => "Words",
         "总字符数" => "Characters",
         "大小" => "Size",
-        "当前系统不支持" => "Not supported on this platform",
         "打印超时，请稍后重试" => "Printing timed out. Please try again.",
         "打印失败，请重试" => "Printing failed. Please try again.",
         "需要 Microsoft Edge WebView2 运行时" => "Requires the Microsoft Edge WebView2 Runtime",
         "没有找到匹配的结果，尝试其他关键词进行搜索" => "No results. Try another search term.",
         "请先关闭正在编辑这些文档的其他窗口，再删除" => "Close other windows editing these documents before deleting them.",
         "删除成功" => "Deleted successfully",
+        "资源都在使用中" => "All assets are in use",
         "已添加到“置顶”" => "Pinned",
         "已从“置顶”移除" => "Unpinned",
         "保存失败" => "Save failed",
@@ -2131,14 +2131,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "回收站暂无内容" => "Trash is empty",
         "位置" => "Location",
         "剩余时间" => "Time remaining",
-        "恢复成功。部分文档由于原位置不存在，已恢复到“我的文档”" => "Restored. Some documents were moved to My documents because their original location no longer exists.",
         "恢复成功" => "Restored successfully",
         "已彻底删除" => "Permanently deleted",
         "清空" => "Empty",
         "已清空回收站" => "Trash emptied",
         "清理未使用资源" => "Remove unused assets",
-        "没有未使用资源" => "No unused assets",
-        "没有可清理的资源" => "Nothing to remove",
         "移出" => "Move out",
         "确认清空回收站？" => "Empty the Trash?",
         "删除的内容将进入回收站，30 天后自动彻底删除" => "Deleted items will be moved to Trash and permanently deleted after 30 days.",
@@ -2166,7 +2163,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "本文暂未被其它文档引用" => "No backlinks yet",
         "本文暂未引用其它文档" => "No linked documents yet",
         "查看更多" => "Show more",
-        "当前为阅读模式，请切换为编辑模式后重试" => "Switch to editing mode to make changes.",
         "表情符号" => "Emoji",
         "动物" => "Animals",
         "食物" => "Food",
@@ -2180,7 +2176,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "输入“/”快速插入内容" => "Type / to insert content",
         "点击更换图标" => "Click to change icon",
         "请输入标题" => "Enter a title",
-        "请输入有效的链接。" => "Enter a valid link.",
         "确认" => "Confirm",
         "文本" => "Text",
         "复制原始网页链接" => "Copy original link",
@@ -2264,7 +2259,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "提前 1 周 (09:00)" => "1 week before (09:00)",
         "当天 (18:00)" => "Same day (18:00)",
         "明天" => "Tomorrow",
-        "该提醒已被删除。" => "This reminder was deleted.",
         "设置时间" => "Set time",
         "提醒" => "Reminder",
         "收起目录" => "Hide table of contents",
@@ -2344,7 +2338,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "取消静音" => "Unmute",
         "静音" => "Mute",
         "预览" => "Preview",
-        "无法播放该音频" => "Cannot play this audio",
         "全屏" => "Full screen",
         "文本视图" => "Text view",
         "卡片视图" => "Card view",

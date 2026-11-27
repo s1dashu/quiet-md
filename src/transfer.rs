@@ -255,15 +255,15 @@ fn first_made(t: &Scanned) -> Option<u64> {
 
 /// What a folder import left behind, for its toast.
 pub(crate) fn import_problems(failed: usize, cloud: usize) -> Option<String> {
-    let failed = (failed > 0).then(|| crate::localized_count!(failed, "有 {failed} 个文件未能导入", "{failed} file could not be imported", "{failed} files could not be imported"));
+    let failed = (failed > 0).then(|| crate::localized_count!(failed, "{failed} 个文件导入失败", "{failed} file failed to import", "{failed} files failed to import"));
     let parts: Vec<String> = failed.into_iter().chain((cloud > 0).then(|| cloud_skipped(cloud))).collect();
     (!parts.is_empty()).then(|| parts.join(crate::settings::tr("；", "; ")))
 }
 
 fn cloud_skipped(cloud: usize) -> String {
-    crate::localized_count!(cloud, "{cloud} 项只在 iCloud 中、没有下载到这台 Mac，已跳过；在访达中下载后可再导入",
-        "Skipped {cloud} item that is only in iCloud; download it in Finder, then import again",
-        "Skipped {cloud} items that are only in iCloud; download them in Finder, then import again")
+    crate::localized_count!(cloud, "已跳过 {cloud} 个仅在 iCloud 中的项目，在访达中下载后可再导入",
+        "Skipped {cloud} item kept only in iCloud; download it in Finder to import it",
+        "Skipped {cloud} items kept only in iCloud; download them in Finder to import them")
 }
 
 fn downloads() -> PathBuf {
@@ -455,7 +455,7 @@ impl Workspace {
             if written.is_err() {
                 let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx));
             } else if missing > 0 {
-                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_count!(missing, "已导出，但有 {missing} 个图片或附件未能复制", "Exported, but {missing} image or attachment could not be copied", "Exported, but {missing} images or attachments could not be copied"), cx));
+                let _ = this.update(cx, |w, cx| w.show_toast_kind(ToastKind::Error, &crate::localized_count!(missing, "已导出，{missing} 个图片或附件复制失败", "Exported; {missing} image or attachment failed to copy", "Exported; {missing} images or attachments failed to copy"), cx));
             }
         })
         .detach();
@@ -465,7 +465,7 @@ impl Workspace {
     pub fn export_pdf(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
         if !printing::SUPPORTED {
-            self.show_toast_kind(ToastKind::Error, crate::settings::text("当前系统不支持"), cx);
+            self.show_toast_kind(ToastKind::Error, crate::settings::tr("打印和导出 PDF 需要 macOS 或 Windows", "Printing and PDF export need macOS or Windows"), cx);
             return;
         }
         cx.notify();
@@ -495,8 +495,7 @@ impl Workspace {
             let ok = matches!(res, Ok(true)) && path.fs_is_file();
             let _ = this.update(cx, |w, cx| {
                 if ok {
-                    w.toast = None;
-                    cx.notify();
+                    w.dismiss_progress(crate::settings::text("正在导出文档"), cx);
                 } else {
                     w.show_toast_kind(ToastKind::Error, crate::settings::text("导出失败，请重试"), cx);
                 }
@@ -509,7 +508,7 @@ impl Workspace {
     pub fn print_doc(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
         if !printing::SUPPORTED {
-            self.show_toast_kind(ToastKind::Error, crate::settings::text("当前系统不支持"), cx);
+            self.show_toast_kind(ToastKind::Error, crate::settings::tr("打印和导出 PDF 需要 macOS 或 Windows", "Printing and PDF export need macOS or Windows"), cx);
             return;
         }
         let Some(doc) = self.doc_of(id, cx) else { return };
@@ -521,10 +520,7 @@ impl Workspace {
         cx.spawn_in(window, async move |this, cx| {
             let res = printing::run(html, name, Job::Print, view, cx).await;
             let _ = this.update(cx, |w, cx| match res {
-                Ok(_) => {
-                    w.toast = None;
-                    cx.notify();
-                }
+                Ok(_) => w.dismiss_progress(crate::settings::text("文档打印中"), cx),
                 Err(e) => w.show_toast_kind(ToastKind::Error, &e, cx),
             });
         })
@@ -582,8 +578,9 @@ impl Workspace {
                 w.remember_file_changes(imported.changes, crate::settings::tr("导入", "Import"));
                 if let Some(id) = imported.last.filter(|_| open) { w.open(&id, window, cx); }
                 if imported.failed { w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx); }
-                // 导入 copies: say into where, and that the originals were not touched.
-                else { w.show_toast(&crate::localized_count!(imported.done, "已复制 {} 个文件到「{}」，原文件未改动", "Copied {} file into “{}”; the originals are untouched", "Copied {} files into “{}”; the originals are untouched", imported.done, place), cx); }
+                // 导入 copies: say into where, and that the originals stay as they were.
+                else { w.show_toast_with(crate::design::Toast::new(ToastKind::Success, crate::localized_count!(imported.done, "已复制 {} 个文件到「{}」", "Copied {} file into “{}”", "Copied {} files into “{}”", imported.done, place))
+                    .description(crate::settings::tr("原文件保持原样", "The originals stay as they were")), cx); }
                 cx.notify();
             });
         }).detach();
@@ -856,7 +853,7 @@ impl Workspace {
         let (later, into) = (path.to_path_buf(), parent.clone());
         if self.after_tree_writes(move |w, window, cx| w.import_siyuan(&later, into, window, cx)) { return; }
         if !fdl_core::siyuan::recognizes(path) {
-            return self.show_toast_kind(ToastKind::Error, crate::settings::tr("这不是思源笔记的工作空间、笔记本文件夹或 .sy.zip 文件", "This is not a SiYuan workspace, notebook folder or .sy.zip file"), cx);
+            return self.show_toast_kind(ToastKind::Error, crate::settings::tr("请选择思源笔记的工作空间、笔记本文件夹或 .sy.zip 文件", "Pick a SiYuan workspace, notebook folder or .sy.zip file"), cx);
         }
         let (again, retry) = (path.to_path_buf(), parent.clone());
         if !self.save_before(cx, move |w, window, cx| w.import_siyuan(&again, retry.clone(), window, cx)) { return; }
@@ -885,7 +882,7 @@ impl Workspace {
                 let (error, text) = crate::siyuan::summary(&report);
                         w.show_toast_kind(if error { ToastKind::Error } else { ToastKind::Info }, &text, cx);
                     }
-                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string())), cx),
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("导入中断", "Import stopped")).description(crate::settings::diagnostic(&e.to_string())), cx),
                 }
                 cx.notify();
             });
@@ -907,7 +904,7 @@ impl Workspace {
     fn finish_import_folder(&mut self, imported: Imported, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
         let (top, failed, cloud, saved, changes) = match imported {
             Imported::Empty { cloud } => {
-                let msg = if cloud > 0 { cloud_skipped(cloud) } else { crate::settings::tr("这个文件夹里没有 Markdown 或 XML 文件", "This folder has no Markdown or XML files").to_string() };
+                let msg = if cloud > 0 { cloud_skipped(cloud) } else { crate::settings::tr("请选含有 Markdown 或 XML 文件的文件夹", "Pick a folder with Markdown or XML files").to_string() };
                 self.show_toast_kind(ToastKind::Error, &msg, cx);
                 return;
             }
@@ -924,14 +921,15 @@ impl Workspace {
             if open { self.open(&id, window, cx); }
         }
         if let Err(e) = saved {
-            self.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string())), cx);
+            self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("导入中断", "Import stopped")).description(crate::settings::diagnostic(&e.to_string())), cx);
         } else if let Some(msg) = import_problems(failed, cloud) {
             self.show_toast_kind(ToastKind::Error, &msg, cx);
         } else if let Some(e) = top.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)) {
             // 导入 copies: say what went where, and that the original stayed as it was.
             let (name, place) = (crate::settings::display_title(&e.title), self.place_name(e.meta.parent.as_deref()));
-            self.show_toast(&crate::localized_format!("已复制「{}」到「{}」，原文件夹未改动", "Copied “{}” into “{}”; the original folder is untouched", name, place), cx);
-        } else if self.toast.as_ref().is_some_and(|t| matches!(t.kind, ToastKind::Info) && t.msg.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
+            self.show_toast_with(crate::design::Toast::new(ToastKind::Success, crate::localized_format!("已复制「{}」到「{}」", "Copied “{}” into “{}”", name, place))
+                .description(crate::settings::tr("原文件夹保持原样", "The original folder stays as it was")), cx);
+        } else { self.dismiss_progress(crate::settings::tr("正在导入…", "Importing…"), cx); }
         cx.notify();
     }
 

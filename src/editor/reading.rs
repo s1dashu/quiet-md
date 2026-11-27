@@ -12,10 +12,6 @@ use crate::store::InfoRow;
 use crate::editor_ui::ToastKind;
 use gpui::*;
 
-pub const READ_ONLY_HINT: &str = "当前为阅读模式，请切换为编辑模式后重试";
-/// The same refusal while a 版本历史 snapshot is on screen: there is no
-/// "switch to editing" to offer, only 返回当前.
-pub const PREVIEW_HINT: &str = "正在查看历史版本，返回当前版本后才能编辑";
 
 impl Editor {
     /// 版本历史: the document on screen is a snapshot, not the live one. The
@@ -26,8 +22,18 @@ impl Editor {
         cx.notify();
     }
 
-    fn read_only_hint(&self) -> &'static str {
-        if self.preview { PREVIEW_HINT } else { READ_ONLY_HINT }
+    /// A change asked for while the page is read-only: 阅读模式 offers 编辑 (as the "E" key does); a
+    /// 版本历史 snapshot has no editing to switch to, only 返回当前.
+    pub(super) fn read_only_toast(&mut self, cx: &mut Context<Self>) {
+        let t = if self.preview {
+            crate::design::Toast::new(ToastKind::Info, crate::settings::tr("正在查看历史版本", "Viewing an earlier version"))
+                .description(crate::settings::tr("返回当前版本后可以编辑", "Return to the current version to edit"))
+        } else {
+            let me = cx.entity().downgrade();
+            crate::design::Toast::new(ToastKind::Info, crate::settings::tr("当前为阅读模式", "Reading mode is on"))
+                .action(crate::settings::tr("开始编辑", "Edit"), move |_, cx| { let _ = me.update(cx, |_, cx| cx.emit(EditorEvent::Mode(false))); })
+        };
+        self.toast_with(t, cx);
     }
 
     pub fn set_read_only(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -64,8 +70,7 @@ impl Editor {
             return false;
         }
         self.core.restore(doc);
-        let hint = self.read_only_hint();
-        self.toast_kind(ToastKind::Info, hint, cx);
+        self.read_only_toast(cx);
         cx.notify();
         true
     }
@@ -91,8 +96,7 @@ impl Editor {
         let m = k.modifiers;
         if m.platform || m.control || m.function {
             if m.platform && !m.control && matches!(k.key.as_str(), "v" | "x" | "z" | "b" | "i" | "u" | "k") {
-                let hint = self.read_only_hint();
-                self.toast_kind(ToastKind::Info, hint, cx);
+                self.read_only_toast(cx);
             }
             return;
         }
@@ -104,8 +108,7 @@ impl Editor {
         let typing = k.key_char.as_ref().is_some_and(|c| !c.is_empty()) || matches!(k.key.as_str(), "enter" | "backspace" | "delete" | "tab");
         if typing {
             cx.stop_propagation();
-            let hint = self.read_only_hint();
-            self.toast_kind(ToastKind::Info, hint, cx);
+            self.read_only_toast(cx);
         }
     }
 

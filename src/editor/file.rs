@@ -658,7 +658,7 @@ impl Editor {
             Some(p) if cfg!(target_os = "macos") || crate::devtools::scripted() || cfg!(target_family = "wasm") => quick_look(p),
             Some(p) if crate::local_files::runs_program(p) => cx.reveal_path(p),
             Some(p) => cx.open_with_system(p),
-            None => self.toast(crate::settings::text("文件不存在"), cx),
+            None => self.toast(crate::settings::tr("文件已移走或删除", "The file was moved or deleted"), cx),
         }
     }
 
@@ -674,7 +674,7 @@ impl Editor {
 
     /// 下载: a copy where the save panel says (Downloads first).
     pub(super) fn download_file(&mut self, f: &FileBlock, cx: &mut Context<Self>) {
-        let Some(src) = local_path(f).filter(|p| p.fs_is_file()) else { return self.toast(crate::settings::text("文件不存在"), cx) };
+        let Some(src) = local_path(f).filter(|p| p.fs_is_file()) else { return self.toast(crate::settings::tr("文件已移走或删除", "The file was moved or deleted"), cx) };
         let picked = crate::devtools::take_pick().and_then(|p| p.into_iter().next());
         let dir = dirs::download_dir().or_else(dirs::home_dir).unwrap_or_default();
         let rx = picked.is_none().then(|| cx.prompt_for_new_path(&dir, Some(&f.name)));
@@ -701,7 +701,7 @@ impl Editor {
     }
 
     fn toggle_audio(&mut self, id: BlockId, cx: &mut Context<Self>) {
-        let Some(pl) = self.audio_player(id) else { return self.toast(crate::settings::text("无法播放该音频"), cx) };
+        let Some(pl) = self.audio_player(id) else { return self.toast(crate::settings::tr("播放音频失败", "Playing the audio failed"), cx) };
         if pl.playing() {
             pl.pause();
         } else {

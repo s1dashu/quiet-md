@@ -243,7 +243,7 @@ impl Workspace {
             Ok(true) => self.show_toast_kind(crate::editor_ui::ToastKind::Success, crate::settings::tr("已保存当前版本", "Saved a version"), cx),
             // Identical text never adds a snapshot; say so rather than let the
             // click look broken.
-            Ok(false) => self.show_toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("内容与上一份相同，没有新增版本", "Same as the newest version; nothing added"), cx),
+            Ok(false) => self.show_toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("与最新版本相同", "Same as the newest version"), cx),
             Err(e) => return self.set_history_error(e.to_string(), cx),
         }
         self.refresh_history(window, cx);
@@ -301,7 +301,8 @@ impl Workspace {
         self.exit_preview(cx);
         self.history = None;
         if self.store.save(&id, &doc).is_err() {
-            self.show_toast_kind(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败：当前版本未被改动。", "Restore failed; the current version was left alone."), cx);
+            self.show_toast_with(crate::design::Toast::new(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败", "Restore failed"))
+                .description(crate::settings::tr("当前版本保持原样", "The current version stays as it was")), cx);
             return;
         }
         if table && let Some(p) = self.store.file_path(&id) { crate::table::reload(&p, cx); }

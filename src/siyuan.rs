@@ -45,8 +45,8 @@ fn noteworthy(r: &Report) -> bool {
 /// read (an error then). It stays one line; the report page, shown after
 /// it, lists what changed form.
 pub(crate) fn summary(r: &Report) -> (bool, String) {
-    let mut text = crate::localized_count!(r.docs, "已复制 {} 篇思源笔记文档，原文件未改动", "Copied {} SiYuan document; the originals are untouched", "Copied {} SiYuan documents; the originals are untouched", r.docs);
-    if !r.failed.is_empty() { text.push_str(&crate::localized_count!(r.failed.len(), "，{} 篇未能导入", ", {} failed", ", {} failed", r.failed.len())); }
+    let mut text = crate::localized_count!(r.docs, "已复制 {} 篇思源笔记文档，原文件保持原样", "Copied {} SiYuan document; the originals stay as they were", "Copied {} SiYuan documents; the originals stay as they were", r.docs);
+    if !r.failed.is_empty() { text.push_str(&crate::localized_count!(r.failed.len(), "，{} 篇导入失败", ", {} failed", ", {} failed", r.failed.len())); }
     (!r.failed.is_empty(), text)
 }
 

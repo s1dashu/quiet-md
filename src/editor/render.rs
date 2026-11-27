@@ -1637,7 +1637,6 @@ impl Editor {
         let lightbox = self.lightbox_el(window, cx);
         let board = self.board_el();
         self.sync_tables(window, cx);
-        let toast = self.toast_el(window, cx);
         let probes = std::mem::take(&mut *self.probes.borrow_mut());
         let origin0 = self.content_origin.get();
         let zoom_badge = self.zoom_badge_el(window);
@@ -1949,7 +1948,6 @@ impl Editor {
             .children(find_box)
             .children(lightbox)
             .children(board)
-            .children(toast)
             .child(root_canvas)
     }
 }

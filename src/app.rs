@@ -478,9 +478,6 @@ pub struct Workspace {
     pub trash_menu: Option<(String, Point<Pixels>, Anchor)>,
     /// 回收站's 自动删除 dropdown is open.
     pub trash_days_menu: bool,
-    /// The toast and its clock.
-    pub toast: Option<crate::ui::ToastState>,
-    toast_task: Option<Task<()>>,
     /// Folded sidebar sections: 置顶, then two unused (我的文档 never folds, #421; 本机文件 is gone).
     pub folded: [bool; 3],
     /// Top-level folder folders folded shut in the sidebar, by key.
@@ -765,8 +762,6 @@ impl Workspace {
             trash: vec![],
             trash_menu: None,
             trash_days_menu: false,
-            toast: None,
-            toast_task: None,
             mode_menu: false,
             mode_btn_bounds: Rc::new(Cell::new(None)),
             more_btn_bounds: Rc::new(Cell::new(None)),
@@ -953,8 +948,8 @@ impl Workspace {
                 match r {
                     // Listed by its name until now: its title and words come with it.
                     Ok(()) if w.store.cloud_only(&target).is_none() => { w.entries.set(w.store.list()); w.sort(); w.open(&target, window, cx); }
-                    Ok(()) => w.show_toast_kind(ToastKind::Error, crate::settings::tr("这篇文档还没有从 iCloud 下载完成", "This document hasn't finished downloading from iCloud"), cx),
-                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法从 iCloud 下载这篇文档：{}", "Could not download this document from iCloud: {}", e), cx),
+                    Ok(()) => w.show_toast_kind(ToastKind::Error, crate::settings::tr("这篇文档仍在从 iCloud 下载", "This document is still downloading from iCloud"), cx),
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("从 iCloud 下载失败", "Downloading from iCloud failed")).description(e.to_string()), cx),
                 }
                 cx.notify();
             });
@@ -1007,7 +1002,7 @@ impl Workspace {
         let doc = match self.store.load_for_edit(id, shared) {
             Ok(d) => d,
             Err(e) => {
-                self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文档：{}", "Could not open document: {}", crate::settings::diagnostic(&e.to_string())), cx);
+                self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("打开文档失败", "Opening the document failed")).description(crate::settings::diagnostic(&e.to_string())), cx);
                 cx.notify();
                 return false;
             }
@@ -1049,10 +1044,6 @@ impl Workspace {
             }
             EditorEvent::Mode(reading) => this.set_mode(*reading, window, cx),
             EditorEvent::Info(info) => this.set_info_row(*info),
-            EditorEvent::Toast => {
-                this.toast = None;
-                cx.notify();
-            }
             EditorEvent::Save => {
                 if !this.flush(cx) { this.confirm = Some(Confirm::SaveFailed); cx.notify(); }
             }
@@ -1350,32 +1341,17 @@ impl Workspace {
     }
 
     pub fn show_toast_kind(&mut self, kind: ToastKind, msg: &str, cx: &mut Context<Self>) {
-        self.toast = Some(crate::ui::ToastState::new(kind, msg));
-        if let Some(ed) = &self.editor {
-            ed.update(cx, |e, cx| e.clear_toast(cx));
-        }
-        self.wake_for_toast_fade(cx);
-        cx.notify();
+        self.show_toast_with(crate::design::Toast::new(kind, msg.to_string()), cx);
     }
 
-    /// A frame when the toast's fade starts (its own frames carry it from there); none while paused.
-    fn wake_for_toast_fade(&mut self, cx: &mut Context<Self>) {
-        let Some(wait) = self.toast.as_ref().and_then(|t| t.until_fade()) else { self.toast_task = None; return };
-        self.toast_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        }));
+    /// The work an Info toast said was under way (正在导入…) is done: that toast goes.
+    pub fn dismiss_progress(&mut self, title: &str, cx: &mut Context<Self>) {
+        crate::design::toast::dismiss_where(self.window, |tone, t| tone == ToastKind::Info && t == title, cx);
     }
 
-    fn render_toast(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let this = cx.entity().downgrade();
-        crate::ui::toast_el(self.toast.as_ref()?, window, move |on, _, cx| {
-            let _ = this.update(cx, |w, cx| {
-                if let Some(t) = &mut w.toast { t.hover(on); }
-                w.wake_for_toast_fade(cx);
-                cx.notify();
-            });
-        })
+    /// A toast with a description, an action or a close button, in front of this window's stack.
+    pub fn show_toast_with(&mut self, t: crate::design::Toast, cx: &mut Context<Self>) {
+        crate::design::toast::show(self.window, t, cx);
     }
 
     /// 重命名: the row's title turns into an input; Enter or clicking away saves, Esc cancels.
@@ -1702,7 +1678,8 @@ impl Workspace {
         let key = self.store.with(None, |s| Ok(s.key().to_string())).unwrap_or_else(|_| crate::store::library_key(&root));
         let moved = crate::store::Store::migrate(&root).and_then(|r| Ok((r, crate::store::Store::open_at_as(root.clone(), &key)?)));
         match moved {
-            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("没能改为真实文件夹，文档库保持原样：{}", "Couldn't move to real folders; the library is unchanged: {}", crate::settings::diagnostic(&e.to_string())), cx),
+            Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("改为真实文件夹失败", "Moving to real folders failed"))
+                .description(crate::localized_format!("文档库保持原样：{}", "The library stays as it was: {}", crate::settings::diagnostic(&e.to_string()))), cx),
             Ok((report, store)) => {
                 let _ = self.store.with(None, |s| { *s = store; Ok(()) });
                 crate::changelog::migrated(&report);
@@ -2165,7 +2142,7 @@ impl Render for Workspace {
         let lang_menu = self.render_lang_menu(cx);
         let pref_menu = self.render_pref_menu(cx);
         let font_menu = self.render_font_menu(cx);
-        let toast = self.render_toast(window, cx);
+        let toast = crate::design::toast::toaster(window, cx);
         let forced_update = crate::update::prompt(window, cx);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -2317,20 +2294,26 @@ impl Render for Workspace {
                     w.doc_sub = None;
                     cx.stop_propagation();
                     cx.notify();
+                    return;
                 }
+                // Esc nothing else took closes the front toast.
+                if ev.keystroke.key == "escape" && crate::design::toast::dismiss_front(window, cx) { cx.stop_propagation(); }
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             // Esc closes the document's menus first (Radix's DropdownMenu). The editor binds Esc to its
             // own action, which runs before any key listener, and spends it selecting the block: take
             // the action on its way down while a menu is open (a switch row keeps the menu open, so
             // Esc is how it goes).
-            .capture_action(cx.listener(|w, _: &crate::editor::keymap::Escape, _, cx| {
+            .capture_action(cx.listener(|w, _: &crate::editor::keymap::Escape, window, cx| {
                 if w.doc_menu || w.mode_menu {
                     w.mode_menu = false;
                     w.doc_menu = false;
                     w.doc_sub = None;
                     cx.stop_propagation();
                     cx.notify();
+                } else if w.preview.is_none() && w.history.is_none() && w.confirm.is_none() && crate::design::toast::dismiss_front(window, cx) {
+                    // then the front toast, before the editor spends Esc selecting the block
+                    cx.stop_propagation();
                 }
             }))
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {

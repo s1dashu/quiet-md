@@ -31,7 +31,7 @@ pub async fn run(html: String, title: String, job: Job, parent: usize, cx: &mut 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (html, title, job, parent, cx);
-        Err(crate::settings::text("当前系统不支持").into())
+        Err(crate::settings::tr("打印和导出 PDF 需要 macOS 或 Windows", "Printing and PDF export need macOS or Windows").into())
     }
 }
 

@@ -288,7 +288,7 @@ impl Workspace {
         let ids: Vec<String> = picked.iter().filter(|id| !target.as_ref().is_some_and(|t| tree.subtree(id).contains(t))).cloned().collect();
         if ids.is_empty() {
             // The dialog hides the picked folders; this is its safety net.
-            if !picked.is_empty() { self.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::tr("不能移到所选文件夹里面", "Can't move into a selected folder"), cx); }
+            if !picked.is_empty() { self.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::tr("请选所选文件夹以外的位置", "Pick a place outside the selected folders"), cx); }
             return;
         }
         let file_before = self.entries.to_vec();

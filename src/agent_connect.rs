@@ -100,7 +100,7 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
             .child(Button::outline("install-cli").sized(ButtonSize::Sm).label(if done { tr("已安装", "Installed") } else { tr("安装命令行工具", "Install Command") }).disabled(done || bundled_cli().is_none())
                 .on_click(cx.listener(|w, _, _, cx| match install_link() {
                     Ok(_) => { w.show_toast_kind(ToastKind::Success, tr("已安装到 ~/.local/bin", "Installed in ~/.local/bin"), cx); cx.notify(); }
-                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("没有装上：{}", "Could not install: {}", e), cx),
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("安装失败", "Install failed")).description(e.to_string()), cx),
                 })))
             .child(small(tr("装到 ~/.local/bin，不需要管理员密码", "Goes in ~/.local/bin, no password needed")))
             .into_any_element())
