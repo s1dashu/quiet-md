@@ -28,7 +28,7 @@ impl Workspace {
                 Ok(id)
             })
         };
-        match made {
+        match &made {
             Ok(id) => {
                 self.search_open = false;
                 self.doc_info = None;
@@ -36,13 +36,13 @@ impl Workspace {
                 self.sort();
                 if let Some(p) = &parent { self.expanded.insert(p.clone()); }
                 self.search.update(cx, |s, cx| s.set_text("", cx));
-                self.open(&id, window, cx);
+                self.open(id, window, cx);
                 if let Some(ed) = &self.editor { { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); } }
             }
             Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("新建失败：{}", "Could not create document: {}", crate::settings::diagnostic(&e.to_string()))),
         }
         self.set_pref(|p| p.last_new = if markdown { "markdown" } else { "doc" }.into(), cx);
-        self.remember_files(file_before, crate::settings::tr(if markdown { "新建 Markdown" } else { "新建文档" }, if markdown { "New Markdown" } else { "New document" }));
+        self.remember_new_page(file_before, crate::settings::tr(if markdown { "新建 Markdown" } else { "新建文档" }, if markdown { "New Markdown" } else { "New document" }), made.as_deref().ok());
         cx.notify();
     }
 

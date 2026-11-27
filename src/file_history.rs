@@ -23,10 +23,19 @@ pub(crate) struct FileHistory {
     undo: Vec<Record>, redo: Vec<Record>, next: u64,
     pub busy: bool,
     requests: VecDeque<bool>,
+    /// The page 新建文档 / 新建子文档 just made and opened with the keys in it: its step and its editor.
+    fresh: Option<(u64, EntityId)>,
 }
 impl Workspace {
     pub(crate) fn remember_files(&mut self, journal: crate::store::FileChanges, label: &'static str) -> u64 {
         self.remember_file_changes(journal.take(), label)
+    }
+
+    /// `remember_files` for a page made and opened in its editor (新建文档, 新建子文档): until anything is
+    /// done in it, ⌘Z there undoes making it (`new_page_untouched`).
+    pub(crate) fn remember_new_page(&mut self, journal: crate::store::FileChanges, label: &'static str, made: Option<&str>) {
+        let token = self.remember_files(journal, label);
+        self.file_history.fresh = self.editor.as_ref().filter(|_| token != 0 && made.is_some() && self.current.as_deref() == made).map(|e| (token, e.entity_id()));
     }
 
     /// `remember_files` for changes written by a background store (导入文件夹).
@@ -152,8 +161,7 @@ impl Workspace {
     /// 撤销 / 重做 in the Edit menu: the folders' next steps by name while ⌘Z is theirs (`capture_file_history`);
     /// none (plain 撤销 / 重做) while it is a page's, whose steps have no names.
     pub(crate) fn undo_menu_names(&self, window: &Window, cx: &App) -> (Option<String>, Option<String>) {
-        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
-        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return (None, None) }
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), self.doc_keys(window, cx)) { return (None, None) }
         let name = |r: &Record, redo: bool| {
             // one page or folder: its title too
             let title = match &r.entries[..] { [(a, b)] => b.as_ref().or(a.as_ref()).map(|e| crate::settings::display_title(&e.title)), _ => None };
@@ -167,12 +175,22 @@ impl Workspace {
         (self.file_history.undo.last().map(|r| name(r, false)), self.file_history.redo.last().map(|r| name(r, true)))
     }
 
+    /// The open document has the keys, and with them ⌘Z: not while it is the page 新建文档 / 新建子文档 just
+    /// made, nothing done in it yet and making it the folders' last step, whose ⌘Z undoes making it (the
+    /// report of 2026-11-28: the keys go into the new page, where ⌘Z had nothing to undo).
+    fn doc_keys(&self, window: &Window, cx: &App) -> bool {
+        self.view == View::Doc && self.editor.as_ref().is_some_and(|e| {
+            let ed = e.read(cx);
+            ed.holds_focus(window, cx) && !new_page_untouched(self.file_history.fresh, self.file_history.undo.last().map(|r| r.token), e.entity_id(), ed.core.untouched())
+        })
+    }
+
     /// ⌘Z / ⌘⇧Z, caught on the way down: the folders' history (创建副本, 移动, 删除…) only while the keys are
     /// in the sidebar or a folder's page. With the open document holding them it is that document's own, even
-    /// with nothing left to undo there (as in Notion and 飞书: undo in a page never undoes the sidebar).
+    /// with nothing left to undo there (as in Notion and 飞书: undo in a page never undoes the sidebar), but for a
+    /// page just made and not yet touched (`doc_keys`).
     pub(crate) fn capture_file_history(&mut self, redo: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
-        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return; }
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), self.doc_keys(window, cx)) { return; }
         cx.stop_propagation();
         self.file_history.requests.push_back(redo);
         self.run_file_history(window, cx);
@@ -303,6 +321,11 @@ impl Workspace {
 /// document has the keys.
 fn files_take_undo(field: bool, doc_keys: bool) -> bool { !field && !doc_keys }
 
+/// The page in `editor` is the one the folders' `last` step made (`fresh`), with nothing done in it since.
+fn new_page_untouched<E: PartialEq>(fresh: Option<(u64, E)>, last: Option<u64>, editor: E, untouched: bool) -> bool {
+    untouched && fresh.is_some_and(|(token, e)| Some(token) == last && e == editor)
+}
+
 #[cfg(test)]
 mod tests {
     // (`test` here is GPUI's, through the glob)
@@ -328,5 +351,27 @@ mod tests {
         // the sidebar or the folder's page: the folders'; a field of the workspace's own keeps its keys
         assert!(files_take_undo(false, false));
         assert!(!files_take_undo(true, false));
+    }
+
+    /// The report (2026-11-28): 新建子文档 (or 新建文档) opens the new page with the keys in it, where ⌘Z had
+    /// nothing to undo, so making it could not be undone. Untouched, its ⌘Z is the folders' (making it);
+    /// typed into, the page's own, also once its typing is undone; another editor (opened again) or
+    /// another step since, the page's too.
+    #[core::prelude::v1::test]
+    fn an_untouched_new_page_undoes_making_it() {
+        let mut core = fdl_core::editor::core::Core::new(crate::model::Document::default());
+        let doc_keys = |fresh, last, editor, core: &fdl_core::editor::core::Core| !new_page_untouched(fresh, last, editor, core.untouched());
+        assert!(core.untouched() && !doc_keys(Some((3, 7)), Some(3), 7, &core));
+        assert!(files_take_undo(false, doc_keys(Some((3, 7)), Some(3), 7, &core)));
+        // the page opened again (a new editor), another step since, or none made: the page's
+        assert!(doc_keys(Some((3, 7)), Some(3), 8, &core));
+        assert!(doc_keys(Some((3, 7)), Some(4), 7, &core));
+        assert!(doc_keys(Some((3, 7)), None, 7, &core));
+        assert!(doc_keys(None, Some(3), 7, &core));
+        // typed into: the page's, its typing undone or not
+        core.insert_text("标题");
+        assert!(!core.untouched() && doc_keys(Some((3, 7)), Some(3), 7, &core));
+        assert!(core.undo());
+        assert!(!core.untouched() && doc_keys(Some((3, 7)), Some(3), 7, &core));
     }
 }

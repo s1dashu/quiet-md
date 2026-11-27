@@ -765,6 +765,9 @@ impl Core {
         self.last_edit = None; self.generation += 1;
     }
 
+    /// Nothing done to the document since it was opened: no step to undo or redo.
+    pub fn untouched(&self) -> bool { self.undo.is_empty() && self.redo.is_empty() }
+
     pub fn undo(&mut self) -> bool {
         self.typed_in_equation = None;
         let Some(s) = self.undo.pop_back() else { return false };

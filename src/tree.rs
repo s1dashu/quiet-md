@@ -238,20 +238,21 @@ impl Workspace {
         let file_before = self.store.track_file_changes();
         let made = if plain_folder { self.store.create().and_then(|(id, _)| self.store.set_parent(&id, Some(parent)).map(|_| id)) }
             else { self.store.create_child(parent, &crate::model::Document::default()) };
-        match made {
+        match &made {
             Ok(id) => {
                 self.entries.set(self.store.list());
                 self.sort();
-                if let Some(folder) = self.entries.iter().find(|e| e.id == id).and_then(|e| e.meta.parent.clone()) {
+                if let Some(folder) = self.entries.iter().find(|e| &e.id == id).and_then(|e| e.meta.parent.clone()) {
                     self.expanded.insert(folder.clone());
                     self.reveal_in_tree(&folder);
                 }
-                self.open(&id, window, cx);
+                self.open(id, window, cx);
                 if let Some(ed) = &self.editor { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
             }
             Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("新建失败：{}", "Could not create document: {}", crate::settings::diagnostic(&e.to_string()))),
         }
-        self.remember_files(file_before, if plain_folder { crate::settings::tr("新建文档", "New document") } else { crate::settings::tr("新建子文档", "New subdocument") });
+        let label = if plain_folder { crate::settings::tr("新建文档", "New document") } else { crate::settings::tr("新建子文档", "New subdocument") };
+        self.remember_new_page(file_before, label, made.as_deref().ok());
         cx.notify();
     }
 
