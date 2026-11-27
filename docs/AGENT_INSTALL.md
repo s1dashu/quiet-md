@@ -38,10 +38,10 @@ inside the Quiet.md app:
 - **Linux:** `quiet` is in the package's `bin/` folder, beside `quiet_md`.
   Link it into a folder on `PATH`, e.g. `ln -sf <package>/bin/quiet ~/.local/bin/quiet`.
 
-If Quiet.md is not installed, or its app has no `quiet` inside (versions
-before the one with 连接 Agent / Agent Connector in Settings), tell the user to
-download the latest Quiet.md from https://quiet.md and open it once, then
-continue.
+If Quiet.md is not installed, its app has no `quiet` inside, or `quiet
+--version` is below 0.2.0 (versions without 连接 Agent / Agent Connector in
+Settings, which also lack commands the skill uses), tell the user to update to
+the latest Quiet.md from https://quiet.md and open it once, then continue.
 
 ## 2. Install the skill
 

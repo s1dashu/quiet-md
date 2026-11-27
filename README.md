@@ -135,6 +135,8 @@ On first launch, Quiet.md opens straight into a **Quiet Notes** folder in your D
 
 ## Use with AI agents
 
+> **Requires Quiet.md 0.2.0 or later.** Agent Connector and the `quiet` commands the skill relies on arrive in 0.2.0; earlier versions may not have `quiet` at all. If `quiet` isn't found, a command is unknown, or Settings has no Agent Connector, update to the latest Quiet.md from [quiet.md](https://quiet.md).
+
 Two pieces: the `quiet` command line tool, which ships inside the Quiet.md app, and the agent skill in [`skills/quiet-md`](skills/quiet-md/SKILL.md), which teaches the agent to use it.
 
 1. **Install the skill** with the [skills](https://github.com/vercel-labs/skills) CLI (needs Node.js):
