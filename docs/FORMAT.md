@@ -27,6 +27,7 @@ Quiet.md/
     ├── trash/index.json.v5 The FORMAT 5 trash index, kept after the move to 6
     ├── history/<id>/       Document body snapshots
     ├── history-trash/<id>/ Snapshots for trashed documents
+    ├── local/<device id>/files.json  This device's own: each listed file's number on its disk (inode, NTFS file index), birth time and size by id, so a file renamed in Finder, even while the app was closed, keeps its id and metadata (store `file_ids`). Never merged or read by another device; older versions ignore it
     ├── moving/             A copy on its way in from another top-level folder on another disk, or an original on its way out; whatever is left is removed by the next such move
     └── before-folders-4/   Pre-migration layout backup, removed after 30 days
 ```

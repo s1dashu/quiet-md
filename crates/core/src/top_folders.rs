@@ -986,7 +986,7 @@ mod tests {
     /// Renamed in the Finder: found by its inode where it turns up, the same id and pin.
     #[test]
     fn a_rename_in_the_finder_keeps_what_it_had() {
-        if !cfg!(unix) { return; }
+        if !cfg!(any(unix, windows)) { return; }
         let (mut tops, o, ko, ki) = nested();
         let ii = id_at(&mut tops, &ki, "note.md").unwrap();
         let top = id_at(&mut tops, &ko, "top.md").unwrap();
@@ -999,6 +999,97 @@ mod tests {
         assert!(list.iter().find(|e| e.id == ii).is_some_and(|e| e.meta.rel == "renamed.md" && e.meta.pinned));
         assert!(list.iter().find(|e| e.id == top).is_some_and(|e| e.meta.rel == "inner/top.md" && e.meta.pinned), "moved into a folder too");
         assert_eq!(list.iter().filter(|e| e.top == ki).count(), 2);
+    }
+
+    /// One top-level folder with `a.md` pinned and a folder `sub`, listed, then closed (the app quit).
+    fn closed_with_a_pin() -> (PathBuf, String) {
+        let o = canonical(&dir("again"));
+        crate::vfs::create_dir_all(o.join("sub")).unwrap();
+        crate::vfs::write(o.join("a.md"), "# a\n\nfirst\n").unwrap();
+        crate::vfs::write(o.join("sub").join("keep.md"), "# keep\n").unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let k = tops.add(&o).unwrap();
+        let a = id_at(&mut tops, &k, "a.md").unwrap();
+        tops.store(&k).unwrap().set_pinned(&a, true).unwrap();
+        // Saved by the app just before it quit: a new file (number) the table must know.
+        let mut d = tops.store(&k).unwrap().load(&a).unwrap();
+        d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("more")));
+        tops.store(&k).unwrap().save(&a, &d).unwrap();
+        (o, a)
+    }
+    /// The app started again: what it lists, by path.
+    fn reopened(o: &Path) -> Vec<Entry> {
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let k = tops.add(o).unwrap();
+        tops.list().into_iter().filter(|e| e.top == k).collect()
+    }
+    fn at<'a>(list: &'a [Entry], rel: &str) -> &'a Entry { list.iter().find(|e| e.meta.rel == rel).unwrap_or_else(|| panic!("{rel} not listed")) }
+    /// This computer's table of the files' numbers, edited as `f` says (standing in for what a test cannot make happen).
+    fn edit_table(o: &Path, a: &str, f: impl FnOnce(&mut crate::file_ids::FileId)) {
+        let local = o.join(".quiet").join("local");
+        let dev = crate::vfs::read_dir(&local).unwrap().flatten().next().unwrap().path();
+        let p = dev.join("files.json");
+        let mut t: crate::file_ids::Table = serde_json::from_slice(&crate::vfs::read(&p).unwrap()).unwrap();
+        f(&mut t.files.get_mut(a).unwrap().id);
+        crate::vfs::write(&p, serde_json::to_vec(&t).unwrap()).unwrap();
+    }
+
+    /// Renamed and moved in the Finder while the app was closed: the next start finds it by
+    /// the table in `.quiet/local/`, the same id and pin.
+    #[test]
+    fn a_rename_while_closed_keeps_what_it_had() {
+        if !cfg!(any(unix, windows)) { return; }
+        let (o, a) = closed_with_a_pin();
+        crate::vfs::rename(o.join("a.md"), o.join("sub").join("renamed.md")).unwrap();
+        let list = reopened(&o);
+        let e = at(&list, "sub/renamed.md");
+        assert!(e.id == a && e.meta.pinned, "{e:?}");
+        assert!(list.iter().all(|e| e.meta.rel != "a.md"));
+    }
+
+    /// The deleted file's number given to a new one (`edit_table` makes the table say so): not
+    /// inherited, as it was made at another time. With the time it was made, it would be.
+    #[test]
+    fn a_number_used_again_is_not_inherited() {
+        if !cfg!(any(unix, windows)) { return; }
+        let (o, a) = closed_with_a_pin();
+        crate::vfs::remove_file(o.join("a.md")).unwrap();
+        crate::vfs::write(o.join("new.md"), "# new\n").unwrap();
+        let now = crate::file_ids::of(&o.join("new.md"), &crate::vfs::metadata(o.join("new.md")).unwrap()).unwrap();
+        edit_table(&o, &a, |f| { f.dev = now.dev; f.ino = now.ino; f.born = now.born.map(|b| b + 1_000_000_000); f.size = now.size; });
+        let list = reopened(&o);
+        assert!(at(&list, "new.md").id != a && !at(&list, "new.md").meta.pinned);
+        assert!(list.iter().all(|e| e.id != a && !e.meta.pinned));
+        // The same, made at the time it says: that is the file renamed, and it keeps the pin.
+        let (o, a) = closed_with_a_pin();
+        crate::vfs::rename(o.join("a.md"), o.join("moved.md")).unwrap();
+        let now = crate::file_ids::of(&o.join("moved.md"), &crate::vfs::metadata(o.join("moved.md")).unwrap()).unwrap();
+        edit_table(&o, &a, |f| { f.born = now.born; });
+        let list = reopened(&o);
+        assert!(at(&list, "moved.md").id == a && at(&list, "moved.md").meta.pinned);
+    }
+
+    /// Deleted, and a new file of the same name made elsewhere: a new file, nothing inherited.
+    #[test]
+    fn a_new_file_of_the_same_name_is_not_inherited() {
+        let (o, a) = closed_with_a_pin();
+        crate::vfs::remove_file(o.join("a.md")).unwrap();
+        crate::vfs::write(o.join("sub").join("a.md"), "# a\n\nfirst\n").unwrap();
+        let list = reopened(&o);
+        assert!(at(&list, "sub/a.md").id != a && !at(&list, "sub/a.md").meta.pinned);
+        assert!(list.iter().all(|e| !e.meta.pinned));
+    }
+
+    /// Moved to another disk and one with the same number brought in: another disk's file (the
+    /// table says the number was on another `dev`), nothing inherited.
+    #[test]
+    fn a_file_from_another_disk_is_not_taken_for_one_renamed() {
+        if !cfg!(any(unix, windows)) { return; }
+        let (o, a) = closed_with_a_pin();
+        crate::vfs::rename(o.join("a.md"), o.join("b.md")).unwrap();
+        edit_table(&o, &a, |f| f.dev = f.dev.wrapping_add(1));
+        let list = reopened(&o);
+        assert!(at(&list, "b.md").id != a && !at(&list, "b.md").meta.pinned);
     }
 
     /// A folder deleted through the outer one that is the inner top-level folder: off the

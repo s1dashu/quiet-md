@@ -32,6 +32,10 @@ sha1_smol = "1.0"
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rusqlite = { version = "0.43", features = ["bundled"] }
 
+# file_ids: a file's NTFS index (GetFileInformationByHandle), what an inode is elsewhere.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { version = "1.28.0", features = ["v4", "js"] }
 js-sys = "0.3"
