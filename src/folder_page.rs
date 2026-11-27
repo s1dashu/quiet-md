@@ -658,6 +658,7 @@ impl Workspace {
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
+        let _s = crate::devtools::span("thumb-miss");
         // The derived rows exist only in this preview tree and never enter the editor/store.
         fn subpages(blocks: &mut [crate::model::Block], entries: &[&Entry], budget: &mut usize) {
             for b in blocks {

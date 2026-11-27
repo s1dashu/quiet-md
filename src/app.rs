@@ -589,6 +589,7 @@ impl Workspace {
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
+                let _s = crate::devtools::span("activate");
                 if window.is_window_active() {
                     if let Some(id) = &this.current { crate::quick_note::used(id, cx); }
                     // Several windows share one top-level folder in front: the one coming forward
@@ -656,7 +657,7 @@ impl Workspace {
                 bg.timer(Duration::from_secs(2)).await;
                 // A top-level folder gone from the disk leaves the sidebar (and nothing is written
                 // there any more); one that is back returns.
-                if this.update(cx, |w, cx| w.check_folders(cx)).is_err() { break }
+                if this.update(cx, |w, cx| { let _s = crate::devtools::span("check-folders"); w.check_folders(cx) }).is_err() { break }
                 let now = shape(dirs(cx)).await;
                 let Ok(path) = this.update(cx, |w, _| w.current.as_ref()
                     .filter(|id| !w.store.file_task_busy() && !w.tree_writes_pending() && w.store.kind(id) != crate::store::DocKind::Table)
@@ -667,7 +668,7 @@ impl Workspace {
                     Some((path, meta.modified().ok()?, meta.len()))
                 }).await;
                 if file != last_file {
-                    let Ok(settled) = this.update(cx, |w, cx| w.refresh_external(None, cx)) else { break };
+                    let Ok(settled) = this.update(cx, |w, cx| { let _s = crate::devtools::span("refresh-external"); w.refresh_external(None, cx) }) else { break };
                     last_file = if settled { file } else { None };
                 }
                 if now == last { continue }
@@ -689,7 +690,7 @@ impl Workspace {
             loop {
                 cx.background_executor().timer(Duration::from_secs(15)).await;
                 let now = crate::time::now_ms() as i64;
-                if this.update(cx, |w, cx| w.check_reminders(last, now, cx)).is_err() {
+                if this.update(cx, |w, cx| { let _s = crate::devtools::span("reminders"); w.check_reminders(last, now, cx) }).is_err() {
                     break;
                 }
                 last = now;
@@ -891,6 +892,7 @@ impl Workspace {
         cx.spawn(async move |this, cx| {
             let done = task.await;
             let _ = this.update(cx, |w, cx| {
+                let _s = crate::devtools::span("relist-adopt");
                 let entries = w.store.end_relist(done);
                 // Not mid-rename: the row under the field would be rebuilt; the next look brings it.
                 if w.rename.is_some() || w.move_dlg.is_some() { return }
@@ -912,6 +914,7 @@ impl Workspace {
 
     /// Most recently modified first.
     pub(crate) fn sort(&mut self) {
+        let _s = crate::devtools::span("sort");
         self.reapply_pending_tree_writes();
         self.entries.edit().sort_by(|a, b| b.meta.modified.cmp(&a.meta.modified).then_with(|| a.id.cmp(&b.id)));
         self.sync_note_rows();
@@ -2072,6 +2075,7 @@ pub(crate) const HEADER_ACTIONS_GAP: f32 = 2.;
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::devtools::frame_begin();
         // No page picked: the default folder's page; with no folder open, the empty state.
         if self.view == View::Default && let Some(row) = self.default_folder() {
             self.folder_current = Some(row.clone());
@@ -2400,6 +2404,7 @@ impl Render for Workspace {
             .children(crumb_menu)
             .children(forced_update)
             .children(toast)
+            .children(crate::devtools::frame_probe())
     }
 }
 

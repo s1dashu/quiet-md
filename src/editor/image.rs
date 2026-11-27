@@ -238,7 +238,7 @@ pub fn init_pictures(cx: &mut App) {
     let e = cx.new(|cx: &mut Context<DocImages>| {
         cx.spawn(async |this, cx| loop {
             cx.background_executor().timer(Duration::from_secs(2)).await;
-            if this.update(cx, |c, cx| c.sweep(cx)).is_err() { break }
+            if this.update(cx, |c, cx| { let _s = crate::devtools::span("image-sweep"); c.sweep(cx) }).is_err() { break }
         }).detach();
         DocImages(Rc::default(), 0)
     });

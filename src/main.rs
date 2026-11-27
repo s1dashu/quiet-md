@@ -32,6 +32,9 @@ mod devtools {
     pub fn rows_begin(_: &gpui::Window) {}
     pub fn row_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
     pub fn anchor_probe(_: impl Into<gpui::SharedString>) -> Option<gpui::AnyElement> { None }
+    pub fn frame_begin() {}
+    pub fn frame_probe() -> Option<gpui::AnyElement> { None }
+    pub fn span(_: &'static str) -> Option<()> { None }
 }
 mod design;
 mod docinfo;

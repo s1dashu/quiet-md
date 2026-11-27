@@ -321,6 +321,7 @@ pub(crate) fn follow_folder_list(cx: &mut App) {
         cx.background_executor().timer(std::time::Duration::from_secs(2)).await;
         let Some(now) = cx.background_executor().spawn(async { fdl_core::top_folders::TopFolders::listed_now() }).await else { continue };
         cx.update(|cx| {
+            let _s = crate::devtools::span("folders-json");
             let mut store = cx.global::<crate::shared_store::SharedStore>().clone();
             if store.file_task_busy() || store.loading() { return }
             let (added, removed) = store.changed_elsewhere(&now);

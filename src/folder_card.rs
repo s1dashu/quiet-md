@@ -307,6 +307,7 @@ impl Workspace {
         let key = self.entries.generation();
         let mut p = self.folder_page.folders.papers.borrow_mut();
         if p.key != Some(key) {
+            let _s = crate::devtools::span("papers-index");
             let mut children: HashMap<String, Vec<usize>> = HashMap::new();
             for (i, e) in self.entries.iter().enumerate() {
                 if let Some(parent) = &e.meta.parent { children.entry(parent.clone()).or_default().push(i); }
