@@ -2099,7 +2099,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "搜索目标位置" => "Search destinations",
         "移动成功" => "Moved successfully",
         "无搜索结果" => "No results",
-        "从 我的文档 移动到" => "Move from My documents to",
+        "移动到…" => "Move to…",
         "信息与数据" => "Information and data",
         "概览" => "Overview",
         "最近修改" => "Last modified",
