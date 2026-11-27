@@ -1644,6 +1644,11 @@ impl Store {
         *self.synced.borrow_mut() = Some(Synced { read, local: self.local_stamp(), index: self.index.clone(), foreign: self.foreign.clone(), trash: self.trash.clone(), whole, absent });
     }
 
+    /// This computer's file just written from memory: memory still holds what the disk says.
+    fn local_written(&self) {
+        if let Some(s) = self.synced.borrow_mut().as_mut() { s.local = self.local_stamp(); }
+    }
+
     /// This computer's file about the library as `meta::files` sees a device file.
     fn local_stamp(&self) -> Option<meta::Seen> { meta::seen_now(&self.local_file()) }
 
@@ -2168,7 +2173,7 @@ impl Store {
         let scroll = std::mem::take(&mut self.view.get_mut().scroll);
         // The times stay pending until written: `begin_write` puts them back on the re-read index.
         let opened = if self.view.get_mut().opened.is_empty() { Ok(()) } else {
-            self.begin_write().and_then(|_lock| if self.flat { self.save_index() } else { self.save_local(&self.local_state()) })
+            self.begin_write().and_then(|_lock| if self.flat { self.save_index() } else { self.save_local(&self.local_state()).map(|()| self.local_written()) })
                 .map(|()| self.view.get_mut().opened.clear())
         };
         if scroll.is_empty() { return opened }
@@ -3954,9 +3959,14 @@ impl Store {
     /// next [`Self::flush_view_state`] or with any other write of the index.
     pub fn touch(&mut self, id: &str) -> Option<Meta> {
         let m = self.index.get_mut(id)?;
+        let was = m.clone();
         m.opened = now();
         let m = m.clone();
         self.view.get_mut().opened.insert(id.to_string(), m.opened);
+        // Reading the disk again would give this time back too (`begin_write` lays the pending
+        // times on what it read): memory is still what the disk says, and the next write reads
+        // nothing (it read every device's file again, 25-85 ms for 15,000 notes, on every open).
+        if let Some(s) = self.synced.get_mut().as_mut() && s.index.get(id) == Some(&was) { s.index.insert(id.to_string(), m.clone()); }
         Some(m)
     }
 
@@ -5035,6 +5045,29 @@ mod tests {
         assert_eq!(loads(), n + 1);
         a.list();
         assert_eq!(loads(), n + 1);
+    }
+
+    /// Opening pages (`touch`) and writing what was opened when (`flush_view_state`) leave
+    /// memory as the disk says: the writes after them read no device's file again.
+    #[test]
+    fn opening_pages_reads_nothing_again() {
+        let lib = Lib::new("meta-touch");
+        let mut a = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        let (x, y) = (a.create_from(&doc("甲")).unwrap(), a.create_from(&doc("乙")).unwrap());
+        a.list();
+        let n = loads();
+        for _ in 0..3 {
+            a.touch(&x).unwrap();
+            a.flush_view_state().unwrap();
+            a.touch(&y).unwrap();
+            a.set_width(&y, PageWidth::Wide).unwrap();
+            a.flush_view_state().unwrap();
+        }
+        assert_eq!(loads(), n, "opening pages: nothing read again");
+        // The times are written: a store opened afresh has them.
+        let opened = a.list().into_iter().find(|e| e.id == y).unwrap().meta.opened;
+        let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("aaaa")).unwrap();
+        assert_eq!(b.list().into_iter().find(|e| e.id == y).unwrap().meta.opened, opened);
     }
 
     /// A code folder lists its notes only (docs/FORMAT.md, "What a folder shows"):

@@ -105,9 +105,9 @@ impl Workspace {
         self.editor = None;
         self.current = None;
         if self.folder_current.as_deref() != Some(id) { self.reset_folder_scroll(); }
-        if let Some(meta) = self.store.touch(id) && let Some(entry) = self.entries.edit().iter_mut().find(|e| e.id == id) { entry.meta = meta; }
+        if let Some(meta) = { let _s = crate::devtools::span("folder-touch"); self.store.touch(id) } && let Some(entry) = self.entries.edit().iter_mut().find(|e| e.id == id) { entry.meta = meta; }
         self.schedule_view_state(cx);
-        if self.manual_page_sort() { self.prepare_manual_order(cx); }
+        if self.manual_page_sort() { let _s = crate::devtools::span("manual-order"); self.prepare_manual_order(cx); }
         self.folder_current = Some(id.to_string());
         self.view = View::Folder;
         self.row_menu = None;
