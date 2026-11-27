@@ -1749,11 +1749,15 @@ impl Workspace {
     /// linking to it (双向链接).
     pub(crate) fn sync_links(&mut self, cx: &mut Context<Self>) {
         let (Some(id), Some(ed)) = (self.current.clone(), self.editor.clone()) else { return };
+        // A file in two nested top-level folders is offered once, as the open document's top-level folder has it.
+        let twins = self.store.twins(&self.entries, &self.store.top_of(&id).unwrap_or_default());
         let docs = self
             .entries
             .iter()
+            .zip(&twins)
             // A folder with a 正文 is mentioned as that document (#357).
-            .filter(|e| e.note.is_none())
+            .filter(|(e, twin)| e.note.is_none() && !**twin)
+            .map(|(e, _)| e)
             .map(|e| crate::editor::links::DocRef { id: e.id.clone(), title: e.title.clone(), icon: e.icon.clone(), folder: e.meta.folder.is_some(), modified: e.meta.modified, opened: e.meta.opened })
             .collect();
         let backlinks = self

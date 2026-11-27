@@ -1043,14 +1043,13 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("下载后可预览", "İndirdikten sonra önizleme"),
     ("其他语言和符号（{}）", "Diğer yazılar ve simgeler ({})"),
     // 工作区 (docs/design/workspaces.md)
-    ("这个文件夹已经在侧栏的文件夹里", "Bu klasör zaten kenar çubuğundaki bir klasörün içinde"),
+    ("请分别添加文稿、桌面等文件夹", "Belgeler, Masaüstü gibi klasörleri ayrı ayrı ekleyin"),
     ("文件夹名不能为空", "Klasör adı boş olamaz"),
     ("没有权限给这个文件夹改名", "Bu klasörü yeniden adlandırma izniniz yok"),
     ("这个文件夹不能改名", "Bu klasör yeniden adlandırılamaz"),
     ("重新查找", "Yeniden ara"),
     ("从侧栏移除", "Kenar çubuğundan kaldır"),
     ("还没有打开任何文件夹。笔记就是文件夹里的文件。", "Henüz açık klasör yok. Notlarınız bir klasördeki dosyalardır."),
-    ("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "Bu klasör zaten açık olan “{}” klasörünü içeriyor; önce onu kenar çubuğundan kaldırın"),
     ("已经有一个叫「{}」的文件夹", "“{}” adlı bir klasör zaten var"),
     ("文件夹改名失败：{}", "Klasör yeniden adlandırılamadı: {}"),
     ("无法在这里创建文件夹：", "Klasör burada oluşturulamıyor: "),
@@ -1530,6 +1529,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Windows ve Linux’ta yapıştırma biçimi korur; her kısayol temizlenebilir"),
     // 移到另一个顶层文件夹
     ("已在这个文件夹里", "Zaten bu klasörde"),
+    ("不能移动到自身或后代文件夹中", "Bir klasör kendi içine veya içindeki bir klasöre taşınamaz"),
     ("已存在同名文件：{}", "Bu adda bir dosya zaten var: {}"),
     ("文档或文件夹不存在", "Bu sayfa ya da klasör artık yok"),
     ("旧格式的文档库没有真实文件夹", "Önce kitaplığı gerçek klasörlere dönüştürün"),

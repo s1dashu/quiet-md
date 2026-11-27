@@ -55,17 +55,17 @@ pub fn folders(a: &Args, out: &mut String) -> R<()> {
             let raw = pos.next().ok_or_else(|| fail("usage", "folders add needs a folder: quiet folders add PATH"))?;
             let dir = std::path::absolute(raw).map_err(|e| fail("bad_args", format!("{raw}: {e}")))?;
             if !dir.is_dir() { return Err(fail("not_found", format!("{} is not a folder", dir.display())).hint("make it first (mkdir), or check the path")); }
-            if fdl_core::top_folders::too_broad(&dir) {
-                return Err(fail("too_broad", format!("{} is a disk's top, the home folder or a system folder", dir.display())).hint("add the folder your notes are in, e.g. ~/Documents/Notes"));
-            }
             let mut tops = top_folders(true)?;
             let name = |tops: &TopFolders, k: &str| tops.folder(k).map(|r| format!("{} ({})", r.name(), r.path.display())).unwrap_or_default();
+            // Inside an open top-level folder or holding one is fine: a view of its own of the same files.
             match tops.check(&dir) {
                 Ok(_) => {}
                 Err(AddError::Open(k)) => return Err(fail("already_open", format!("{} is already open", name(&tops, &k))).hint("`quiet folders` lists what is open")),
-                Err(AddError::Inside(k)) => return Err(fail("inside_open", format!("{} is inside {}, which is open: it is listed there already", dir.display(), name(&tops, &k))).hint(format!("`quiet ls {}` shows it", tops.folder(&k).map(|r| r.name()).unwrap_or_default()))),
-                Err(AddError::Holds(k)) => return Err(fail("holds_open", format!("{} holds {}, which is open", dir.display(), name(&tops, &k))).hint("remove that one first (`quiet folders remove`), then add this one")),
+                Err(AddError::TooBroad) => return Err(fail("too_broad", format!("{} is a disk's top or the home folder", dir.display())).hint("add Documents, Desktop and other folders one at a time")),
                 Err(AddError::Other(e)) => return Err(fail("io", e)),
+            }
+            if fdl_core::top_folders::too_broad(&dir) {
+                return Err(fail("too_broad", format!("{} is a system folder", dir.display())).hint("add the folder your notes are in, e.g. ~/Documents/Notes"));
             }
             // As 添加文件夹 asks first about a code project or a very big folder: here --force says yes.
             if !dir.join(INTERNAL).exists() && !a.has("force") {

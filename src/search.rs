@@ -189,6 +189,8 @@ struct Hits {
     q: String,
     /// Indices into the entries: title hits, then body hits, each in list order.
     rows: Vec<usize>,
+    /// The entries left out as twins of others (`SharedStore::twins`).
+    twins: Vec<bool>,
     /// Each row's height in the 界面字体 it was measured in on first render.
     heights: Option<(&'static str, Vec<f32>)>,
 }
@@ -211,14 +213,14 @@ impl SearchCache {
         self.generation += 1;
     }
 
-    /// The hits for `q` (lowercase, not empty) among `entries`.
-    fn rows(&mut self, entries: &[Entry], q: &str) -> &mut Hits {
+    /// The hits for `q` (lowercase, not empty) among `entries`, but `twins`.
+    fn rows(&mut self, entries: &[Entry], q: &str, twins: Vec<bool>) -> &mut Hits {
         self.sync(entries);
-        if !matches!(&self.hits, Some(h) if h.generation == self.generation && h.q == q) {
+        if !matches!(&self.hits, Some(h) if h.generation == self.generation && h.q == q && h.twins == twins) {
             let (mut rows, mut body) = (vec![], vec![]);
             for (i, d) in self.docs.iter().enumerate() {
                 // A folder with a 正文 is found as that document (#357), not twice.
-                if entries[i].note.is_some() { continue; }
+                if entries[i].note.is_some() || twins[i] { continue; }
                 if d.title_l().contains(q) {
                     rows.push(i)
                 } else if d.body_l().contains(q) {
@@ -226,7 +228,7 @@ impl SearchCache {
                 }
             }
             rows.extend(body);
-            self.hits = Some(Hits { generation: self.generation, q: q.into(), rows, heights: None });
+            self.hits = Some(Hits { generation: self.generation, q: q.into(), rows, twins, heights: None });
         }
         self.hits.as_mut().unwrap()
     }
@@ -429,22 +431,25 @@ impl Workspace {
 
     /// [`Self::search_results`] as indices into `entries`.
     fn search_rows(&self, q: &str) -> Vec<usize> {
+        // A file in two nested top-level folders is one row: the active one's (workspaces.md 2.6).
+        let twins = self.store.twins(&self.entries, &self.store.active_top().unwrap_or_default());
         if q.is_empty() {
             // An attachment opened in its own window belongs to its page, not to 最近浏览.
-            let mut recent: Vec<usize> = (0..self.entries.len()).filter(|&i| self.entries[i].note.is_none() && !self.entries[i].meta.attachment()).collect();
+            let mut recent: Vec<usize> = (0..self.entries.len()).filter(|&i| self.entries[i].note.is_none() && !self.entries[i].meta.attachment() && !twins[i]).collect();
             recent.sort_by_key(|&i| std::cmp::Reverse(self.entries[i].meta.opened.max(self.entries[i].meta.modified)));
             recent.truncate(RECENT);
             return recent;
         }
-        self.search_cache.borrow_mut().rows(&self.entries, q).rows.clone()
+        self.search_cache.borrow_mut().rows(&self.entries, q, twins).rows.clone()
     }
 
     /// Each hit row's height for `q` (not empty): the summary's line count
     /// decides it, so only rows near the view need building.
     fn search_heights(&self, q: &str, window: &Window) -> Vec<f32> {
+        let twins = self.store.twins(&self.entries, &self.store.active_top().unwrap_or_default());
         let mut cache = self.search_cache.borrow_mut();
         let cache = &mut *cache;
-        if let Some((font, h)) = &cache.rows(&self.entries, q).heights && *font == theme::ui_family() {
+        if let Some((font, h)) = &cache.rows(&self.entries, q, twins).heights && *font == theme::ui_family() {
             return h.clone();
         }
         let SearchCache { docs, hits, ascii, .. } = cache;
@@ -689,37 +694,41 @@ mod tests {
         ];
         let mut cache = SearchCache::default();
         for q in ["apple", "äp", "ä", "苹果", "e", "zzz"] {
-            assert_eq!(cache.rows(&entries, q).rows, reference(&entries, q), "{q}");
+            assert_eq!(cache.rows(&entries, q, vec![false; entries.len()]).rows, reference(&entries, q), "{q}");
         }
-        assert_eq!(cache.rows(&entries, "apple").rows, [1, 4, 0, 2, 5]);
+        assert_eq!(cache.rows(&entries, "apple", vec![false; entries.len()]).rows, [1, 4, 0, 2, 5]);
+        // A twin through a nested top-level folder is left out, and found again once it is not one.
+        let twins = vec![false, false, false, false, true, false];
+        assert_eq!(cache.rows(&entries, "apple", twins).rows, [1, 0, 2, 5]);
+        assert_eq!(cache.rows(&entries, "apple", vec![false; entries.len()]).rows, [1, 4, 0, 2, 5]);
     }
 
     #[test]
     fn hits_follow_library_changes() {
         let mut entries = vec![entry("a", "One", "alpha"), entry("b", "Two", "beta")];
         let mut cache = SearchCache::default();
-        assert_eq!(cache.rows(&entries, "beta").rows, [1]);
-        cache.rows(&entries, "beta").heights = Some(("", vec![58.]));
+        assert_eq!(cache.rows(&entries, "beta", vec![false; entries.len()]).rows, [1]);
+        cache.rows(&entries, "beta", vec![false; entries.len()]).heights = Some(("", vec![58.]));
         let generation = cache.generation;
         // The same text in new allocations (a fresh `Store::list`) keeps the hits.
         let fresh: Vec<Entry> = entries.iter().map(|e| entry(&e.id, &e.title, e.body.as_ref())).collect();
-        assert!(cache.rows(&fresh, "beta").heights.is_some());
+        assert!(cache.rows(&fresh, "beta", vec![false; fresh.len()]).heights.is_some());
         assert_eq!(cache.generation, generation);
         // An edited body, a renamed title, an added and a removed document each drop them.
         entries[0].body = "alpha beta".into();
-        assert_eq!(cache.rows(&entries, "beta").rows, [0, 1]);
-        assert!(cache.rows(&entries, "beta").heights.is_none());
+        assert_eq!(cache.rows(&entries, "beta", vec![false; entries.len()]).rows, [0, 1]);
+        assert!(cache.rows(&entries, "beta", vec![false; entries.len()]).heights.is_none());
         entries[1].title = "Beta".into();
-        assert_eq!(cache.rows(&entries, "beta").rows, [1, 0]);
+        assert_eq!(cache.rows(&entries, "beta", vec![false; entries.len()]).rows, [1, 0]);
         entries.insert(0, entry("c", "Gamma", "BETA"));
-        assert_eq!(cache.rows(&entries, "beta").rows, [2, 0, 1]);
+        assert_eq!(cache.rows(&entries, "beta", vec![false; entries.len()]).rows, [2, 0, 1]);
         entries.remove(2);
-        assert_eq!(cache.rows(&entries, "beta").rows, [0, 1]);
-        assert_eq!(cache.rows(&entries, "gamma").rows, [0]);
+        assert_eq!(cache.rows(&entries, "beta", vec![false; entries.len()]).rows, [0, 1]);
+        assert_eq!(cache.rows(&entries, "gamma", vec![false; entries.len()]).rows, [0]);
         // Reordered (sorted by modification) entries map to their new places.
         entries.reverse();
-        assert_eq!(cache.rows(&entries, "gamma").rows, [1]);
-        assert_eq!(cache.rows(&[], "gamma").rows, Vec::<usize>::new());
+        assert_eq!(cache.rows(&entries, "gamma", vec![false; entries.len()]).rows, [1]);
+        assert_eq!(cache.rows(&[], "gamma", vec![]).rows, Vec::<usize>::new());
     }
 
     #[test]

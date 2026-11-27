@@ -491,7 +491,11 @@ impl Onboarding {
         let siyuan: Vec<(PathBuf, Option<String>)> = self.imports().into_iter().filter(|(p, _)| fdl_core::siyuan::recognizes(p)).collect();
         let others: Vec<PathBuf> = self.open.iter().cloned().chain(if self.copy && new_top.is_some() { vec![] } else { self.imports().into_iter().map(|(p, _)| p).filter(|p| !siyuan.iter().any(|(s, _)| s == p)).collect() }).collect();
         for d in others {
-            if let Err(e) = tops.add(&d) && !matches!(e, fdl_core::top_folders::AddError::Open(_) | fdl_core::top_folders::AddError::Inside(_)) { failed.push(format!("{}：{e}", short_path(&d))); }
+            match tops.add(&d) {
+                Ok(_) | Err(fdl_core::top_folders::AddError::Open(_)) => {}
+                Err(fdl_core::top_folders::AddError::TooBroad) => failed.push(format!("{}：{}", short_path(&d), tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"))),
+                Err(e) => failed.push(format!("{}：{e}", short_path(&d))),
+            }
         }
         PENDING.store(false, Ordering::Relaxed);
         let target = new_top.clone();

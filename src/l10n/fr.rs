@@ -1074,14 +1074,13 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("下载后可预览", "Aperçu après téléchargement"),
     ("其他语言和符号（{}）", "Autres écritures et symboles ({})"),
     // 工作区 (docs/design/workspaces.md)
-    ("这个文件夹已经在侧栏的文件夹里", "Ce dossier se trouve déjà dans un dossier de la barre latérale"),
+    ("请分别添加文稿、桌面等文件夹", "Ajoutez séparément Documents, Bureau ou d’autres dossiers"),
     ("文件夹名不能为空", "Le nom du dossier ne peut pas être vide"),
     ("没有权限给这个文件夹改名", "Vous n’avez pas l’autorisation de renommer ce dossier"),
     ("这个文件夹不能改名", "Ce dossier ne peut pas être renommé"),
     ("重新查找", "Chercher à nouveau"),
     ("从侧栏移除", "Retirer de la barre latérale"),
     ("还没有打开任何文件夹。笔记就是文件夹里的文件。", "Aucun dossier n’est encore ouvert. Vos notes sont les fichiers d’un dossier."),
-    ("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "Ce dossier contient « {} », déjà ouvert ; retirez-le d’abord de la barre latérale"),
     ("已经有一个叫「{}」的文件夹", "Un dossier nommé « {} » existe déjà"),
     ("文件夹改名失败：{}", "Impossible de renommer le dossier : {}"),
     ("无法在这里创建文件夹：", "Impossible de créer le dossier ici : "),
@@ -1530,6 +1529,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Le collage garde la mise en forme sous Windows et Linux ; tout raccourci peut être effacé"),
     // 移到另一个顶层文件夹
     ("已在这个文件夹里", "Déjà dans ce dossier"),
+    ("不能移动到自身或后代文件夹中", "Un dossier ne peut pas aller dans lui-même ni dans un dossier qu’il contient"),
     ("已存在同名文件：{}", "Un fichier de ce nom existe déjà : {}"),
     ("文档或文件夹不存在", "Cette page ou ce dossier n’est plus là"),
     ("旧格式的文档库没有真实文件夹", "Convertissez d’abord la bibliothèque en vrais dossiers"),

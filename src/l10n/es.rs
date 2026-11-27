@@ -991,14 +991,13 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("下载后可预览", "Vista previa tras descargar"),
     ("其他语言和符号（{}）", "Otras escrituras y símbolos ({})"),
     // 工作区 (docs/design/workspaces.md)
-    ("这个文件夹已经在侧栏的文件夹里", "Esta carpeta ya está dentro de una carpeta de la barra lateral"),
+    ("请分别添加文稿、桌面等文件夹", "Añade por separado Documentos, Escritorio u otras carpetas"),
     ("文件夹名不能为空", "El nombre de la carpeta no puede estar vacío"),
     ("没有权限给这个文件夹改名", "No tienes permiso para cambiar el nombre de esta carpeta"),
     ("这个文件夹不能改名", "No se puede cambiar el nombre de esta carpeta"),
     ("重新查找", "Buscar de nuevo"),
     ("从侧栏移除", "Quitar de la barra lateral"),
     ("还没有打开任何文件夹。笔记就是文件夹里的文件。", "Aún no hay ninguna carpeta abierta. Tus notas son los archivos de una carpeta."),
-    ("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "Esta carpeta contiene «{}», que ya está abierta; quítala primero de la barra lateral"),
     ("已经有一个叫「{}」的文件夹", "Ya existe una carpeta llamada «{}»"),
     ("文件夹改名失败：{}", "No se pudo cambiar el nombre de la carpeta: {}"),
     ("无法在这里创建文件夹：", "No se puede crear la carpeta aquí: "),
@@ -1519,6 +1518,7 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Pegar conserva el formato en Windows y Linux; cualquier atajo se puede borrar"),
     // 移到另一个顶层文件夹
     ("已在这个文件夹里", "Ya está en esta carpeta"),
+    ("不能移动到自身或后代文件夹中", "Una carpeta no se puede mover a sí misma ni a una carpeta que contiene"),
     ("已存在同名文件：{}", "Ya hay un archivo con este nombre: {}"),
     ("文档或文件夹不存在", "Esta página o carpeta ya no está"),
     ("旧格式的文档库没有真实文件夹", "Pasa primero la biblioteca a carpetas reales"),

@@ -10,7 +10,7 @@ use crate::ui::ToastKind;
 use fdl_core::top_folders::{AddError, RenameError};
 use fdl_core::shown::Survey;
 use gpui::{prelude::FluentBuilder, *};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// "在访达中显示", in the system's words.
 pub(crate) fn show_in_files() -> &'static str {
@@ -46,7 +46,9 @@ impl Workspace {
     /// added for the first time is looked at first, off the main thread: a code
     /// project or a very big one is added only once the user says so (`Confirm::AddFolder`).
     pub(crate) fn add_folders(&mut self, dirs: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
-        let dirs = dirs.to_vec();
+        // A disk's top or the home folder is refused before it is looked through (it would be asked about as a very big one).
+        let (broad, dirs): (Vec<PathBuf>, Vec<PathBuf>) = dirs.iter().cloned().partition(|d| self.store.check_folder(d) == Err(AddError::TooBroad));
+        if !broad.is_empty() { self.add_failed(AddError::TooBroad, cx); }
         let task = cx.background_executor().spawn(async move {
             dirs.into_iter().map(|d| { let s = if d.join(crate::store::INTERNAL).exists() { Survey::Plain } else { fdl_core::shown::survey(&d) }; (d, s) }).collect::<Vec<_>>()
         });
@@ -77,7 +79,7 @@ impl Workspace {
                     let msg = crate::localized_format!("已打开「{}」：在原位置使用，没有复制", "Opened “{}”: used where it is, not copied", self.folder_name(&key));
                     self.show_toast(&msg, cx);
                 }
-                Err(e) => self.add_failed(d, e, window, cx),
+                Err(e) => self.add_failed(e, cx),
             }
         }
     }
@@ -95,22 +97,11 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A folder that is already open, or inside one: shown there instead.
-    fn add_failed(&mut self, dir: &Path, e: AddError, window: &mut Window, cx: &mut Context<Self>) {
+    /// A folder that is already open: shown there instead.
+    fn add_failed(&mut self, e: AddError, cx: &mut Context<Self>) {
         match e {
             AddError::Open(key) => { self.folded_tops.remove(&key); cx.notify(); }
-            AddError::Inside(key) => {
-                self.folded_tops.remove(&key);
-                self.entries.set(self.store.list());
-                self.sort();
-                let found = self.entries.iter().find(|e| e.top == key && e.meta.folder.is_some() && self.store.folder_dir(Some(&e.id)).is_some_and(|p| p == dir)).map(|e| e.id.clone());
-                if let Some(id) = found { self.reveal_in_tree(&id); self.open_folder(&id, window, cx); }
-                self.show_toast(tr("这个文件夹已经在侧栏的文件夹里", "This folder is already inside a folder in the sidebar"), cx);
-            }
-            AddError::Holds(key) => {
-                let name = self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1).unwrap_or_default();
-                self.show_toast_kind(ToastKind::Error, &crate::localized_format!("这个文件夹里有已经打开的「{}」，先把它从侧栏移除再打开", "This folder holds “{}”, which is already open; remove it from the sidebar first", name), cx);
-            }
+            AddError::TooBroad => self.show_toast_kind(ToastKind::Error, tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"), cx),
             AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法添加文件夹：{}", "Could not add folder: {}", crate::settings::diagnostic(&e)), cx),
         }
     }

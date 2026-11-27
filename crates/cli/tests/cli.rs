@@ -758,13 +758,19 @@ fn folders_add_list_and_remove() {
     let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(written["folders"].as_array().unwrap().len(), 2);
     assert!(folders_ok(&file, &["ls", "Notes"]).contains("a.md"), "its documents are listed at once");
-    // The app's checks: open already, inside one that is, holding one, not there, too broad.
+    // The app's checks: open already, not there, a disk's top or the home folder (with --dry-run: nothing is written even if it passed).
     let err = |args: &[&str]| { let o = folders_run(&file, args); assert!(!o.status.success(), "{args:?}"); String::from_utf8_lossy(&o.stderr).into_owned() };
     assert!(err(&["folders", "add", notes.to_str().unwrap()]).starts_with("error[already_open]"));
-    assert!(err(&["folders", "add", notes.join("sub").to_str().unwrap()]).starts_with("error[inside_open]"));
-    assert!(err(&["folders", "add", base.to_str().unwrap()]).starts_with("error[holds_open]"));
     assert!(err(&["folders", "add", base.join("nope").to_str().unwrap()]).starts_with("error[not_found]"));
-    assert!(err(&["folders", "add", "/"]).starts_with("error[too_broad]"));
+    assert!(err(&["folders", "add", "/", "--dry-run"]).starts_with("error[too_broad]"));
+    if let Some(home) = std::env::var_os("HOME") { assert!(err(&["folders", "add", home.to_str().unwrap(), "--dry-run"]).starts_with("error[too_broad]")); }
+    // Inside an open one, or holding one: added, a view of its own of the same files.
+    let sub = notes.join("sub");
+    std::fs::write(sub.join("b.md"), "# B\n").unwrap();
+    assert_eq!(folders_json(&file, &["folders", "add", sub.to_str().unwrap()])["added"]["name"], "sub");
+    assert!(sub.join(".quiet").is_dir() && folders_ok(&file, &["ls", "sub"]).contains("b.md") && folders_ok(&file, &["ls", "Notes/sub"]).contains("b.md"));
+    assert!(folders_ok(&file, &["folders", "add", base.to_str().unwrap(), "--dry-run", "--force"]).starts_with("would add"));
+    folders_ok(&file, &["folders", "remove", sub.to_str().unwrap()]);
     // A code project asks first; --force adds it.
     let code = base.join("code");
     std::fs::create_dir_all(&code).unwrap();

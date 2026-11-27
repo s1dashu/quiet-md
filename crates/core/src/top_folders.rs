@@ -47,21 +47,21 @@ impl TopFolder {
     }
 }
 
-/// Why a folder could not be added.
+/// Why a folder could not be added. A folder inside an open top-level folder, or
+/// holding one, may be: it is a view of its own of the same files (each keeps its
+/// own `.quiet/`, and the outer one never reads the inner one's).
 #[derive(Debug, PartialEq)]
 pub enum AddError {
     /// Already open as this top-level folder.
     Open(String),
-    /// Inside this open top-level folder: it is listed there already.
-    Inside(String),
-    /// Holds this open top-level folder: two indexes would keep the same files.
-    Holds(String),
+    /// A disk's top or the home folder: everything on it would be listed.
+    TooBroad,
     Other(String),
 }
 
 impl std::fmt::Display for AddError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { AddError::Open(_) => write!(f, "这个文件夹已经打开"), AddError::Inside(_) => write!(f, "这个文件夹已经在打开的文件夹里"), AddError::Holds(_) => write!(f, "这个文件夹里有已经打开的文件夹"), AddError::Other(e) => write!(f, "{e}") }
+        match self { AddError::Open(_) => write!(f, "这个文件夹已经打开"), AddError::TooBroad => write!(f, "请分别添加文稿、桌面等文件夹"), AddError::Other(e) => write!(f, "{e}") }
     }
 }
 
@@ -211,16 +211,12 @@ impl TopFolders {
         Ok(())
     }
 
-    /// Where `dir` stands among the open top-level folders.
+    /// Where `dir` stands among the open top-level folders: its canonical path when it may be
+    /// added. Inside one or around one it may (`AddError`).
     pub fn check(&self, dir: &Path) -> std::result::Result<PathBuf, AddError> {
         let dir = canonical(dir);
-        for r in &self.folders {
-            let p = canonical(&r.path);
-            if p == dir { return Err(AddError::Open(r.key.clone())); }
-            if dir.starts_with(&p) { return Err(AddError::Inside(r.key.clone())); }
-            if p.starts_with(&dir) { return Err(AddError::Holds(r.key.clone())); }
-        }
-        Ok(dir)
+        if disk_or_home(&dir) { return Err(AddError::TooBroad); }
+        match self.folders.iter().find(|r| canonical(&r.path) == dir) { Some(r) => Err(AddError::Open(r.key.clone())), None => Ok(dir) }
     }
 
     /// Open folder `dir` as a new top-level folder at the end; its key.
@@ -376,10 +372,34 @@ impl TopFolders {
     /// Pages moved from one top-level folder to another: who holds what is looked up again.
     pub fn forget_owners(&mut self) { self.owner.clear(); }
 
-    /// The top-level folder holding `path`, if one does.
+    /// The top-level folder holding `path`, if one does; of two nested ones, the inner.
     pub fn folder_of_path(&self, path: &Path) -> Option<&TopFolder> {
         let path = canonical(path);
-        self.folders.iter().find(|r| path.starts_with(canonical(&r.path)))
+        self.folders.iter().map(|r| (r, canonical(&r.path))).filter(|(_, p)| path.starts_with(p)).max_by_key(|(_, p)| p.components().count()).map(|(r, _)| r)
+    }
+
+    /// Which of `entries` (as `list` gave them) are another's twin: the same file listed again
+    /// through a top-level folder nested in another (or holding one). Of each file one stays:
+    /// the one in top-level folder `prefer`, else the one in the innermost. All false when no
+    /// two top-level folders nest. Folders (and pages) are told apart by their path on disk.
+    pub fn twins(&self, entries: &[Entry], prefer: &str) -> Vec<bool> {
+        let mut out = vec![false; entries.len()];
+        let dirs: HashMap<&str, PathBuf> = self.folders.iter().filter(|r| r.store.is_some()).map(|r| (r.key.as_str(), canonical(&r.path))).collect();
+        if !dirs.values().any(|a| dirs.values().any(|b| a != b && b.starts_with(a))) { return out; }
+        let depth = |k: &str| dirs.get(k).map_or(0, |p| p.components().count());
+        let mut kept: HashMap<PathBuf, usize> = HashMap::new();
+        for (i, e) in entries.iter().enumerate() {
+            let Some(dir) = dirs.get(e.top.as_str()) else { continue };
+            if e.meta.local() || e.meta.rel.is_empty() { continue; }
+            let at = dir.join(&e.meta.rel);
+            let better = |j: usize| { let o = &entries[j]; (e.top == prefer, depth(&e.top)) > (o.top == prefer, depth(&o.top)) };
+            match kept.get(&at).copied() {
+                None => { kept.insert(at, i); }
+                Some(j) if better(j) => { out[j] = true; kept.insert(at, i); }
+                Some(_) => out[i] = true,
+            }
+        }
+        out
     }
 
     /// Every top-level folder's entries, each marked with its top-level folder.
@@ -408,11 +428,15 @@ impl TopFolders {
 
 fn new_key() -> String { uuid::Uuid::new_v4().to_string() }
 
+/// A disk's top or the home folder (`dir` canonical): never a top-level folder, from the
+/// sidebar or the command line.
+fn disk_or_home(dir: &Path) -> bool { dir.parent().is_none() || dirs::home_dir().is_some_and(|h| canonical(&h) == dir) }
+
 /// A folder too broad to open as a top-level folder from the command line: a disk's top,
 /// the home folder, or one the system keeps (its programs, settings and libraries).
 pub fn too_broad(dir: &Path) -> bool {
     let dir = canonical(dir);
-    if dir.parent().is_none() || dirs::home_dir().is_some_and(|h| canonical(&h) == dir) { return true; }
+    if disk_or_home(&dir) { return true; }
     let system: &[&str] = if cfg!(windows) { &[r"C:\Windows", r"C:\Program Files", r"C:\Program Files (x86)", r"C:\ProgramData"] }
         else { &["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/opt", "/dev", "/proc", "/sys", "/boot", "/tmp"] };
     system.iter().any(|s| { let s = canonical(Path::new(s)); dir == s })
@@ -448,11 +472,9 @@ mod tests {
         assert_eq!(list.iter().find(|e| e.id == made).unwrap().top, ka);
         assert_eq!(list.iter().find(|e| e.title == "note").unwrap().top, kb);
         assert_eq!(tops.owner(&made).as_deref(), Some(ka.as_str()));
-        // Nesting: the same folder, one inside, one around.
+        // The same folder again: already open.
         assert_eq!(tops.add(&a), Err(AddError::Open(ka.clone())));
-        crate::vfs::create_dir_all(a.join("sub")).unwrap();
-        assert_eq!(tops.add(&a.join("sub")), Err(AddError::Inside(ka.clone())));
-        assert!(matches!(tops.add(a.parent().unwrap()), Err(AddError::Holds(_))));
+        assert_eq!(tops.add(&a.join(".")), Err(AddError::Open(ka.clone())), "however written");
         // Removed: the folder stays, and comes back as it was.
         tops.remove(&ka).unwrap();
         assert!(a.join("in a.xml").fs_is_file() || a.join("in a.md").fs_is_file());
@@ -642,6 +664,199 @@ mod tests {
         let (added, removed) = app.changed_elsewhere(&now);
         assert!(added.is_empty() && removed.is_empty(), "taken in: nothing left to do");
         assert!(app.folder(&ka).is_some());
+    }
+
+    #[test]
+    fn a_disk_or_the_home_folder_is_never_added() {
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let top = if cfg!(windows) { PathBuf::from(r"C:\") } else { PathBuf::from("/") };
+        assert_eq!(tops.add(&top), Err(AddError::TooBroad));
+        if let Some(h) = dirs::home_dir() { assert_eq!(tops.check(&h), Err(AddError::TooBroad)); assert_eq!(tops.check(&h.join(".")), Err(AddError::TooBroad)); }
+        assert!(tops.folders.is_empty());
+        assert!(!AddError::TooBroad.to_string().is_empty());
+    }
+
+    /// A inside B, B inside A: both open, each a library of its own; the outer one
+    /// lists the inner one's pages and never its `.quiet/`, and what each keeps
+    /// about a page (pins, 最近打开) is its own.
+    #[test]
+    fn nested_folders_open_side_by_side() {
+        let outer = dir("outer");
+        let inner = outer.join("inner");
+        crate::vfs::create_dir_all(inner.join("deep")).unwrap();
+        crate::vfs::write(inner.join("note.md"), "# note\n").unwrap();
+        crate::vfs::write(inner.join("deep/more.md"), "# more\n").unwrap();
+        crate::vfs::write(outer.join("top.md"), "# top\n").unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ko = tops.add(&outer).unwrap();
+        let ki = tops.add(&inner).unwrap();
+        // And the other way round: one around an open one.
+        let around = dir("around");
+        let within = around.join("within");
+        crate::vfs::create_dir_all(&within).unwrap();
+        crate::vfs::write(within.join("w.md"), "# w\n").unwrap();
+        let kw = tops.add(&within).unwrap();
+        let ka = tops.add(&around).unwrap();
+        assert!(inner.join(".quiet/format.json").fs_is_file() && outer.join(".quiet/format.json").fs_is_file());
+        let list = tops.list();
+        let of = |k: &str| { let mut v: Vec<String> = list.iter().filter(|e| e.top == k).map(|e| e.meta.rel.clone()).collect(); v.sort(); v };
+        assert_eq!(of(&ko), ["inner", "inner/deep", "inner/deep/more.md", "inner/note.md", "top.md"], "the inner .quiet/ is not content");
+        assert_eq!(of(&ki), ["deep", "deep/more.md", "note.md"]);
+        assert_eq!((of(&kw), of(&ka)), (vec!["w.md".to_string()], vec!["within".to_string(), "within/w.md".to_string()]));
+        let ids: HashSet<&String> = list.iter().map(|e| &e.id).collect();
+        assert_eq!(ids.len(), list.len(), "the same file has an id in each, never the same one");
+        // Each keeps its own: a pin in the inner one is not the outer one's.
+        let (io, ii) = (list.iter().find(|e| e.top == ko && e.meta.rel == "inner/note.md").unwrap().id.clone(), list.iter().find(|e| e.top == ki && e.meta.rel == "note.md").unwrap().id.clone());
+        tops.store(&ki).unwrap().set_pinned(&ii, true).unwrap();
+        tops.store(&ko).unwrap().touch(&io);
+        let list = tops.list();
+        let get = |id: &str| list.iter().find(|e| e.id == id).unwrap().meta.clone();
+        assert!(get(&ii).pinned && !get(&io).pinned);
+        assert!(get(&io).opened > 0 && get(&ii).opened == 0);
+        assert_eq!(tops.owner(&ii).as_deref(), Some(ki.as_str()));
+        assert_eq!(tops.folder_of_path(&inner.join("note.md")).map(|r| r.key.clone()), Some(ki.clone()), "the inner one holds it nearest");
+        assert_eq!(tops.folder_of_path(&outer.join("top.md")).map(|r| r.key.clone()), Some(ko.clone()));
+        // Twins: one row per file in what lists them all, the preferred top-level folder's first.
+        let twins = tops.twins(&list, &ko);
+        let kept: Vec<(String, String)> = list.iter().zip(&twins).filter(|(_, t)| !**t).map(|(e, _)| (e.top.clone(), e.meta.rel.clone())).collect();
+        assert_eq!(kept.len(), list.len() - 4, "note, deep, more and w once each");
+        assert!(kept.contains(&(ko.clone(), "inner/note.md".into())) && !kept.contains(&(ki.clone(), "note.md".into())));
+        let twins = tops.twins(&list, "");
+        assert!(list.iter().zip(&twins).any(|(e, t)| !t && e.top == ki && e.meta.rel == "note.md"), "none preferred: the inner one");
+        // Removing the inner one leaves the outer one as it was.
+        tops.remove(&ki).unwrap();
+        assert!(tops.list().iter().any(|e| e.id == io));
+    }
+
+    /// Outer folder O with I inside it, both open, a page in each and one in I's part of O.
+    fn nested() -> (TopFolders, PathBuf, String, String) {
+        let o = canonical(&dir("o"));
+        crate::vfs::create_dir_all(o.join("inner")).unwrap();
+        crate::vfs::write(o.join("inner/note.md"), "# note\n").unwrap();
+        crate::vfs::write(o.join("top.md"), "# top\n").unwrap();
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let ko = tops.add(&o).unwrap();
+        let ki = tops.add(&o.join("inner")).unwrap();
+        tops.list();
+        (tops, o, ko, ki)
+    }
+    fn id_at(tops: &mut TopFolders, k: &str, rel: &str) -> Option<String> { tops.list().into_iter().find(|e| e.top == k && e.meta.rel == rel).map(|e| e.id) }
+    fn rels(tops: &mut TopFolders, k: &str) -> Vec<String> { let mut v: Vec<String> = tops.list().into_iter().filter(|e| e.top == k).map(|e| e.meta.rel).collect(); v.sort(); v }
+
+    /// Moving across nested top-level folders: to where the file already is, nothing
+    /// moves (no copy, no " 2", nothing removed); into itself, refused; elsewhere, an
+    /// ordinary move that the other side lists again, once.
+    #[test]
+    fn a_move_between_nested_folders_to_where_it_is_changes_nothing() {
+        let (mut tops, o, ko, ki) = nested();
+        let (before_o, before_i) = (rels(&mut tops, &ko), rels(&mut tops, &ki));
+        let note = id_at(&mut tops, &ko, "inner/note.md").unwrap();
+        let (a, b) = tops.pair(&ko, &ki).unwrap();
+        let e = a.move_across(b, &note, None, crate::store::Place::Before(None)).unwrap_err();
+        assert_eq!(e.to_string(), "已在这个文件夹里");
+        assert_eq!(crate::vfs::read_to_string(o.join("inner/note.md")).unwrap(), "# note\n");
+        assert!(!o.join("inner/note 2.md").fs_exists());
+        let folder = id_at(&mut tops, &ko, "inner").unwrap();
+        let (a, b) = tops.pair(&ko, &ki).unwrap();
+        assert_eq!(a.move_across(b, &folder, None, crate::store::Place::Before(None)).unwrap_err().to_string(), "不能移动到自身或后代文件夹中");
+        assert!(o.join("inner/.quiet/format.json").fs_is_file() && !o.join("inner/inner").fs_exists());
+        assert_eq!((rels(&mut tops, &ko), rels(&mut tops, &ki)), (before_o, before_i.clone()), "both as they were");
+        // The other way: I's page to its own folder in O's view of it.
+        let ni = id_at(&mut tops, &ki, "note.md").unwrap();
+        let fo = id_at(&mut tops, &ko, "inner").unwrap();
+        let (b, a) = tops.pair(&ki, &ko).unwrap();
+        assert_eq!(b.move_across(a, &ni, Some(&fo), crate::store::Place::Before(None)).unwrap_err().to_string(), "已在这个文件夹里");
+        assert_eq!(rels(&mut tops, &ki), before_i);
+        // O's own page into I: on disk now in I's folder; each lists it once.
+        let top = id_at(&mut tops, &ko, "top.md").unwrap();
+        let (a, b) = tops.pair(&ko, &ki).unwrap();
+        a.move_across(b, &top, None, crate::store::Place::Before(None)).unwrap();
+        tops.forget_owners();
+        assert!(o.join("inner/top.md").fs_is_file() && !o.join("top.md").fs_exists());
+        assert_eq!(rels(&mut tops, &ki), ["note.md", "top.md"]);
+        assert_eq!(rels(&mut tops, &ko), ["inner", "inner/note.md", "inner/top.md"]);
+        assert_eq!(tops.owner(&top).as_deref(), Some(ki.as_str()), "the moved id is I's now");
+        // And out of I to O's top: I lets it go, O has it once.
+        let (b, a) = tops.pair(&ki, &ko).unwrap();
+        b.move_across(a, &top, None, crate::store::Place::Before(None)).unwrap();
+        tops.forget_owners();
+        assert_eq!(rels(&mut tops, &ki), ["note.md"]);
+        assert_eq!(rels(&mut tops, &ko), ["inner", "inner/note.md", "top.md"]);
+        assert_eq!(tops.list().iter().filter(|e| e.id == top).count(), 1);
+    }
+
+    fn with_picture(title: &str, src: &Path) -> Document {
+        let mut d = doc(title);
+        d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Image { src_kind: "src".into(), src: src.to_string_lossy().into_owned(), width: None, height: None, caption: None, crop: None }, Default::default()));
+        d
+    }
+    fn pictures(tops: &mut TopFolders, k: &str, id: &str) -> Vec<String> { tops.store(k).unwrap().load(id).unwrap().asset_sources() }
+
+    /// A page in I's part of O names its pictures from its library's top (`.assets/x.png`):
+    /// through either top-level folder it shows the same file, whichever one put it there.
+    #[test]
+    fn a_nested_page_shows_its_pictures_through_both() {
+        let (mut tops, o, ko, ki) = nested();
+        let png = o.join("p.png");
+        crate::vfs::write(&png, b"png").unwrap();
+        // Through I: into I's .assets/.
+        let s = tops.store(&ki).unwrap();
+        let at = o.join("inner").join(s.import_attachment(&png).unwrap());
+        let by_i = s.create_from(&with_picture("by i", &at)).unwrap();
+        let text = crate::vfs::read_to_string(o.join("inner/by i.xml")).unwrap();
+        assert!(text.contains(".assets/") && !text.contains(o.to_str().unwrap()), "written from the library's top: {text}");
+        let via_o = id_at(&mut tops, &ko, "inner/by i.xml").unwrap();
+        assert_eq!(pictures(&mut tops, &ko, &via_o), [at.to_string_lossy().into_owned()], "O finds it in I's .assets/");
+        assert_eq!(pictures(&mut tops, &ki, &by_i), [at.to_string_lossy().into_owned()]);
+        // Through O: into O's .assets/, still named from a top, found through I too.
+        let s = tops.store(&ko).unwrap();
+        let at_o = o.join(s.import_attachment(&png).unwrap());
+        let fo = id_at(&mut tops, &ko, "inner").unwrap();
+        let by_o = tops.store(&ko).unwrap().create_from_in(&with_picture("by o", &at_o), Some(&fo)).unwrap();
+        let text = crate::vfs::read_to_string(o.join("inner/by o.xml")).unwrap();
+        assert!(text.contains(".assets/") && !text.contains(o.to_str().unwrap()), "{text}");
+        let via_i = id_at(&mut tops, &ki, "by o.xml").unwrap();
+        assert_eq!(pictures(&mut tops, &ki, &via_i), [at_o.to_string_lossy().into_owned()], "I finds it in O's .assets/");
+        assert_eq!(pictures(&mut tops, &ko, &by_o), [at_o.to_string_lossy().into_owned()]);
+        // Saved again through the other one, the file says the same.
+        let d = tops.store(&ki).unwrap().load(&via_i).unwrap();
+        tops.store(&ki).unwrap().save(&via_i, &d).unwrap();
+        assert_eq!(crate::vfs::read_to_string(o.join("inner/by o.xml")).unwrap(), text);
+        // The sweep: what a page deleted through the other one still names (in that one's 回收站) stays.
+        tops.store(&ko).unwrap().delete(&via_o, None).unwrap();
+        tops.store(&ki).unwrap().delete(&via_i, None).unwrap();
+        tops.list();
+        let unused = |root: &Path| Store::unused_assets_at(root.to_path_buf(), vec![], vec![]).unwrap();
+        assert!(unused(&o.join("inner")).is_empty(), "named by a page in O's 回收站");
+        assert!(unused(&o).is_empty(), "named by a page in I's 回收站");
+        // Nothing nests: as before, a picture no page names is offered.
+        let lone = canonical(&dir("lone"));
+        let mut s = Store::open_top_folder(&lone).unwrap();
+        let pic = lone.join(s.import_attachment(&png).unwrap());
+        let id = s.create_from(&with_picture("lone", &pic)).unwrap();
+        s.delete(&id, None).unwrap();
+        crate::vfs::write(Store::assets_in(&lone).join("stray.png"), b"x").unwrap();
+        assert_eq!(unused(&lone).into_iter().map(|(n, _)| n).collect::<Vec<_>>(), ["stray.png"]);
+    }
+
+    /// The same page open for editing through both: a save through one that finds the
+    /// file changed by the other refuses to write over it (DocxXML pages).
+    #[test]
+    fn a_page_edited_through_both_is_never_written_over() {
+        let (mut tops, o, ko, ki) = nested();
+        let fo = id_at(&mut tops, &ko, "inner").unwrap();
+        let po = tops.store(&ko).unwrap().create_from_in(&doc("shared"), Some(&fo)).unwrap();
+        let pi = id_at(&mut tops, &ki, "shared.xml").unwrap();
+        let mut a = tops.store(&ko).unwrap().load_for_edit(&po, false).unwrap();
+        let mut b = tops.store(&ki).unwrap().load_for_edit(&pi, false).unwrap();
+        a.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("from o")));
+        b.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("from i")));
+        tops.store(&ko).unwrap().save_editor(&po, &a).unwrap();
+        assert!(tops.store(&ki).unwrap().save_editor(&pi, &b).is_err());
+        let text = crate::vfs::read_to_string(o.join("inner/shared.xml")).unwrap();
+        assert!(text.contains("from o") && !text.contains("from i"));
+        // A clean editor through I takes in O's save.
+        assert!(tops.store(&ki).unwrap().refresh_external(&pi).unwrap().is_some());
     }
 
     #[test]

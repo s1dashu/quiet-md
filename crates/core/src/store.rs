@@ -1112,13 +1112,14 @@ impl Store {
             }
             Ok(())
         }
-        /// The pages under `dir`; a scan that could not see them all is refused.
-        fn scan(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+        /// The pages under `dir`; a scan that could not see them all is refused. The folders it went through go to `dirs`.
+        fn scan(dir: &Path, out: &mut Vec<PathBuf>, dirs: &mut Vec<PathBuf>) -> Result<()> {
             // Every file that may be a page is read, ours or not: nothing in use is offered.
             let found = layout::scan(dir, &mut |_, _, _, _| true);
             if found.partial { anyhow::bail!("a folder under {} could not be read", dir.display()) }
             if let Some(p) = found.pending.first() { anyhow::bail!("{} is not downloaded from iCloud", dir.join(p).display()) }
             out.extend(found.docs.iter().map(|rel| dir.join(rel)));
+            dirs.extend(found.dirs.iter().chain(&found.empty).map(|rel| dir.join(rel)));
             Ok(())
         }
         /// A 数据表's values, a line each.
@@ -1131,14 +1132,20 @@ impl Store {
         let flat = Self::flat_at(&root);
         let internal = if flat { root.clone() } else { root.join(INTERNAL) };
         let docs = if flat { root.join("docs") } else { root.clone() };
-        let mut pages: Vec<PathBuf> = vec![];
-        scan(&docs, &mut pages)?;
+        let (mut pages, mut dirs): (Vec<PathBuf>, Vec<PathBuf>) = (vec![], vec![]);
+        scan(&docs, &mut pages, &mut dirs)?;
         pages.extend(pages.clone().iter().map(|p| with_suffix(p, ".bak")));
         walk(&if flat { root.join("trash") } else { internal.join("trash") }, &mut pages)?;
         walk(&internal.join("history"), &mut pages)?;
         walk(&internal.join("history-trash"), &mut pages)?;
+        // A top-level folder nested in this one, or holding it, shares pages with it (workspaces.md
+        // 2.6): a page deleted or saved through that one has its copy in that one's 回收站 and history.
+        let library = |d: &Path| d.join(INTERNAL).join("format.json").fs_is_file();
+        let mut others: Vec<PathBuf> = if flat { vec![] } else { dirs.drain(..).filter(|d| library(d)).collect() };
+        if !flat { others.extend(root.ancestors().skip(1).filter(|d| library(d)).map(Path::to_path_buf)); }
+        for lib in &others { for sub in ["trash", "history", "history-trash"] { walk(&lib.join(INTERNAL).join(sub), &mut pages)?; } }
         for p in &outside {
-            if p.fs_is_dir() { scan(p, &mut pages)? }
+            if p.fs_is_dir() { scan(p, &mut pages, &mut dirs)? }
             else if p.fs_is_file() { pages.push(p.clone()) }
             // A 本机文件 deleted where it was is gone; with its folder gone too it may be on a disk not attached.
             else if !p.parent().is_some_and(|d| d.fs_is_dir()) { anyhow::bail!("{} cannot be reached", p.display()) }
@@ -1984,7 +1991,7 @@ impl Store {
         if !self.is_markdown(id) {
             let mut doc = docxml::parse(text)?;
             if text.contains("href=") { self.links_to_ids(&self.doc_dir(id), &mut doc); }
-            self.sources_here(&mut doc, None);
+            self.sources_here(id, &mut doc, false);
             return Ok(doc);
         }
         let mut doc = crate::markdown::parse_file(text, &self.markdown_title(id), self.base(id).as_deref());
@@ -1997,37 +2004,58 @@ impl Store {
         crate::data_images::absorb(&mut doc.blocks, &self.top_dir);
         // What is not beside it is the library's (`.assets/…`, as older builds wrote
         // it), or another system's absolute path to one of its files.
-        if self.base(id).is_none() { self.sources_here(&mut doc, Some(&Self::assets_in(&self.top_dir))); }
+        if self.base(id).is_none() { self.sources_here(id, &mut doc, true); }
         Ok(doc)
     }
 
+    /// The libraries page `id` names its pictures from, innermost first: this one's top and every
+    /// folder above the page holding a library of its own (`.quiet/`). One top-level folder nested
+    /// in another shares its pages with it; a page there reads and writes `.assets/x.png` the
+    /// same way through either (the innermost library that has the file). Just this one's top
+    /// when nothing nests.
+    fn library_tops(&self, id: &str) -> Vec<PathBuf> {
+        let mut out = vec![];
+        if !self.flat && self.index.get(id).is_some_and(|m| !m.local()) {
+            let mut dir = self.path(id).parent().map(Path::to_path_buf);
+            while let Some(d) = dir {
+                if d == self.top_dir || d.join(INTERNAL).join("format.json").fs_is_file() { out.push(d.clone()); }
+                dir = d.parent().map(Path::to_path_buf);
+            }
+        }
+        if !out.contains(&self.top_dir) { out.insert(0, self.top_dir.clone()); }
+        out
+    }
+
     /// A page's sources as this computer reads them (docs/FORMAT.md): a relative one
-    /// from the library; an absolute one that is not here (another system's, or
-    /// the library has moved) as the same file in this library's images folder,
-    /// when it is there, so the next save writes it relative. Links, data and
-    /// files outside the library stay as written. `within`: only those that
-    /// are under it here.
-    fn sources_here(&self, doc: &mut Document, within: Option<&Path>) {
-        let top = &self.top_dir;
-        let here = |src: &str| -> Option<String> {
+    /// from its library (`library_tops`: the innermost that has the file); an absolute one
+    /// that is not here (another system's, or the library has moved) as the same file in
+    /// the library's images folder, when it is there, so the next save writes it relative.
+    /// Links, data and files outside the library stay as written. `assets_only`: only
+    /// those that are in a library's images folder here.
+    fn sources_here(&self, id: &str, doc: &mut Document, assets_only: bool) {
+        let tops = self.library_tops(id);
+        let here = |src: &str| -> Option<PathBuf> {
             if src.is_empty() || src.contains("://") || src.starts_with("data:") { return None }
             if !crate::paths::is_absolute_anywhere(src) {
                 // As `image_path_in` has read them: a folder in it, no scheme.
-                return (src.contains(['/', '\\']) && !src.contains(':')).then(|| crate::paths::resolve(src, top).to_string_lossy().into_owned());
+                if !(src.contains(['/', '\\']) && !src.contains(':')) { return None }
+                let at: Vec<PathBuf> = tops.iter().map(|t| crate::paths::resolve(src, t)).collect();
+                return at.iter().find(|p| p.fs_exists()).or(at.first()).cloned();
             }
             if Path::new(src).fs_is_absolute() && Path::new(src).fs_exists() { return None }
-            in_assets(top, src).map(|p| p.to_string_lossy().into_owned())
+            tops.iter().find_map(|t| in_assets(t, src))
         };
-        doc.map_sources(|src| here(src).filter(|p| within.is_none_or(|w| Path::new(p).starts_with(w))));
+        let assets: Vec<PathBuf> = tops.iter().map(|t| Self::assets_in(t)).collect();
+        doc.map_sources(|src| here(src).filter(|p| !assets_only || assets.iter().any(|a| p.starts_with(a))).map(|p| p.to_string_lossy().into_owned()));
     }
 
-    /// `doc` with the library's own files written relative to it with `/`
-    /// (`.assets/x.png`; docs/FORMAT.md), None when it has none to change.
-    /// Files outside the library keep their absolute path. (A Markdown page
-    /// writes its own relative to its file: `markdown::Options::dir`.)
-    fn portable_sources(&self, doc: &Document) -> Option<Document> {
-        let top = &self.top_dir;
-        let portable = |src: &str| Path::new(src).fs_is_absolute().then(|| crate::paths::portable_in(Path::new(src), top)).flatten();
+    /// `doc` with its library's own files written relative to it with `/`
+    /// (`.assets/x.png`; docs/FORMAT.md; the innermost of `library_tops` that holds
+    /// the file), None when it has none to change. Files outside keep their absolute
+    /// path. (A Markdown page writes its own relative to its file: `markdown::Options::dir`.)
+    fn portable_sources(&self, id: &str, doc: &Document) -> Option<Document> {
+        let tops = self.library_tops(id);
+        let portable = |src: &str| Path::new(src).fs_is_absolute().then(|| tops.iter().find_map(|t| crate::paths::portable_in(Path::new(src), t))).flatten();
         let cover = doc.cover.as_ref().map(|c| c.src.as_str());
         if !doc.asset_sources().iter().map(String::as_str).chain(cover).any(|s| portable(s).is_some()) { return None }
         let mut out = doc.clone();
@@ -2044,7 +2072,7 @@ impl Store {
         if self.kind(id) == DocKind::Board { return (crate::whiteboard::write_file(doc), vec![]); }
         if self.kind(id) == DocKind::Table { return (String::new(), vec![]); }
         if !self.is_markdown(id) {
-            let portable = self.portable_sources(doc);
+            let portable = self.portable_sources(id, doc);
             let doc = portable.as_ref().unwrap_or(doc);
             if !self.flat && !doc.doc_links().is_empty() {
                 let mut doc = doc.clone();

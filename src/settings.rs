@@ -2658,6 +2658,7 @@ fn diagnostic_for(message: &str, english: bool) -> String {
         ("文档已恢复，回收站索引清理失败：{}", "Document restored, but the Trash index could not be cleaned up: {}"),
         // 移到另一个顶层文件夹（core across.rs）
         ("已在这个文件夹里", "Already in this folder"),
+        ("不能移动到自身或后代文件夹中", "A folder can't move into itself or a folder inside it"),
         ("已存在同名文件：{}", "A file with this name is already there: {}"),
         ("文档或文件夹不存在", "This page or folder is no longer here"),
         ("旧格式的文档库没有真实文件夹", "Move the library to real folders first"),
