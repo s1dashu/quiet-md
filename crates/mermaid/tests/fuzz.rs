@@ -4,21 +4,23 @@
 
 use fdl_mermaid::{Approx, Style, render};
 
-const SAMPLES: [&str; 13] = [
+const SAMPLES: [&str; 14] = [
     include_str!("samples/f01-basic.mmd"), include_str!("samples/f02-subgraph.mmd"), include_str!("samples/f03-lr-shapes.mmd"), include_str!("samples/f04-zh.mmd"),
     include_str!("samples/f05-cycle.mmd"), include_str!("samples/s01-basic.mmd"), include_str!("samples/s02-full.mmd"), include_str!("samples/s03-create.mmd"),
     include_str!("samples/st01-regions.mmd"), include_str!("samples/st02-full.mmd"),
     include_str!("samples/c01-full.mmd"), include_str!("samples/p01-pie.mmd"), include_str!("samples/e01-full.mmd"),
+    include_str!("samples/m01-mindmap.mmd"),
 ];
 
 /// Pieces of syntax spliced in at random.
-const BITS: [&str; 72] = [
+const BITS: [&str; 76] = [
     "-->", "---", "-.->", "==>", "~~~", "--o", "--x", "<-->", "|t|", "-- t -->", "[", "]", "(", ")", "{", "}", "((", "))", "[[", "]]", "[(", ">", "\"", "`", ":::c",
     "\nsubgraph s\n", "\nend\n", "\ndirection LR\n", "&", ";", "\n", " ", "@{ shape: diamond }", "e1@", "\nclassDef c fill:#f00\n", "\nclass A c\n", "\nstyle A fill:#0f0\n", "\nlinkStyle 0 stroke:red\n",
     "->>", "-->>+", "-)", "-x", ": msg", "\nloop x\n", "\nalt y\n", "\nelse\n", "\nNote over A,B: n\n", "\nactivate A\n",
     "[*]", "\nstate S {\n", "\n--\n", "<<choice>>", "<<fork>>", "\nnote right of A\n", "\nend note\n", "\nstate \"d\" as S\n",
     "<|--", "*--", "o--", "..|>", "()--", "\"1\"", "~T~", "\nclass C {\n", "\nnamespace N {\n", ": 12.5",
     "||--o{", "}|..|{", "|o--o|", " PK, FK", " to zero or more ", "\nsubgraph g\n",
+    "\n        ", "))", "((", "\t",
 ];
 
 struct Rng(u64);
@@ -56,7 +58,15 @@ fn random_edits_never_panic() {
             drawn += 1;
             assert!(svg.width.is_finite() && svg.height.is_finite() && svg.width >= 0. && svg.height >= 0., "{src}");
             assert!(svg.svg.starts_with("<svg") && svg.svg.trim_end().ends_with("</svg>"), "{src}");
-            assert!(!svg.svg.contains("NaN") && !svg.svg.contains("inf"), "{src}");
+            // (numbers only: the text between tags may say anything)
+            let mut tags = String::new();
+            let mut inside = false;
+            for c in svg.svg.chars() {
+                inside |= c == '<';
+                if inside { tags.push(c); }
+                inside &= c != '>';
+            }
+            assert!(!tags.contains("NaN") && !tags.contains("inf"), "{src}");
         }
     }
     eprintln!("{drawn}/{rounds} edits drew");
