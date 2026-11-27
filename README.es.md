@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="Última versión"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="Estado de CI"></a>
+  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&event=schedule&label=CI" alt="Estado de CI"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows y Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Hecha con Rust y GPUI">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="Licencia MIT"></a>
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sobre una pradera en pixel art: la barra lateral muestra las carpetas y el Inicio presenta cada carpeta como una pila de tarjetas de notas con imágenes.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md sobre una pradera en pixel art: la barra lateral muestra las carpetas y la página de la carpeta principal presenta cada carpeta como una pila de tarjetas de notas con imágenes.">
 </p>
 
 > [!NOTE]
@@ -43,7 +43,7 @@
 
 ## Por qué Quiet.md
 
-**📁 Tus notas son archivos, sin más.** Sin cuenta, sin nube y, por defecto, nada sale a la red (salvo la comprobación opcional de actualizaciones y las fuentes que tú provocas: la manuscrita para chino, japonés y coreano la primera vez que una pizarra la necesita, y una fuente de documento descargable cuando la eliges). Cada carpeta de la barra lateral es una carpeta real de tu disco, y cada nota es un archivo con el nombre de su título: `.md` para Markdown y `.xml` para documentos enriquecidos. Sincronízalas con iCloud, Git o lo que prefieras. Si algún día dejas Quiet.md, tus archivos siguen exactamente donde estaban.
+**📁 Tus notas son archivos, sin más.** Sin cuenta, sin nube y, por defecto, nada sale a la red (salvo la comprobación opcional de actualizaciones, los recuentos de uso anónimos que la app y la herramienta de línea de comandos `quiet` envían una vez al día —solo recuentos, como cuántas veces se abrió la app; se desactivan en Ajustes › General › Estadísticas de uso anónimas— y las fuentes que tú provocas: la manuscrita para chino, japonés y coreano la primera vez que una pizarra la necesita, y una fuente de documento descargable cuando la eliges). Cada carpeta de la barra lateral es una carpeta real de tu disco, y cada nota es un archivo con el nombre de su título: `.md` para Markdown y `.xml` para documentos enriquecidos. Sincronízalas con iCloud, Git o lo que prefieras. Si algún día dejas Quiet.md, tus archivos siguen exactamente donde estaban.
 
 **⚡ Nativa, y rápida.** Toda la interfaz la dibujan en la GPU Rust y [GPUI](https://www.gpui.rs/). Sin Electron, sin WebView. En una nota de un millón de caracteres, escribir cuesta unos 5 ms por fotograma, y una pantalla de 120 Hz da 8,3.
 
@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Una nota larga abierta en Quiet.md, con encabezados, fórmulas en línea y una tabla de concentraciones de iones.">
 </p>
 
-Encabezados, listas, tareas, citas, avisos destacados, columnas, tablas con celdas combinadas, código con resaltado de sintaxis, fórmulas LaTeX, imágenes, archivos y portadas. Los atajos de Markdown funcionan mientras escribes y el menú `/` tiene todo lo demás. Menciona otra nota para enlazarla; esa nota mostrará sus referencias inversas.
+Encabezados, listas, tareas, citas, avisos destacados, columnas, tablas con celdas combinadas, código con resaltado de sintaxis, fórmulas LaTeX, imágenes, archivos y portadas. Los atajos de Markdown funcionan mientras escribes y el menú `/` tiene todo lo demás. Menciona otra nota para enlazarla; esa nota mostrará sus referencias inversas. Los bloques de código Mermaid se dibujan como diagramas. Las tablas de datos guardan registros con campos de selección, fecha, número, fórmula, búsqueda y relación, en vistas que filtras, ordenas y agrupas; cada celda de una columna Notas es una nota de verdad. El menú … tiene Modo concentración, Modo máquina de escribir y Enfoque de párrafo, y Visualización › Acercar agranda solo el texto.
 
 ### Dibujar
 
@@ -69,25 +69,39 @@ Las pizarras son un tablero portado de Excalidraw: formas, flechas que siguen un
 
 ### Organiza en carpetas de verdad
 
-El Inicio muestra cada carpeta como una pila de sus páginas. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas y los movimientos se pueden deshacer. Fija notas y márcalas como favoritas, busca en todos los títulos y líneas con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera. Los archivos y carpetas Markdown que tengas en otras partes del ordenador se pueden abrir en **Archivos de este ordenador** y editar donde están.
+La barra lateral agrupa tus carpetas de primer nivel; al abrir una, su página muestra las subcarpetas como pilas de sus páginas y la vista de lista ordena por cualquier columna. Añade cualquier carpeta del ordenador con **Añadir carpeta** y se usa donde está. Mantén una nota sobre una carpeta y se abrirá sola; las carpetas pueden ir dentro de otras carpetas, las páginas y carpetas pasan de una carpeta de primer nivel a otra, y cada movimiento se puede deshacer. Fija notas arriba en la barra lateral, busca en todos los títulos y líneas desde el icono de búsqueda o con `⌘ J`, y busca y reemplaza dentro de una nota, también con expresiones regulares. Las notas eliminadas esperan en la papelera los días que elijas. Un archivo Markdown abierto por separado se edita en su propia ventana, donde está.
 
 ### Trae tus notas
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece importar una bóveda de Obsidian que ha encontrado.">
-</p>
-
-En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown al Inicio o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
+Importar desde otra app… (en el menú Archivo) busca en el ordenador tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y tus espacios de trabajo de SiYuan, y los copia sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown a la página de una carpeta o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
 
 ### Y además
 
 - **Historial de versiones**: cada nota guarda instantáneas al guardarse (20 por defecto, hasta 30). Abre una para ver en su sitio qué cambió, restáurala con un clic o ponle nombre.
 - **Notas rápidas**: en macOS, un atajo global (`⌥ Espacio` por defecto) abre una pequeña ventana de nota sobre cualquier app.
 - **Tu aspecto**: cuatro estilos integrados —Craft, Feishu, Notion y Obsidian—, cada uno con variante oscura, o tu propio CSS ([docs/THEMES.md](docs/THEMES.md)). Elige la fuente de la interfaz y la de los documentos.
-- **Tus teclas**: pulsa `⌘ /` para ver todos los atajos y reasignar cualquiera. En Windows y Linux, Ctrl sustituye a ⌘ y Alt a ⌥.
+- **Tus teclas**: pulsa `⌘ /` para ver todos los atajos y reasignar o borrar cualquiera. En Windows y Linux, Ctrl sustituye a ⌘ y Alt a ⌥.
+- **Línea de comandos y agentes**: la herramienta `quiet`, incluida en la app, permite que agentes de IA como Claude Code o Codex lean y editen tu biblioteca con el mismo motor que la app. Ajustes › Conector de agentes te da una línea para pegarle a tu agente, que se instala solo; en macOS instala la herramienta con un clic. Más detalles en el [README en inglés](README.md#work-with-agents).
 - **Tu idioma**: inglés, chino simplificado, chino tradicional, japonés, coreano, español, francés, árabe y turco. El árabe une sus letras y se escribe de derecha a izquierda.
 - **Limpieza**: Ajustes › Biblioteca encuentra las imágenes y archivos que ya no usa ninguna nota y los retira cuando lo confirmas.
 - **Actualizaciones**: las versiones nuevas se instalan desde la propia app tras verificar su firma. Las comprobaciones automáticas se pueden desactivar.
+
+## Hoja de ruta
+
+- [x] Documentos enriquecidos: encabezados, listas, avisos destacados, tablas, columnas, código, fórmulas, imágenes y archivos
+- [x] Archivos Markdown, abiertos y editados donde están
+- [x] Pizarras: diagramas y bocetos a mano alzada, dentro de las notas o por separado
+- [x] Abre cualquier carpeta donde está, una junto a otra en la barra lateral
+- [x] Importa desde Obsidian, Logseq, SiYuan, Typora, iA Writer y cualquier carpeta de Markdown
+- [x] Modos de escritura: concentración, máquina de escribir y enfoque de párrafo
+- [x] Temas, modo oscuro y nueve idiomas
+- [x] Una CLI `quiet` y una skill para agentes de IA
+- [ ] Tablas de datos (en curso)
+- [ ] Diagramas Mermaid (en curso)
+- [ ] Móviles: iPhone, iPad y Android (en curso)
+- [ ] Sincronización entre dispositivos (en curso)
+- [ ] Propiedades de documento
+- [ ] Recortes web
 
 ## Descarga
 
@@ -112,7 +126,7 @@ En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writ
 
 También puedes descargarla desde [Quiet.md](https://quiet.md/?lang=en). Todas las versiones y sus sumas SHA-256 están en [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
 
-En el primer arranque eliges el idioma, dónde guardar la biblioteca y el atajo de notas rápidas, y puedes copiar tus notas de Obsidian, Logseq, iA Writer o Typora. Una biblioteca vacía recibe la guía **Getting started**: un recorrido de diez minutos por las funciones principales. Nunca sobrescribe las notas que ya tengas.
+En el primer arranque, Quiet.md abre directamente una carpeta **Quiet Notes** en tus Documentos (o la carpeta `Quiet.md` que creó una versión anterior) con la guía **Getting started**: un recorrido de diez minutos por las funciones principales. Nunca sobrescribe las notas que ya tengas. Añade otras carpetas o trae notas de otras apps cuando quieras, desde el menú Archivo.
 
 ## Rendimiento
 
@@ -171,5 +185,5 @@ El código se publica bajo la licencia [MIT](LICENSE). El código, las fuentes y
 
 Lo siguiente no está cubierto por la licencia MIT y debe sustituirse en los forks:
 
-- Los 70 iconos de Nucleo en `assets/icons/` están bajo una licencia comercial de Nucleo. No los extraigas ni los redistribuyas por separado.
+- Los iconos de Nucleo de `assets/icons/` (82) y `assets/editor-icons/` (24) están bajo una licencia comercial de Nucleo. No los extraigas ni los redistribuyas por separado.
 - El nombre “Quiet.md” y el icono de la app.

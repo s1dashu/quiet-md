@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="Latest release"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&event=schedule&label=CI" alt="CI status"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows and Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Built with Rust and GPUI">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT license"></a>
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md on a pixel-art meadow: the sidebar lists folders, and Home shows each folder as a stack of note cards with pictures.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="Quiet.md on a pixel-art meadow: the sidebar lists folders, and the top-level folder's page shows each folder as a stack of note cards with pictures.">
 </p>
 
 > [!NOTE]
@@ -43,7 +43,7 @@
 
 ## Why Quiet.md
 
-**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check, the `quiet` command line tool's anonymous daily usage counts (`quiet telemetry off`), and font downloads you cause: the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it, and a downloadable document font when you pick one. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
+**📁 Your notes are just files.** No account, no cloud, and nothing goes over the network by default, apart from the optional update check, anonymous daily usage counts from the app and the `quiet` command line tool (only counts such as how often the app was opened; turn them off in Settings › General › Anonymous usage statistics), and font downloads you cause: the handwriting font for Chinese, Japanese and Korean the first time a whiteboard needs it, and a downloadable document font when you pick one. Every folder in the sidebar is a real folder on your disk, and every note is a file named after its title: `.md` for Markdown, `.xml` for rich documents. Sync them with iCloud, Git or anything you like. If you ever stop using Quiet.md, your files stay right where they are.
 
 **⚡ Native, and fast.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/). No Electron, no WebView. In a one-million-character note, typing takes about 5 ms a frame, and a 120 Hz display allows 8.3.
 
@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="A long note open in Quiet.md, with headings, inline math and a table of ion concentrations.">
 </p>
 
-Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks.
+Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Mermaid code blocks draw as diagrams. Data tables keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
 
 ### Draw
 
@@ -69,19 +69,15 @@ Boards are a whiteboard ported from Excalidraw: shapes, arrows that stay attache
 
 ### Organize in real folders
 
-Home shows each folder as a stack of its pages. Hold a note over a folder and it opens for you; folders go inside folders, and moves can be undone. Pin and favorite notes, search every title and line with `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash. Markdown files and folders elsewhere on your computer can be opened under **Files on this computer** and edited where they are.
+The sidebar groups your top-level folders. Open one and its page shows subfolders as stacks of their pages, and the list view sorts by any column. Add any folder on your computer with **Add Folder** and it is used where it is. Hold a note over a folder and it opens for you; folders go inside folders, pages and folders move between top-level folders, and every move can be undone. Pin notes to the top of the sidebar, search every title and line from the search icon or `⌘ J`, and find and replace within a note, with regular expressions if you like. Deleted notes wait in the Trash for as many days as you choose. A Markdown file opened on its own is edited in its own window, right where it is.
 
 ### Bring your notes
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="The first-launch screen of Quiet.md, offering to import an Obsidian vault it found.">
-</p>
-
-On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto Home or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
+Import from Another App… (in the File menu) finds your Obsidian, Logseq, iA Writer and Typora libraries and SiYuan workspaces on this computer and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto a folder's page or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
 
 ### Work with agents
 
-The `quiet` command line tool lets an AI agent (Claude Code, Codex, or any MCP client) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to data tables and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. `quiet skill install` gives Claude Code and Codex a skill, so they reach for `quiet` whenever you ask about your notes; clients without a shell use `quiet mcp`. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off the app's automatic update check stops it.
+The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to data tables and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. Settings › Agent Connector gives your agent one line to paste and, on macOS, installs the command. The [Quiet.md agent skill](#use-with-ai-agents) teaches Claude Code, Codex and other agents to reach for `quiet` whenever you ask about your notes. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off Settings › General › Anonymous usage statistics stops it.
 
 `quiet` ships inside the app. On macOS, put it on your PATH with `ln -s /Applications/quiet.md.app/Contents/MacOS/quiet /usr/local/bin/quiet`; on Windows it sits beside `quiet_md.exe` in the install folder. See [docs/design/CLI.md](docs/design/CLI.md).
 
@@ -89,11 +85,28 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex, or any MCP c
 
 - **Version history**: every note keeps snapshots as it saves (20 by default, up to 30). Open one to see what changed in place, restore it in one click, or give it a name.
 - **Quick notes**: on macOS, a global shortcut (`⌥ Space` by default) opens a small note window over any app.
-- **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark variant, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
-- **Your keys**: press `⌘ /` to see every shortcut, and rebind any of them. On Windows and Linux, Ctrl stands in for ⌘ and Alt for ⌥.
+- **Your look**: four built-in styles — Craft, Feishu, Notion and Obsidian — each with a dark look worked out from its colours, or your own CSS ([docs/THEMES.md](docs/THEMES.md)). Choose the interface and document fonts.
+- **Your keys**: press `⌘ /` to see every shortcut, and rebind or clear any of them. On Windows and Linux, Ctrl stands in for ⌘ and Alt for ⌥.
 - **Your language**: English, Simplified Chinese, Traditional Chinese, Japanese, Korean, Spanish, French, Arabic and Turkish. Arabic text joins its letters and runs right to left.
 - **Housekeeping**: Settings › Documents finds images and files no note uses any more and moves them out once you confirm.
 - **Updates**: new versions install from inside the app after their signature is verified. Automatic checks can be turned off.
+
+## Roadmap
+
+- [x] Rich documents: headings, lists, callouts, tables, columns, code, math, images and files
+- [x] Markdown files, opened and edited in place
+- [x] Boards: hand-drawn diagrams and sketches, inside notes or on their own
+- [x] Open any folder in place, side by side in the sidebar
+- [x] Import from Obsidian, Logseq, SiYuan, Typora, iA Writer and any Markdown folder
+- [x] Writing modes: focus, typewriter and paragraph focus
+- [x] Themes, dark mode and nine languages
+- [x] A `quiet` CLI and skill for AI agents
+- [ ] Data tables (in progress)
+- [ ] Mermaid diagrams (in progress)
+- [ ] Mobile support: iPhone, iPad and Android (in progress)
+- [ ] Sync across devices (in progress)
+- [ ] Document properties
+- [ ] Web clipper
 
 ## Download
 
@@ -118,7 +131,23 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex, or any MCP c
 
 You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
 
-On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
+On first launch, Quiet.md opens straight into a **Quiet Notes** folder in your Documents (or the `Quiet.md` folder an earlier version made there) with a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten. Add other folders or bring notes from other apps whenever you like, from the File menu.
+
+## Use with AI agents
+
+Two pieces: the `quiet` command line tool, which ships inside the Quiet.md app, and the agent skill in [`skills/quiet-md`](skills/quiet-md/SKILL.md), which teaches the agent to use it.
+
+1. **Install the skill** with the [skills](https://github.com/vercel-labs/skills) CLI (needs Node.js):
+
+   ```sh
+   npx skills add s1dashu/quiet-md -g -y -a claude-code   # or -a codex, …; leave out -a to choose
+   ```
+
+2. **Put `quiet` on your PATH.** macOS: Settings › Agent Connector › Install Command (设置 › 连接 Agent › 安装命令行工具) in Quiet.md (it links `quiet` into `~/.local/bin`), or `ln -sf /Applications/quiet.md.app/Contents/MacOS/quiet ~/.local/bin/quiet`; the Homebrew cask links it for you. Windows: the installer adds it to your PATH (open a new terminal). Linux: `bin/quiet` in the `.tar.gz`, or a link named `quiet` to the AppImage.
+
+3. **Check:** `quiet ls` lists the folders Quiet.md has open.
+
+An agent can do all of this for you. Tell it: *Install the Quiet.md skill and CLI by following https://github.com/s1dashu/quiet-md/blob/main/docs/AGENT_INSTALL.md*. That page gives each agent (Claude Code, Codex, others) the exact commands.
 
 ## Performance
 
@@ -177,5 +206,5 @@ The code is licensed under [MIT](LICENSE). Third-party code, fonts and assets ar
 
 The following are not covered by the MIT license and should be replaced in forks:
 
-- The 70 Nucleo icons in `assets/icons/` are under a commercial Nucleo license. Do not extract or redistribute them on their own.
+- The Nucleo icons in `assets/icons/` (82) and `assets/editor-icons/` (24) are under a commercial Nucleo license. Do not extract or redistribute them on their own.
 - The name "Quiet.md" and the app icon.

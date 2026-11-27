@@ -29,6 +29,8 @@ pub enum EditorEvent {
     /// A 子页面列表 item or an @文档 link was clicked.
     OpenDoc(String),
     OpenRelative(String),
+    /// An attachment Quiet.md edits itself (`local_files::opens_here`): in a window of its own.
+    OpenFile(std::path::PathBuf),
     /// A 反向引用 line: that document, scrolled to its nth block.
     OpenDocAt(String, usize),
     /// The reference list's close button.
@@ -45,6 +47,12 @@ pub enum EditorEvent {
     Leave,
     /// Esc while 版本历史 is open: back to the live document, then close.
     HistoryEscape,
+    /// Esc in 专注模式 with nothing else to cancel: leave it.
+    FocusEscape,
+    /// A 数据表 made, trashed or restored a note for a 笔记 cell: the library's lists are read again.
+    LibraryChanged,
+    /// A note edited in a 数据表's record panel was saved: its row follows.
+    NoteSaved(Box<crate::table::NoteSaved>),
 }
 
 /// A child page shown by 子页面列表 blocks.
@@ -164,7 +172,7 @@ pub struct Editor {
     /// Slash / "+" menu list (keyboard selection is kept in view).
     pub slash_scroll: ScrollHandle,
     /// The slash menu's scrollbar: when the list last scrolled (or opened) and the offset then.
-    pub slash_bar: Cell<Option<(std::time::Instant, f32)>>,
+    pub slash_bar: std::rc::Rc<crate::design::ScrollBar>,
     /// Sideways scroll of each unwrapped code block, and its scrollbar.
     pub code_hscroll: RefCell<HashMap<BlockId, (ScrollHandle, Rc<super::scrollbar::Scrollbar>)>>,
     pub mention_scroll: ScrollHandle,
@@ -209,10 +217,30 @@ pub struct Editor {
     pub menu_hovered: bool,
     /// Toolbar suppressed after typing / Esc until the selection changes.
     pub toolbar_hidden: bool,
+    /// The window is in 专注模式: Esc with nothing else to cancel leaves it (`EditorEvent::FocusEscape`).
+    pub focus_mode: bool,
     /// Typing hides the mouse pointer until it moves, as browsers do, so the
     /// I-beam left where the user clicked doesn't sit on top of the new text.
     pub pointer_hidden: bool,
     pub autoscroll: bool,
+    /// 打字机模式's glide toward the middle (丰富 motion): when the last step
+    /// ran, where the page stood before it and for how many frames it hasn't
+    /// moved (`apply_reveal`).
+    pub(super) glide: Option<(web_time::Instant, Pixels, u8)>,
+    /// The space below the last block this frame (`below_height`).
+    pub(super) below_h: f32,
+    /// 放大 / 缩小's percentage and when it was shown (`zoom_badge_el`).
+    pub(super) zoom_badge: Option<(u32, web_time::Instant)>,
+    /// 段落聚焦: the rows kept clear this frame, and the ones before with when
+    /// that changed while the fade runs (`sync_lit`).
+    pub(super) lit: Option<(usize, usize)>,
+    pub(super) lit_fade: Option<((usize, usize), web_time::Instant)>,
+    /// 打字机模式: the caret's line was last brought to the middle (a wheel or a
+    /// click puts it elsewhere); the page's size last frame; a resize asks for
+    /// the line back without a glide.
+    pub(super) tw_centred: bool,
+    pub(super) tw_size: Option<Size<Pixels>>,
+    pub(super) tw_snap: bool,
     /// Last applied (text color, background) from the color panel.
     pub last_color: (Option<ColorName>, Option<ColorName>),
     pub last_lang: String,
@@ -224,6 +252,7 @@ pub struct Editor {
     pub lang_field: Entity<TextField>,
     pub emoji_field: Entity<TextField>,
     pub emoji_scroll: ScrollHandle,
+    pub emoji_bar: std::rc::Rc<crate::design::ScrollBar>,
     /// The emoji search box was clicked or typed into (draws its focus ring).
     pub emoji_search_active: bool,
     pub(super) cover_ui: super::cover::CoverUi,
@@ -253,12 +282,18 @@ pub struct Editor {
     /// Heading just clicked in the catalogue.
     pub(super) cat_jump: Option<BlockId>,
     pub(super) cat_scroll: UniformListScrollHandle,
+    /// The outline's scrollbar (the shared one).
+    pub(super) cat_bar: Rc<crate::design::ScrollBar>,
     pub(super) scrollbar: Rc<super::scrollbar::Scrollbar>,
     /// Column-gap hover: (grid, gap index, over the 新增分栏 circle).
     pub(super) gap_hover: Option<(BlockId, usize, bool)>,
     pub(super) col_drag: Option<super::grid::ColDrag>,
     /// Blocks moved by their handle.
     pub(super) block_drag: Option<super::drag::BlockDrag>,
+    /// Blocks sliding aside for dragged blocks and gliding in once dropped.
+    pub(super) drag_fx: RefCell<super::drag::DragFx>,
+    /// The first and last top-level blocks the page drew rows of this frame.
+    pub(super) rendered_top: Cell<Option<(usize, usize)>>,
     /// Blocks just dropped, flashing since.
     pub(super) drop_flash: Option<(Vec<BlockId>, web_time::Instant)>,
     /// The fold arrow turning after a click: block → start.
@@ -438,7 +473,7 @@ impl Editor {
             frame: Default::default(),
             code_rows: HashMap::new(),
             slash_scroll: ScrollHandle::new(),
-            slash_bar: Cell::new(None),
+            slash_bar: std::rc::Rc::new(crate::design::ScrollBar::rounded(crate::design::geo().menu_r)),
             code_hscroll: Default::default(),
             mention_scroll: ScrollHandle::new(),
             links: Default::default(),
@@ -466,8 +501,17 @@ impl Editor {
             menu: None,
             menu_hovered: false,
             toolbar_hidden: false,
+            focus_mode: false,
             pointer_hidden: false,
             autoscroll: false,
+            glide: None,
+            below_h: 200.,
+            zoom_badge: None,
+            lit: None,
+            lit_fade: None,
+            tw_centred: false,
+            tw_size: None,
+            tw_snap: false,
             last_color: (None, Some(ColorName("light-yellow".into()))),
             last_lang: "Plain Text".into(),
             link_field,
@@ -478,6 +522,7 @@ impl Editor {
             lang_field,
             emoji_field,
             emoji_scroll: ScrollHandle::new(),
+            emoji_bar: std::rc::Rc::new(crate::design::ScrollBar::rounded(0.)),
             emoji_search_active: false,
             cover_ui: super::cover::CoverUi::new(),
             find: None,
@@ -498,10 +543,13 @@ impl Editor {
             cat_seen: ((usize::MAX, 0), TITLE),
             cat_jump: None,
             cat_scroll: UniformListScrollHandle::new(),
+            cat_bar: Default::default(),
             scrollbar: Rc::default(),
             gap_hover: None,
             col_drag: None,
             block_drag: None,
+            drag_fx: Default::default(),
+            rendered_top: Cell::new(None),
             drop_flash: None,
             fold_anim: None,
             col_anim: HashMap::default(),
@@ -595,6 +643,7 @@ impl Editor {
     pub fn receive_document(&mut self, core: &Core, cx: &mut Context<Self>) {
         let sel = self.core.sel;
         let generation = self.core.generation;
+        let board_at = self.open_board_at();
         self.core = core.clone();
         self.core.sel = sel;
         self.core.block_sel = None;
@@ -611,6 +660,7 @@ impl Editor {
         self.slash = None;
         self.cat_generation = None;
         self.ro_doc = self.read_only.then(|| self.core.doc.clone());
+        self.follow_open_board(board_at, cx);
         self.refresh_find(false, cx);
         cx.notify();
     }
@@ -650,6 +700,24 @@ impl Editor {
         }
         self.restart_blink(window, cx);
         cx.notify();
+    }
+
+    /// 打字机模式 was switched: the page pads its end for it, and turning it on
+    /// brings the caret's line to the middle at once.
+    pub fn typewriter_changed(&mut self, cx: &mut Context<Self>) {
+        self.glide = None;
+        self.items_key = None;
+        if crate::settings::typewriter() && self.reveal.is_none() { self.autoscroll = true; }
+        cx.notify();
+    }
+
+    /// The wheel takes over from a glide under way: the page stays where the
+    /// user scrolled it until the caret moves again.
+    pub(super) fn wheel_stops_glide(&mut self) {
+        self.tw_centred = false;
+        if self.glide.take().is_some() && matches!(self.reveal, Some((super::render::Reveal::Caret, _))) {
+            self.reveal = None;
+        }
     }
 
     /// 重命名 from the sidebar: swap the title text as one undoable edit,
@@ -762,7 +830,7 @@ impl Editor {
         let ranked: Vec<usize> =
             ranked.into_iter().filter(|i| menus::SLASH_ITEMS[*i].group != 0 || menus::basic_visible(menus::SLASH_ITEMS[*i].kind, grid, with_text))
                 .filter(|i| !self.markdown || menus::markdown_ok(menus::SLASH_ITEMS[*i].kind))
-                .filter(|i| crate::DATATABLE || menus::SLASH_ITEMS[*i].kind != SlashKind::DataTable).collect();
+                .collect();
         let mut groups: Vec<usize> = vec![];
         for i in &ranked {
             let g = menus::SLASH_ITEMS[*i].group;
@@ -1937,6 +2005,9 @@ impl Editor {
             self.menu = None;
         } else if self.find.is_some() {
             return self.close_find(window, cx);
+        } else if self.focus_mode && self.core.cell_sel.is_none() && !self.core.in_block_mode() && (self.read_only || self.core.sel.is_collapsed()) {
+            // 专注模式: the first Esc leaves it instead of selecting the block
+            return cx.emit(EditorEvent::FocusEscape);
         } else if self.read_only {
             // Nothing to select blocks for.
             self.core.sel = Selection::caret(self.core.sel.head);
@@ -1976,8 +2047,8 @@ impl Editor {
             }
             self.core.selected_text()
         };
-        let xml = docxml::serialize(&Document { blocks, ..Default::default() });
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        let doc = Document { blocks, ..Default::default() };
+        cx.write_to_clipboard(crate::clipboard::copied(text, docxml::serialize(&doc), &doc.blocks));
         true
     }
 
@@ -1992,7 +2063,7 @@ impl Editor {
             *f = crate::clipboard::FakeClipboard { text: xml, ..Default::default() };
             return true;
         }
-        cx.write_to_clipboard(ClipboardItem::new_string_with_json_metadata(text, xml));
+        cx.write_to_clipboard(crate::clipboard::copied(text, xml, &doc.blocks));
         true
     }
 
@@ -2100,7 +2171,7 @@ impl Editor {
         let html = match &fake {
             Some(f) => f.html.clone(),
             None if !plain && internal.is_none() && rich_target && !text.as_deref().is_some_and(crate::paste::has_math) => {
-                crate::clipboard::clipboard_html()
+                crate::clipboard::clipboard_html(item.as_ref())
             }
             None => None,
         };
@@ -2515,6 +2586,8 @@ impl Editor {
         self.link_ui.click = None;
         self.btn_press_reset();
         self.gap_press = None;
+        // A click puts the caret where it lands, off the middle.
+        self.tw_centred = false;
         if !ev.modifiers.shift && self.button_press(ev.position) {
             // The caret stays; the action runs on release.
             window.prevent_default();
@@ -3164,7 +3237,7 @@ fn new_table_file() -> Option<String> {
     let name = format!("{}.sqlite", uuid::Uuid::new_v4());
     let path = crate::store::Store::assets_dir().join(&name);
     crate::table::sqlite::create(&path, &crate::table::blank_base()).ok()?;
-    path.strip_prefix(crate::store::Store::active_dir()).ok().map(|r| r.to_string_lossy().replace('\\', "/"))
+    fdl_core::paths::portable_in(&path, &crate::store::Store::active_dir())
 }
 #[cfg(target_family = "wasm")]
 fn new_table_file() -> Option<String> { None }

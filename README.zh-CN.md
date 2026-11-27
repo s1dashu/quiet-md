@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="最新版本"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI 状态"></a>
+  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&event=schedule&label=CI" alt="CI 状态"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="支持 macOS、Windows 和 Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="使用 Rust 和 GPUI 构建">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT 许可"></a>
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="像素风草坡背景上的 Quiet.md：左侧侧栏列出文件夹，主页把每个文件夹显示成一叠带配图的笔记卡片。">
+  <img src="docs/images/readme-home.webp" width="100%" alt="像素风草坡背景上的 Quiet.md：左侧侧栏列出文件夹，顶层文件夹页把每个文件夹显示成一叠带配图的笔记卡片。">
 </p>
 
 > [!NOTE]
@@ -43,7 +43,7 @@
 
 ## 为什么是 Quiet.md
 
-**📁 笔记就是普通文件。** 没有账号，没有云端，默认不联网（可选的更新检查除外；白板第一次用到中日韩手写字体、或者你选择可下载的文档字体时，会下载对应的字体文件）。侧栏里的每个文件夹都是磁盘上真实的文件夹，每篇笔记都是一个以标题命名的文件：Markdown 是 `.md`，富文本文档是 `.xml`。用 iCloud、Git 或任何同步工具都行；哪天不用 Quiet.md 了，文件也还在原地。
+**📁 笔记就是普通文件。** 没有账号，没有云端，默认不联网（以下除外：可选的更新检查；应用和命令行工具 `quiet` 每天发送一次匿名使用次数，只有计数，例如应用打开了几次，可在「设置 › 通用 › 匿名使用统计」关闭；白板第一次用到中日韩手写字体、或者你选择可下载的文档字体时，会下载对应的字体文件）。侧栏里的每个文件夹都是磁盘上真实的文件夹，每篇笔记都是一个以标题命名的文件：Markdown 是 `.md`，富文本文档是 `.xml`。用 iCloud、Git 或任何同步工具都行；哪天不用 Quiet.md 了，文件也还在原地。
 
 **⚡ 原生，而且快。** 整个界面由 Rust 和 [GPUI](https://www.gpui.rs/) 直接用 GPU 绘制，不是 Electron，也不是网页套壳。在一篇 100 万字的笔记里打字，每帧约 5 ms；120 Hz 屏幕给每帧的时间是 8.3 ms。
 
@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Quiet.md 里打开的一篇长笔记，有标题、行内公式和一张离子浓度表。">
 </p>
 
-标题、列表、待办、引用、高亮块、分栏、可合并单元格的表格、带语法高亮的代码、LaTeX 公式、图片、附件和封面。边写边用 Markdown 快捷输入，其余的都在 `/` 菜单里。提及另一篇笔记就能链接过去，对方会列出反向引用。
+标题、列表、待办、引用、高亮块、分栏、可合并单元格的表格、带语法高亮的代码、LaTeX 公式、图片、附件和封面。边写边用 Markdown 快捷输入，其余的都在 `/` 菜单里。提及另一篇笔记就能链接过去，对方会列出反向引用。Mermaid 代码块直接显示成图表。数据表用单选、日期、数字、公式、查找引用、关联等字段记录信息，视图可以筛选、排序、分组，「笔记」列的每一格都是一篇真实的笔记。「…」菜单里有专注模式、打字机模式和段落聚焦，「显示」›「放大」只放大正文。
 
 ### 画
 
@@ -69,25 +69,39 @@
 
 ### 用真实的文件夹整理
 
-主页把每个文件夹显示成一叠纸，里面有什么一眼就能看到。把笔记拖到文件夹上停一下，文件夹会自己展开；文件夹里还能再放文件夹，移动可以撤销。笔记可以置顶、收藏；按 `⌘ J` 搜索所有标题和正文，在笔记里查找替换，也可以用正则表达式。删掉的笔记先进回收站。电脑上其他位置的 Markdown 文件和文件夹，可以在「本机文件」里打开，原地编辑。
+侧栏按顶层文件夹分组。打开一个文件夹，它的页面把子文件夹显示成一叠纸，里面有什么一眼就能看到；列表视图可以按任意一列排序。电脑上的任何文件夹都能用「添加文件夹」加进来，原地使用。把笔记拖到文件夹上停一下，文件夹会自己展开；文件夹里还能再放文件夹，页面和文件夹也能移到另一个顶层文件夹，每次移动都可以撤销。笔记可以置顶到侧栏最上面；点搜索图标或按 `⌘ J` 搜索所有标题和正文，在笔记里查找替换，也可以用正则表达式。删掉的笔记先进回收站，保留几天由你定。单独打开的 Markdown 文件在自己的窗口里原地编辑。
 
 ### 带上旧笔记
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次启动的画面，提示导入它找到的 Obsidian 库。">
-</p>
-
-第一次打开时，Quiet.md 会找到你的 Obsidian、Logseq、iA Writer 和 Typora 笔记库并复制进来，原文件不会被改动。Obsidian 的 `[[双链]]` 照样能用，点一下就打开它指向的笔记。之后也可以把 Markdown 文件和文件夹拖到主页，或者直接拖进侧栏的某个文件夹。笔记也能导出成 Markdown 或 PDF，或者直接打印。
+「从其他应用导入…」（在「文件」菜单里）会找到这台电脑上的 Obsidian、Logseq、iA Writer、Typora 笔记库和思源笔记工作空间并复制进来，原文件不会被改动。Obsidian 的 `[[双链]]` 照样能用，点一下就打开它指向的笔记。之后也可以把 Markdown 文件和文件夹拖到文件夹页，或者直接拖进侧栏的某个文件夹。笔记也能导出成 Markdown 或 PDF，或者直接打印。
 
 ### 还有
 
 - **版本历史**：每篇笔记保存时都会留下快照（默认 20 份，最多 30 份）。点开一份就在原处看到改了什么，一键恢复，也可以给它起个名字。
 - **快速笔记**：在 macOS 上，全局快捷键（默认 `⌥ Space`）在任何应用上方打开一个小笔记窗口。
-- **外观**：内置 Craft、飞书、Notion、Obsidian 四种风格，每种都有深色版，也可以用 CSS 自己写（见 [docs/THEMES.md](docs/THEMES.md)）。界面字体和文档字体都能选。
-- **快捷键**：按 `⌘ /` 查看全部快捷键，每一个都能改。在 Windows 和 Linux 上，Ctrl 代替 ⌘，Alt 代替 ⌥。
+- **外观**：内置 Craft、飞书、Notion、Obsidian 四种风格，每种都有由它的配色推算出的深色效果，也可以用 CSS 自己写（见 [docs/THEMES.md](docs/THEMES.md)）。界面字体和文档字体都能选。
+- **快捷键**：按 `⌘ /` 查看全部快捷键，每一个都能改，也能清除。在 Windows 和 Linux 上，Ctrl 代替 ⌘，Alt 代替 ⌥。
+- **命令行和 Agent**：随应用附带的命令行工具 `quiet` 让 Claude Code、Codex 等 AI Agent 读写你的文档库，和你用的是同一个引擎。「设置 › 连接 Agent」给出一句话发给 Agent，它会自己装好；macOS 上一键安装命令行工具。详见[英文 README](README.md#work-with-agents)。
 - **语言**：英文、简体中文、繁体中文、日文、韩文、西班牙文、法文、阿拉伯文和土耳其文。阿拉伯文正确连写，从右往左排。
 - **清理**：「设置 › 文档库」能找出已经没有笔记在用的图片和文件，确认后才移出。
 - **更新**：新版本在应用内安装，安装前会校验签名。自动检查可以关闭。
+
+## 路线图
+
+- [x] 富文本文档：标题、列表、高亮块、表格、分栏、代码、公式、图片和附件
+- [x] Markdown 文件，原地打开、原地编辑
+- [x] 画板：手绘风格的图示和草图，可以放进笔记，也可以单独存在
+- [x] 原地打开任意文件夹，在侧栏里并排显示
+- [x] 从 Obsidian、Logseq、思源笔记、Typora、iA Writer 和任意 Markdown 文件夹导入
+- [x] 写作模式：专注模式、打字机模式和段落聚焦
+- [x] 主题、深色模式和九种界面语言
+- [x] 给 AI Agent 用的 `quiet` 命令行工具和 skill
+- [ ] 数据表（进行中）
+- [ ] Mermaid 图表（进行中）
+- [ ] 移动端：iPhone、iPad 和 Android（进行中）
+- [ ] 多设备同步（进行中）
+- [ ] 文档属性
+- [ ] 网页剪藏
 
 ## 下载
 
@@ -112,7 +126,7 @@
 
 也可以在官网 [Quiet.md](https://quiet.md) 下载。所有版本和 SHA-256 校验值见 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)。
 
-首次启动时可以选择界面语言、文档库位置和随手记快捷键，并可从 Obsidian、Logseq、iA Writer、Typora 复制已有笔记进来。空文档库里会放一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。
+首次启动会直接打开「文稿」里的 **Quiet Notes** 文件夹（以前的版本建过 `Quiet.md` 文件夹的，就用它），里面放着一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。别的文件夹、其他应用里的笔记，随时可以从「文件」菜单添加或导入。
 
 ## 性能
 
@@ -171,5 +185,5 @@
 
 以下内容不在 MIT 范围内，fork 时请替换：
 
-- `assets/icons/` 里的 70 个 Nucleo 图标使用 Nucleo 商业授权，请勿单独提取再分发；
+- `assets/icons/` 里的 82 个和 `assets/editor-icons/` 里的 24 个 Nucleo 图标使用 Nucleo 商业授权，请勿单独提取再分发；
 - 「Quiet.md」这个名字和应用图标。

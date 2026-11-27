@@ -56,11 +56,11 @@ type Page = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> Div;
 const PAGES: [(&str, &str, Page); 13] = [
     ("按钮", "Button：六种变体、五种尺寸、图标按钮、工具按钮", pages::buttons),
     ("输入", "Field、Select、Textarea、Label", pages::fields),
-    ("选择控件", "Checkbox、Radio、Switch、Segmented、颜色", pages::toggles),
+    ("选择控件", "Checkbox、Radio、Switch、Segmented、Swatch、Slider", pages::toggles),
     ("标签", "Badge、Kbd、KbdGroup、关联、人员", pages::badges),
     ("菜单", "Popover、MenuItem、MenuLabel、MenuSeparator；应用和数据表的菜单", pages::menus),
     ("对话框", "Dialog；数据表的新增 / 修改字段", pages::dialogs),
-    ("卡片", "Card、Item、Separator、Toast", pages::cards),
+    ("卡片", "Card、Item、Separator、Toast、ScrollArea", pages::cards),
     ("面板", "数据表的筛选、排序、字段配置、填色", pages::panels),
     ("工具栏", "视图工具栏、勾选操作条、表内搜索", pages::bars),
     ("表格", "表头、行、勾选、选区、填色、分组、添加记录、统计", pages::grid),
@@ -117,7 +117,7 @@ impl Gallery {
         inputs.area.update(cx, |t, _| { t.multiline = true; t.wrap = true; });
         let on = [("chk", 1), ("sw", 1), ("own", 0), ("lk", 0), ("lk", 2), ("fl", 1), ("fl", 2), ("fl", 4), ("rowchk", 0), ("sort", 0), ("sort", 3)].into_iter().collect();
         let pick = [(("seg", 0), 0), (("seg", 1), 1), (("sw-c", 0), 2), (("type", 0), 1), (("type", 1), 1), (("opt", 0), 1), (("op", 0), 2), (("day", 0), 12), (("month", 0), 10),
-            (("es", 0), 0), (("pk", 0), 2), (("rec", 0), 1), (("pf-f", 0), 2), (("pf-f", 1), 3), (("pf-o", 1), 1), (("ps-f", 1), 1), (("ps-s", 0), 1), (("fld", 0), 2), (("mode", 0), 0)].into_iter().collect();
+            (("es", 0), 0), (("pk", 0), 2), (("rec", 0), 1), (("pf-f", 0), 2), (("pf-f", 1), 3), (("pf-o", 1), 1), (("ps-f", 1), 1), (("ps-s", 0), 1), (("fld", 0), 2), (("mode", 0), 0), (("sld", 0), 6)].into_iter().collect();
         let rows = [("filter", vec![0, 1]), ("sort", vec![0, 1]), ("opts", vec![9, 0]), ("chips", vec![0, 1, 2]), ("grid", vec![0, 1, 2, 3])].into_iter().collect();
         Gallery { focus: cx.focus_handle(), page: 0, pair: false, clicks: 0, toast: None, on, pick, open: None, dialog: None, inputs, cell: (1, 0), anchor: (1, 1), rows }
     }
@@ -217,6 +217,7 @@ impl Element for Scheme {
 
 impl Render for Gallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::design::menu::set_viewport(window);
         // the inputs' colours follow the theme
         for e in self.inputs.all() { e.update(cx, |t, _| { t.color = color::foreground(); t.placeholder_color = color::placeholder(); }); }
         let dark = crate::theme::dark();

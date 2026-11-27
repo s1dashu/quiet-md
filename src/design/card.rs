@@ -22,7 +22,7 @@ impl Card {
 impl RenderOnce for Card {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let g = geo();
-        let d = under(self.base, |d| d.bg(crate::theme::raised(color::card())).rounded(px(g.card_r)).shadow(shadow::frame()).flex().flex_col()
+        let d = under(self.base, |d| d.bg(color::card()).rounded(px(g.card_r)).shadow(shadow::frame()).flex().flex_col()
             .text_size(px(g.text)).text_color(color::foreground()));
         super::base::Raised(d.into_any_element())
     }
@@ -52,8 +52,8 @@ impl RenderOnce for Separator {
 pub enum ToastTone { Success, Error, Info }
 
 /// A toast (Sonner as shadcn ships it: `popover` under `popover-foreground`, `rounded-2xl`, 356 wide,
-/// p-4, gap 6, 13pt text, Lucide's outline mark at 16 in the text's colour, an error's too) on the
-/// popover's edge.
+/// p-4, gap 6, 13pt text, Lucide's outline mark at 16 in the text's colour, an error's too) at level 2
+/// (`shadow::toast`: the popover's edge over a shallower drop).
 #[derive(IntoElement)]
 pub struct Toast { base: Div, tone: ToastTone, text: SharedString }
 impl Styled for Toast { fn style(&mut self) -> &mut StyleRefinement { self.base.style() } }
@@ -67,7 +67,7 @@ impl RenderOnce for Toast {
         let glyph = icon(mark, 16., color::foreground()).flex_none();
         let mut d = self.base;
         let caller = std::mem::take(d.style());
-        let mut d = d.w(px(356.)).flex().items_center().gap(px(6.)).px(px(g.toast_px)).py(px(g.toast_py)).rounded(px(g.toast_r)).bg(color::popover()).shadow(shadow::popover())
+        let mut d = d.w(px(356.)).flex().items_center().gap(px(6.)).px(px(g.toast_px)).py(px(g.toast_py)).rounded(px(g.toast_r)).bg(color::popover()).shadow(shadow::toast())
             .font_family(crate::theme::ui_family()).text_size(px(13.)).line_height(px(super::text::SM_LINE)).text_color(color::foreground())
             .child(glyph).child(label(self.text));
         d.style().refine(&caller);

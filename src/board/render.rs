@@ -898,11 +898,11 @@ pub fn paint_fit(painter: &mut Painter, board: &Board, bounds: Bounds<Pixels>, p
 }
 
 thread_local! {
-    /// 主页 cards: painters by board version, the last few.
+    /// Folder-page cards: painters by board version, the last few.
     static CARDS: std::cell::RefCell<Vec<(u64, Painter)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// `paint_fit` for a 主页 card, with a painter kept per board version.
+/// `paint_fit` for a folder page's card, with a painter kept per board version.
 pub fn paint_card(board: &Board, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
     let v = board.version();
     CARDS.with(|c| {

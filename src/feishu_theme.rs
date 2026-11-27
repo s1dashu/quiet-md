@@ -83,31 +83,6 @@ pub mod ud {
     }
 }
 
-fn shadow(a: f32, y: f32, blur: f32, spread: f32) -> BoxShadow {
-    let a = if crate::theme::dark() { (a * 3.).min(0.6) } else { a };
-    BoxShadow { color: rgbaf(31, 35, 41, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset: false }
-}
-
-/// Dropdowns and the slash / block menus (`shadow.popover`: 0 4 8).
-pub fn shadow_menu() -> Vec<BoxShadow> {
-    vec![shadow(0.1, 4., 8., 0.)]
-}
-
-/// Second-level panels, search popups, toasts (0 6 24).
-pub fn shadow_panel() -> Vec<BoxShadow> {
-    vec![shadow(0.1, 6., 24., 0.)]
-}
-
-/// Modal dialogs (0 8 24 4 at .12).
-pub fn shadow_dialog() -> Vec<BoxShadow> {
-    vec![shadow(0.12, 8., 24., 4.)]
-}
-
-/// `--shadow-s4-down`: the 「…」 menu, home menus, the icon picker.
-pub fn shadow_s4_down() -> Vec<BoxShadow> {
-    vec![shadow(0.04, 8., 24., 8.), shadow(0.04, 6., 12., 0.), shadow(0.06, 4., 8., -8.)]
-}
-
 pub use crate::theme::{ui_family, DOC_UI_FONT};
 #[cfg(not(any(target_os = "linux", target_family = "wasm")))]
 pub const MONO_FONT: &str = "Menlo";
@@ -124,7 +99,7 @@ impl Theme {
     /// Dark mode: N400 mirrors to L 0.41 and vanishes on raised surfaces (GitHub #319); take the base theme's.
     pub fn text_disabled() -> Hsla { if crate::theme::dark() { crate::theme::Theme::text_disabled() } else { c(ud::N400) } }
     pub fn text_code() -> Hsla { c(ud::N800) }
-    pub fn link() -> Hsla { c(ud::B500) }
+    pub fn link() -> Hsla { crate::theme::lift(c(ud::B500), 4.5) }
     pub fn primary() -> Hsla { c(ud::B600) }
     pub fn primary_500() -> Hsla { c(ud::B500) }
     /// `--primary-fill-solid-01`.
@@ -159,7 +134,6 @@ impl Theme {
     pub fn block_bg_area() -> Hsla { ta(100, 106, 115, 0.05) }
     /// Done to-do text: text-caption at the 0.7 opacity used on done spans.
     pub fn todo_done() -> Hsla { ta(100, 106, 115, 0.7) }
-    pub fn scrollbar_thumb() -> Hsla { ta(31, 35, 41, 0.3) }
     pub fn shadow() -> Hsla { ta(31, 35, 41, 0.10) }
     /// `--B200`: ring of a code block / callout whose handle menu is open.
     pub fn code_hover_ring() -> Hsla { c(ud::B200) }
@@ -184,7 +158,8 @@ fn hsla(c: crate::palette::Rgba) -> Hsla {
 }
 
 pub fn text_color(name: &str) -> Option<Hsla> {
-    crate::palette::text_color(name).map(hsla)
+    // coloured text reads on the dark page (`theme::lift`)
+    crate::palette::text_color(name).map(|c| crate::theme::lift(hsla(c), 4.5))
 }
 
 pub fn bg_color(name: &str) -> Option<Hsla> {
@@ -243,9 +218,9 @@ pub fn heading_metrics(level: u8) -> BlockMetrics {
 
 pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
 
-pub use crate::theme::{craft, ca, mix, ta, shadow_button};
+pub use crate::theme::{craft, ca, mix, ta};
 
-impl Theme { pub fn link_hover() -> Hsla { c(ud::old::B600) } }
+impl Theme { pub fn link_hover() -> Hsla { crate::theme::lift(c(ud::old::B600), 4.5) } }
 
 impl Theme { pub fn table_line() -> Hsla { ca(craft::N1000, 0.09) } }
 

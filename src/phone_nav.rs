@@ -1,11 +1,11 @@
-//! A phone's navigation, as `UINavigationController` keeps it: 主页 at the
-//! root, a folder's page and a document pushed on top. A pushed page has
+//! A phone's navigation, as `UINavigationController` keeps it: a top-level
+//! folder's page at the root, a folder's page and a document pushed on top. A pushed page has
 //! 「‹ 上一级」 at its top left, named after the page it goes back to, and a
 //! swipe from the screen's leading edge takes it back, the page following
 //! the finger and the gesture cancellable halfway (the platform decides,
 //! `BackGestureEvent`). The pages under it are the ones visited; a page
 //! reached some other way (launch, the drawer, search) goes back to the
-//! level above it: its folder, else 主页.
+//! level above it: its folder, up to its top-level folder.
 
 use crate::app::{View, Workspace};
 use crate::settings::{display_title, tr};
@@ -14,7 +14,7 @@ use gpui::*;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Place { Home, Folder(String), Doc(String) }
+pub enum Place { Folder(String), Doc(String) }
 
 /// The pages visited under the one shown, and a back swipe under way.
 #[derive(Default)]
@@ -39,7 +39,6 @@ const PARALLAX: f32 = 0.3;
 impl Workspace {
     fn place(&self) -> Option<Place> {
         match self.view {
-            View::Home => Some(Place::Home),
             View::Folder => self.folder_current.clone().map(Place::Folder),
             View::Doc => self.current.clone().map(Place::Doc),
             _ => None,
@@ -47,15 +46,18 @@ impl Workspace {
     }
 
     fn alive(&self, p: &Place) -> bool {
-        match p { Place::Home => true, Place::Folder(id) | Place::Doc(id) => self.entries.iter().any(|e| &e.id == id) }
+        match p { Place::Folder(id) | Place::Doc(id) => self.entries.iter().any(|e| &e.id == id) }
     }
 
-    /// The level above `p`: its folder, else 主页.
+    /// The level above `p`: its folder (a top-level folder's page has none above it).
     fn up_of(&self, p: &Place) -> Option<Place> {
-        let row = match p { Place::Home => return None, Place::Folder(id) => id.clone(), Place::Doc(id) => self.row_of(id) };
+        let row = match p { Place::Folder(id) => id.clone(), Place::Doc(id) => self.row_of(id) };
         let parent = self.entries.iter().find(|e| e.id == row).and_then(|e| e.meta.parent.clone());
-        Some(parent.filter(|id| self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some())).map_or(Place::Home, Place::Folder))
+        parent.filter(|id| self.entries.iter().any(|e| &e.id == id && e.meta.folder.is_some())).map(Place::Folder)
     }
+
+    /// A top-level folder's page: the root, with the drawer's button where 「‹」 would be.
+    pub(crate) fn at_root(&self, p: &Place) -> bool { matches!(p, Place::Folder(id) if crate::shared_store::top_of_row(id).is_some()) }
 
     /// Where 「‹」 and the edge swipe go: the page visited before, else the level above.
     pub(crate) fn back_target(&self) -> Option<Place> {
@@ -68,21 +70,20 @@ impl Workspace {
         stack.last().filter(|p| **p != now && self.alive(p)).cloned().or_else(|| self.up_of(&now))
     }
 
-    fn place_name(&self, p: &Place) -> String {
+    fn nav_name(&self, p: &Place) -> String {
         match p {
-            Place::Home => tr("主页", "Home").to_string(),
-            Place::Folder(id) | Place::Doc(id) => self.entries.iter().find(|e| &e.id == id).map(|e| display_title(&e.title)).unwrap_or_default(),
+            Place::Folder(id) | Place::Doc(id) => self.entries.iter().find(|e| &e.id == id).map(|e| display_title(&e.title)).unwrap_or_else(|| tr("文件夹", "Folder").to_string()),
         }
     }
 
     /// Each frame on a phone: a page shown since the last one is pushed on
-    /// the one before it (or, already under it, unwinds to it); 主页 is the root.
+    /// the one before it (or, already under it, unwinds to it); a top-level folder's page is a root.
     pub(crate) fn track_place(&mut self) {
         let Some(now) = self.place() else { return };
         let nav = &mut self.phone_nav;
         if nav.seen.as_ref() == Some(&now) { return }
         if std::mem::take(&mut nav.popping) {
-        } else if now == Place::Home {
+        } else if matches!(&now, Place::Folder(id) if crate::shared_store::top_of_row(id).is_some()) {
             nav.stack.clear();
         } else if let Some(i) = nav.stack.iter().rposition(|p| *p == now) {
             nav.stack.truncate(i);
@@ -99,7 +100,6 @@ impl Workspace {
         self.phone_nav.popping = true;
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.step_aside(window, cx)); }
         match t {
-            Place::Home => self.show_view(View::Home, cx),
             Place::Folder(id) => { self.open_folder(&id, window, cx); }
             Place::Doc(id) => self.open(&id, window, cx),
         }
@@ -108,7 +108,7 @@ impl Workspace {
 
     /// 「‹ 上一级」: the chevron on the drawer's icon column, the page it goes back to beside it.
     pub(crate) fn back_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let name = self.place_name(&self.back_target()?);
+        let name = self.nav_name(&self.back_target()?);
         // The bar starts at TOUCH_BUTTON_X: the 22pt chevron centred where a 44pt button's glyph is.
         Some(div().id("phone-back").flex_none().h(px(44.)).max_w(px(200.)).pl(px(crate::design::T.tool_h / 2. - 11.)).pr(px(8.))
             .flex().items_center().gap(px(2.)).cursor_pointer().active(|s| s.opacity(0.5))
@@ -160,16 +160,15 @@ impl Workspace {
         let vw = f32::from(window.viewport_size().width);
         self.phone_nav.under = Some(target.clone());
         let page = match &target {
-            Place::Home => self.render_home(window, cx),
             Place::Folder(id) => {
                 let shown = self.folder_current.replace(id.clone());
-                let el = if self.phone_pages(window) { self.render_phone_list(true, window, cx) } else { self.render_folder(window, cx) };
+                let el = if self.phone_pages(window) { self.render_phone_list(window, cx) } else { self.render_folder(window, cx) };
                 self.folder_current = shown;
                 el
             }
             // Another document can't be drawn without opening it: its title on a blank page.
             Place::Doc(_) => div().size_full().px(px(24.)).pt(px(64.)).text_size(px(28.)).font_weight(FontWeight::BOLD).text_color(Theme::text())
-                .child(crate::editor_ui::ui_text(self.place_name(&target))).into_any_element(),
+                .child(crate::editor_ui::ui_text(self.nav_name(&target))).into_any_element(),
         };
         self.phone_nav.under = None;
         let dim = 0.12 * (1. - progress);

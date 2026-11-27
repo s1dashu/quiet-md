@@ -21,8 +21,11 @@ cask "quietmd" do
   depends_on macos: :ventura
 
   app "quiet.md.app"
+  # The `quiet` command line tool inside the app, linked onto the PATH. Releases up to 0.1.14 do not
+  # have it: the tap's cask takes this line from the first release that does.
+  binary "#{appdir}/quiet.md.app/Contents/MacOS/quiet"
 
-  # The library (~/Documents/Quiet.md by default) holds the user's notes and is never removed.
+  # The library (~/Documents/Quiet Notes by default, Quiet.md from earlier versions) holds the user's notes and is never removed.
   zap trash: [
     "~/Library/Application Support/quiet-md",
     "~/Library/Caches/com.s1dashu.quietmd",

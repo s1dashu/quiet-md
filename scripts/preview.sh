@@ -1,16 +1,27 @@
 #!/bin/zsh
 # Replace the running hand-test build (dist-preview) with target/release. It
 # runs as dist-preview/Quiet.md Preview.app (so it is never mistaken for the installed app) on the
-# saved preview library, or ~/Documents/Quiet.md. The app initializes the
+# saved preview library, or the default one (~/Documents/Quiet.md if it is there, else
+# ~/Documents/Quiet Notes, as the app picks). The app initializes the
 # bundled 开始指南 on first launch, just like an installed build.
+# When that library is the one an installed build opens (the default place, or where
+# library.json says), the preview runs as installed: no QUIET_MD_HOME, so it finds the
+# library the same way and renaming it is remembered for the installed app too. Any other
+# library (a temporary or test one, or QUIET_MD_HOME given) is pinned with QUIET_MD_HOME.
 # Only this checkout's own binaries are stopped:
 # pkill matches this checkout's absolute path. Log: /tmp/quiet-md-preview.log
 set -e
 cd "$(dirname "$0")/.."
-preview_library="${QUIET_MD_HOME:-$(cat dist-preview/library-path 2>/dev/null || printf '%s' "$HOME/Documents/Quiet.md")}"
+default_library="$HOME/Documents/Quiet Notes"; [ -d "$HOME/Documents/Quiet.md" ] && default_library="$HOME/Documents/Quiet.md"
+preview_library="${QUIET_MD_HOME:-$(cat dist-preview/library-path 2>/dev/null || printf '%s' "$default_library")}"
 # An empty path would put the library in the current directory.
 [ -n "$preview_library" ] || { echo "preview.sh: no preview library" >&2; exit 1; }
-export QUIET_MD_HOME="$preview_library"
+located=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("path",""))' "$HOME/Library/Application Support/quiet-md/library.json" 2>/dev/null || true)
+installed="${located:-$default_library}"
+as_installed=
+# the old default still named after a rename: library.json says where it went
+if [ -z "${QUIET_MD_HOME:-}" ] && { [ "$preview_library" = "$installed" ] || { [ -n "$located" ] && [ "$preview_library" = "$HOME/Documents/Quiet.md" ]; }; }; then as_installed=1; fi
+if [ -n "$as_installed" ]; then unset QUIET_MD_HOME; echo "preview.sh: the installed app's library ($installed), found as installed"; else export QUIET_MD_HOME="$preview_library"; fi
 app="$PWD/dist-preview/Quiet.md Preview.app"
 bin="$app/Contents/MacOS/quiet_md"
 pkill -f "^$bin" || true
@@ -32,7 +43,8 @@ iconutil -c icns "$iconset" -o "$app/Contents/Resources/app-icon.icns"
 rm -rf "$icon_tmp"
 cp target/release/quiet_md "$bin.bin"
 # Finder launches must use the same library as this script.
-printf '#!/bin/zsh\nexport QUIET_MD_HOME=%q\nexec "${0:A:h}/quiet_md.bin" "$@"\n' "$preview_library" > "$bin"
+if [ -n "$as_installed" ]; then printf '#!/bin/zsh\nunset QUIET_MD_HOME\nexec "${0:A:h}/quiet_md.bin" "$@"\n' > "$bin"
+else printf '#!/bin/zsh\nexport QUIET_MD_HOME=%q\nexec "${0:A:h}/quiet_md.bin" "$@"\n' "$preview_library" > "$bin"; fi
 chmod +x "$bin"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,7 +59,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSMinimumSystemVersion</key><string>13.0</string>
-  <key>NSDocumentsFolderUsageDescription</key><string>Quiet.md 把文档库放在「文稿」里的 Quiet.md 文件夹。</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Quiet.md 把文档库放在「文稿」里的 Quiet Notes 文件夹。</string>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>Markdown</string>
     <key>CFBundleTypeRole</key><string>Editor</string>
@@ -62,9 +74,11 @@ cat > "$app/Contents/Info.plist" <<PLIST
   </dict></array>
 </dict></plist>
 PLIST
+# No CFBundleURLTypes: quietmd:// links (`quiet open`) go to the installed Quiet.md only, never to
+# this preview. To try them against a build, see docs/design/CLI.md (测试 URL scheme).
 codesign --force --sign - "$app" >/dev/null 2>&1 || true
 # The Dock and Finder cache a bundle's icon by path: tell them it changed.
 touch "$app"
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
-(QUIET_MD_HOME="$QUIET_MD_HOME" nohup "$bin" >/tmp/quiet-md-preview.log 2>&1 &)
+(nohup "$bin" >/tmp/quiet-md-preview.log 2>&1 &)
 sleep 2; pgrep -fl "^$bin"

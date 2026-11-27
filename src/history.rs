@@ -291,7 +291,6 @@ impl Workspace {
         // a 数据表 writes as it is edited: nothing of the present may be pending when its file is replaced
         let table = self.is_table(&id);
         // a build without 数据表 leaves its file as it is
-        if table && !crate::DATATABLE { return self.set_history_error(crate::settings::tr("此版本不支持数据表", "Data tables aren't supported in this version").to_string(), cx); }
         if table { if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); } crate::table::flush_all(cx); }
         let doc = match self.store.restore_version(&id, &name) {
             Ok(d) => d,
@@ -312,7 +311,7 @@ impl Workspace {
         self.unsaved = false;
         self.status = crate::app::SaveStatus::Saved;
         self.sync_document(window, cx);
-        self.entries = self.store.list();
+        self.entries.set(self.store.list());
         self.sort();
         self.show_toast_kind(crate::editor_ui::ToastKind::Success, crate::settings::tr("已恢复到所选版本", "Restored that version"), cx);
     }
@@ -327,7 +326,7 @@ impl Workspace {
             let title = if tag.is_empty() { base } else { crate::localized_format!("{}（{}）", "{} ({})", base, tag) };
             match self.store.copy_table_version(&id, &name, &title) {
                 Ok(new) => {
-                    self.entries = self.store.list();
+                    self.entries.set(self.store.list());
                     self.sort();
                     self.close_history(cx);
                     self.open(&new, window, cx);
@@ -347,7 +346,7 @@ impl Workspace {
                 doc.title = crate::model::RichText::plain(title);
                 match self.store.create_from(&doc) {
                     Ok(new) => {
-                        self.entries = self.store.list();
+                        self.entries.set(self.store.list());
                         self.sort();
                         self.close_history(cx);
                         self.open(&new, window, cx);
@@ -521,7 +520,7 @@ impl Workspace {
                 empty(crate::settings::tr("还没有命名版本", "Nothing named yet"), crate::settings::tr("把鼠标移到某一版上，点铅笔给它起个名字。", "Hover a version and click the pencil to name it."))
             }.into_any_element()
         } else {
-            div().id("history-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h.list_scroll).flex().flex_col().pb(px(6.)).children(rows).into_any_element()
+            crate::design::scroll::make_room(div().id("history-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h.list_scroll).flex().flex_col().pb(px(6.)), "history-list", dmenu::PAD).children(rows).child(crate::design::scroll::bar_corners("history-list", &h.list_scroll, 0., crate::design::scroll::WINDOW_R)).into_any_element()
         };
         let act = |id: &'static str, text: &'static str| Button::ghost(id).label(text);
         let footer = div().flex_none().border_t_1().border_color(Theme::line_divider()).p(px(12.)).flex().items_center().gap(px(4.))

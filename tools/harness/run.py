@@ -4,6 +4,7 @@ usage: python3 tools/harness/run.py <script.txt> [lib_dir] [work_dir]
   lib_dir  default: tools/harness/lib_clean  (copied fresh every run, never mutated)
   work_dir default: /tmp/fdl-run             (shots/*.png and `log` land here)
   FDL_BIN  default: target/release/quiet_md of this checkout
+  FDL_LIB_NAME  default: lib (the copy's folder name, shown as its top-level folder's name)
 Bench numbers: grep -a bench <work_dir>/log
 """
 import os, shutil, subprocess, sys
@@ -14,7 +15,7 @@ work = os.path.abspath(sys.argv[3]) if len(sys.argv) > 3 else '/tmp/fdl-run'
 os.makedirs(work, exist_ok=True)
 script = os.path.join(work, 's.txt')
 open(script, 'w').write(open(sys.argv[1]).read() + '\nquit\n')
-lib = os.path.join(work, 'lib')
+lib = os.path.join(work, os.environ.get('FDL_LIB_NAME') or 'lib')
 shutil.rmtree(lib, ignore_errors=True); shutil.copytree(lib_src, lib)
 binary = os.environ.get('FDL_BIN') or os.path.join(repo, 'target', 'release', 'quiet_md')
 # Release builds leave the script driver out and would just sit there.
@@ -22,6 +23,8 @@ if b'devtools: cannot read' not in open(binary, 'rb').read():
     sys.exit(f'{binary} has no script driver: build it with `cargo build --release --features devtools`')
 env = {'HOME': os.path.expanduser('~'), 'QUIET_MD_HOME': lib, 'FDL_SCRIPT': script,
        'FDL_SHOTS': work, 'PATH': '/opt/homebrew/bin:/usr/bin:/bin'}
-for k in ('FDL_BOARD_PROF', 'FDL_BOARD_RENDER', 'FDL_TRACE', 'FDL_NOPARK', 'FDL_WINDOW_CAPTURE', 'FDL_NOBLINK', 'FDL_TOUCH', 'FDL_RECORD_FPS', 'QUIET_MD_ONBOARDING', 'QUIET_MD_UPDATE_URL', 'QUIET_MD_FONT_URL', 'QUIET_MD_FONT_DIR', 'QUIET_MD_TRIAL_FONTS', 'QUIET_MD_FOLDERS', 'QUIET_MD_COMPONENTS'):
+for k in ('FDL_BOARD_PROF', 'FDL_BOARD_RENDER', 'FDL_TRACE', 'FDL_NOPARK', 'FDL_WINDOW_CAPTURE', 'FDL_NOBLINK', 'FDL_ANIMATE', 'FDL_TOUCH', 'FDL_RECORD_FPS', 'FDL_RECORD_START', 'TMPDIR', 'QUIET_MD_UPDATE_URL', 'QUIET_MD_FONT_URL', 'QUIET_MD_FONT_DIR', 'QUIET_MD_TRIAL_FONTS', 'QUIET_MD_FOLDERS', 'QUIET_MD_COMPONENTS', 'FDL_TREE_WRITE_DELAY'):
     if k in os.environ: env[k] = os.environ[k]
-subprocess.run(binary, env=env, cwd=work, stdout=open(os.path.join(work, 'log'), 'w'), stderr=subprocess.STDOUT)
+code = subprocess.run(binary, env=env, cwd=work, stdout=open(os.path.join(work, 'log'), 'w'), stderr=subprocess.STDOUT).returncode
+# 3: a `row` / `anchor` step found nothing to click (the reason is in the log).
+if code: sys.exit(f'quiet_md exited with {code}; see {os.path.join(work, "log")}')

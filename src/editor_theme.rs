@@ -48,7 +48,7 @@ tokens!(
     bg_overlay, line_divider, line_border, fill_hover, fill_hover_strong, fill_pressed,
     fill_turninto_active, selection, block_hover, block_selected, handle_active, size_cell,
     size_cell_border, size_cell_active, size_cell_disabled, swatch_border, block_bg_area, todo_done,
-    scrollbar_thumb, shadow, code_hover_ring, quote_bar, caret, pinned,
+    shadow, code_hover_ring, quote_bar, caret, pinned,
     table_header, table_line, table_bar_hover, table_bar_selected, danger_bar, danger_cell,
     danger, window, sidebar_text, sidebar_hover, sidebar_selected, sidebar_section,
     button_border, code_chip, code_chip_border, code_bg, code_gutter, code_gutter_line,
@@ -63,7 +63,6 @@ pub fn bg_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu(
 pub fn callout_bg(name: &str) -> Option<gpui::Hsla> { style().palette("callout", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_bg(name) } else { crate::theme::callout_bg(name) }) }
 pub fn callout_border(name: &str) -> Option<gpui::Hsla> { style().palette("border", hue(name)).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_border(name) } else { crate::theme::callout_border(name) }) }
 pub fn callout_border_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu() { crate::feishu_theme::callout_border_swatch(name) } else { crate::theme::callout_border_swatch(name) } }
-pub use crate::theme::{shadow_button, shadow_menu, shadow_panel, shadow_dialog};
 
 pub fn mono_font() -> &'static str { style().font("pre.font") }
 

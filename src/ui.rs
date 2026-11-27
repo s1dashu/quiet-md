@@ -5,6 +5,7 @@ use crate::time::civil;
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
     svg().path(SharedString::from(format!("icons/{name}.svg"))).size(px(size)).flex_none().text_color(color)
@@ -17,26 +18,53 @@ pub enum ToastKind {
     Info,
 }
 
-/// Toast: `design::Toast` 32px below the top, centred. It lasts 3s and fades over
-/// its last .3s; None once it is over.
-pub fn toast_el(kind: ToastKind, msg: &SharedString, t0: web_time::Instant, window: &mut Window) -> Option<AnyElement> {
-    let e = t0.elapsed().as_secs_f32();
-    if e >= 3. {
+/// A toast's message and clock (Sonner's, as shadcn ships it): shown 4s, fading over the last .3s;
+/// the clock stops while the pointer is over it and goes on with what is left once it leaves.
+pub struct ToastState { pub kind: ToastKind, pub msg: SharedString, ran: Duration, since: Option<web_time::Instant> }
+
+impl ToastState {
+    const LIFE: f32 = 4.;
+    const FADE: f32 = 0.3;
+    pub fn new(kind: ToastKind, msg: &str) -> Self {
+        ToastState { kind, msg: SharedString::from(msg.to_string()), ran: Duration::ZERO, since: Some(web_time::Instant::now()) }
+    }
+    fn elapsed(&self) -> f32 { (self.ran + self.since.map_or(Duration::ZERO, |t| t.elapsed())).as_secs_f32() }
+    pub fn over(&self) -> bool { self.elapsed() >= Self::LIFE }
+    /// How long until the fade starts (when its frames take over); None while paused.
+    pub fn until_fade(&self) -> Option<Duration> {
+        self.since.map(|_| Duration::from_secs_f32((Self::LIFE - Self::FADE - self.elapsed()).max(0.)))
+    }
+    /// The pointer came onto (`true`) or left the toast: stop or restart the clock.
+    pub fn hover(&mut self, on: bool) {
+        match (on, self.since) {
+            (true, Some(t)) => { self.ran += t.elapsed(); self.since = None; }
+            (false, None) => self.since = Some(web_time::Instant::now()),
+            _ => {}
+        }
+    }
+}
+
+/// Toast: `design::Toast` 32px below the top, centred; None once it is over. `on_hover` is told
+/// when the pointer comes onto it or leaves (the owner pauses the clock, `ToastState::hover`).
+pub fn toast_el(t: &ToastState, window: &mut Window, on_hover: impl Fn(bool, &mut Window, &mut App) + 'static) -> Option<AnyElement> {
+    let e = t.elapsed();
+    if e >= ToastState::LIFE {
         return None;
     }
-    let op = if e > 2.7 {
-        window.request_animation_frame();
-        (3. - e) / 0.3
+    let op = if e > ToastState::LIFE - ToastState::FADE {
+        if t.since.is_some() { window.request_animation_frame(); }
+        (ToastState::LIFE - e) / ToastState::FADE
     } else {
         1.
     };
-    let tone = match kind {
+    let tone = match t.kind {
         ToastKind::Success => crate::design::ToastTone::Success,
         ToastKind::Error => crate::design::ToastTone::Error,
         ToastKind::Info => crate::design::ToastTone::Info,
     };
     let vw = window.viewport_size().width;
-    let card = crate::design::Toast::new(tone, crate::settings::label(msg));
+    // It takes the pointer (as Sonner's does): what is under it doesn't light up or take the click.
+    let card = div().id("toast").occlude().on_hover(move |on, window, cx| on_hover(*on, window, cx)).child(crate::design::Toast::new(tone, crate::settings::label(&t.msg)));
     Some(
         deferred(
             anchored()
@@ -62,10 +90,17 @@ pub fn list_line() -> Hsla {
     theme::ca(craft::N1000, 0.045)
 }
 
-/// The quiet list hover: a rounded fill that also hides the row's
-/// hairline above it.
+/// The quiet list hover: a rounded fill that hides the row's own hairline
+/// at once (the one below follows `FolderPage::list_hover`, see [`row_line`]).
 pub fn row_hover(s: StyleRefinement) -> StyleRefinement {
     s.bg(Theme::fill_hover()).border_color(transparent_black()).rounded(px(ROW_RADIUS))
+}
+
+/// A list hairline (the header's foot, or the line above a row), hidden
+/// when a row it touches is lit (hovered, or holding its menu): a lit
+/// row's rounded fill would otherwise leave the line's ends at its corners.
+pub fn row_line(touches_lit: bool) -> Hsla {
+    if touches_lit { transparent_black() } else { list_line() }
 }
 
 
@@ -85,7 +120,7 @@ pub fn spinner(t: f32, color: Hsla) -> Div {
 
 
 
-/// A list row's corners under the pointer (主页, 回收站).
+/// A list row's corners under the pointer (a folder's page, 回收站).
 pub const ROW_RADIUS: f32 = 6.;
 
 
@@ -230,7 +265,12 @@ pub trait TipExt: Sized {
     fn tip(self, text: &str, keys: Option<&str>) -> Self {
         let text = crate::settings::label(text);
         let label = match keys {
-            Some(k) => format!("{text}（{k}）"),
+            // the language's own brackets: full-width in Chinese and Japanese, close in Korean, spaced elsewhere
+            Some(k) => match crate::settings::lang() {
+                crate::settings::Lang::Zh | crate::settings::Lang::ZhTw | crate::settings::Lang::Ja => format!("{text}（{k}）"),
+                crate::settings::Lang::Ko => format!("{text}({k})"),
+                _ => format!("{text} ({k})"),
+            },
             None => text.to_string(),
         };
         self.tip_label(label, TipSide::Below)
@@ -278,6 +318,10 @@ pub(crate) fn header_right_inset() -> f32 {
 
 pub(crate) fn window_controls(window: &Window) -> Option<Div> {
     if !cfg!(any(target_os = "windows", target_os = "linux")) { return None; }
+    // The header's ghost buttons' ink and fills (`ui::header_icon`), so the caption buttons match
+    // the search / new / more beside them in either look.
+    let (hover, pressed) = crate::design::toolbar::ghost_fills(false);
+    let ink = crate::design::color::foreground();
     // Windows must receive mouse-down to arm its native caption buttons.
     let button = |id: &'static str, area: WindowControlArea, label: &'static str| {
         div().id(id).size(px(crate::app::HEADER_ACTIONS_H)).mx(px(7.)).rounded(px(8.)).flex_none().flex().items_center().justify_center().cursor_pointer()
@@ -289,17 +333,17 @@ pub(crate) fn window_controls(window: &Window) -> Option<Div> {
                 WindowControlArea::Max => window.zoom_window(),
                 WindowControlArea::Close => window.dispatch_action(Box::new(crate::app::CloseWindow), cx),
                 WindowControlArea::Drag => {},
-            })).hover(|s| s.bg(Theme::fill_hover())).active(|s| s.bg(Theme::fill_pressed())).tip(label, None)
+            })).hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)).tip(label, None)
     };
     let maximized = window.is_maximized();
     // Native hit-test areas preserve Snap Layouts and the normal WM_CLOSE save guard.
     Some(div().absolute().top_0().right_0().h(px(crate::app::HEADER_H)).flex().items_center().title_bar()
         .child(div().mx(px(12.)).w(px(1.)).h(px(18.)).bg(Theme::line_divider()))
         .child(button("window-minimize", WindowControlArea::Min, crate::settings::tr("最小化", "Minimize"))
-            .child(icon("minus", 18., Theme::icon())))
-        .child(button("window-maximize", WindowControlArea::Max, if maximized { crate::settings::tr("还原", "Restore") } else { crate::settings::tr("最大化", "Maximize") }).child(icon(if maximized { "copy" } else { "expand" }, 18., Theme::icon())))
+            .child(icon("minus", 18., ink)))
+        .child(button("window-maximize", WindowControlArea::Max, if maximized { crate::settings::tr("还原", "Restore") } else { crate::settings::tr("最大化", "Maximize") }).child(icon(if maximized { "copy" } else { "expand" }, 18., ink)))
         .child(button("window-close", WindowControlArea::Close, crate::settings::tr("关闭", "Close"))
-            .child(icon("x", 18., Theme::icon()))))
+            .child(icon("x", 18., ink))))
 }
 
 /// "名称 (键 + 键)" plus an optional "Markdown: …" line.
@@ -443,10 +487,11 @@ pub fn cjk_punct_font() -> Option<&'static str> { crate::fonts::cjk_punct_instal
 pub struct UiText {
     text: SharedString,
     hit: Option<(std::ops::Range<usize>, Hsla)>,
+    optical: bool,
 }
 
 pub fn ui_text(text: impl Into<SharedString>) -> UiText {
-    UiText { text: text.into(), hit: None }
+    UiText { text: text.into(), hit: None, optical: false }
 }
 
 pub struct UiTextLayout {
@@ -458,6 +503,12 @@ pub struct UiTextLayout {
 }
 
 impl UiText {
+    /// Centred on its line by what it looks like, not by its font box: GPUI sets the baseline
+    /// half the line's ascent minus descent below the box's middle, and a CJK fallback's tall
+    /// ascent drops the text half a point under its neighbours (the header row, lined up on the
+    /// traffic lights). Lifted so the middle of the capitals sits on the line's middle.
+    pub fn optical(mut self) -> Self { self.optical = true; self }
+
     pub fn hit(mut self, range: Option<std::ops::Range<usize>>, color: Hsla) -> Self {
         self.hit = range.map(|r| (r, color));
         self
@@ -530,6 +581,20 @@ fn truncated(line: &ShapedLine, runs: &[TextRun], suffix: &str, font_size: Pixel
     out.extend(suffix_runs);
     let s: SharedString = format!("{}{}", &text[..cut], suffix).into();
     window.text_system().shape_line(s, font_size, &out, None)
+}
+
+thread_local! {
+    /// `cap_height`'s answers, by font and size (measured once, then read every frame).
+    static CAPS: RefCell<std::collections::HashMap<(FontId, u32), Pixels>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// The capitals' height from an "H" (the font's own cap height where it has none).
+fn cap_height(ts: &WindowTextSystem, id: FontId, size: Pixels) -> Pixels {
+    let key = (id, f32::from(size).to_bits());
+    if let Some(c) = CAPS.with(|m| m.borrow().get(&key).copied()) { return c }
+    let c = ts.typographic_bounds(id, size, 'H').map(|b| b.size.height.abs()).unwrap_or_else(|_| ts.cap_height(id, size));
+    CAPS.with(|m| m.borrow_mut().insert(key, c));
+    c
 }
 
 impl Element for UiText {
@@ -605,7 +670,18 @@ impl Element for UiText {
         cx: &mut App,
     ) {
         if let Some(line) = line {
-            let _ = line.paint(bounds.origin, layout.line_height, TextAlign::Left, None, window, cx);
+            let mut origin = bounds.origin;
+            if self.optical && let Some(run) = layout.runs.first() {
+                let ts = window.text_system().clone();
+                // the capitals' height from an "H": PingFang's own cap height (0.86 em) is its ideographs',
+                // and taken at its word it pushed Latin text a point down instead of centring it
+                let id = ts.resolve_font(&run.font);
+                let cap = cap_height(&ts, id, layout.font_size);
+                // the capitals' middle sits (ascent - descent - cap) / 2 below the box's; to whole device pixels
+                let sf = window.scale_factor();
+                origin.y -= px((f32::from(line.ascent - line.descent - cap) / 2. * sf).round() / sf);
+            }
+            let _ = line.paint(origin, layout.line_height, TextAlign::Left, None, window, cx);
         }
     }
 }
@@ -745,6 +821,24 @@ pub fn wave_fill(fraction: f32, color: Hsla) -> impl IntoElement {
     }).absolute().inset_0()
 }
 
+
+/// A path as people read it: the home folder as "~".
+pub(crate) fn tilde(p: &std::path::Path) -> String {
+    match dirs::home_dir().and_then(|h| p.strip_prefix(&h).ok().map(|r| r.to_path_buf())) {
+        Some(r) => format!("~/{}", r.display()),
+        None => p.display().to_string(),
+    }
+}
+
+/// The breadcrumbs' size in every page header (a document's, a folder's): shadcn's
+/// Breadcrumb, text-sm.
+pub const CRUMB_SIZE: f32 = 14.;
+
+/// shadcn's Breadcrumb (the user's call, 2026-11-25): the crumbs before the page, their separators
+/// and the "…" in `muted-foreground` (BreadcrumbLink), `foreground` under the pointer; the current
+/// page in `foreground` (BreadcrumbPage), the same weight.
+pub fn crumb_ink() -> Hsla { crate::design::color::muted_foreground() }
+pub fn crumb_page() -> Hsla { crate::design::color::foreground() }
 
 /// A page header's icon button (search, new, more): `Button::ghost`, header-tall.
 pub fn header_icon(id: &'static str, name: &'static str) -> crate::design::Button {

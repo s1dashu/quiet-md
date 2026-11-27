@@ -68,12 +68,15 @@ pub struct Button {
     label: Option<SharedString>,
     selected: bool,
     disabled: bool,
+    on_wash: bool,
+    still: bool,
+    optical: bool,
 }
 element!(Button, parent);
 
 impl Button {
     pub fn new(id: impl Into<ElementId>, variant: ButtonVariant) -> Self {
-        Button { base: div().id(id), variant, size: ButtonSize::Default, icon: None, editor: false, icon_end: None, label: None, selected: false, disabled: false }
+        Button { base: div().id(id), variant, size: ButtonSize::Default, icon: None, editor: false, icon_end: None, label: None, selected: false, disabled: false, on_wash: false, still: false, optical: false }
     }
     pub fn primary(id: impl Into<ElementId>) -> Self { Self::new(id, ButtonVariant::Primary) }
     pub fn outline(id: impl Into<ElementId>) -> Self { Self::new(id, ButtonVariant::Outline) }
@@ -96,6 +99,16 @@ impl Button {
     /// Pressed or in use (a toolbar tool with a filter on, a menu's trigger while it is open:
     /// `aria-expanded` / `aria-pressed`): `muted` (one step up on a raised surface in the dark).
     pub fn selected(mut self, on: bool) -> Self { self.selected = on; self }
+    /// A ghost on a sidebar row that has its own hover wash: under the pointer and when on it takes
+    /// `background` instead of `muted`, which on the wash over the glass sidebar reads as no step at
+    /// all (docs/design/SHADCN_AUDIT.md).
+    pub fn on_wash(mut self) -> Self { self.on_wash = true; self }
+    /// Keeps its face under the pointer: the editor's block handle, white beside the white card
+    /// it lifts (maintainer 2026-11-25: the hover grey read as a different control).
+    pub fn still(mut self) -> Self { self.still = true; self }
+    /// The label centred by its look (`UiText::optical`): on the header row, level with the
+    /// traffic lights and the crumbs.
+    pub fn optical(mut self) -> Self { self.optical = true; self }
     /// Not available: the whole button at 50% (`disabled:opacity-50`), no pointer.
     pub fn disabled(mut self, on: bool) -> Self { self.disabled = on; self }
 }
@@ -116,8 +129,9 @@ impl RenderOnce for Button {
         // `rounded-md`; `rounded-[min(var(--radius-md),8px)]` at xs and `…10px` at sm: 8 either way at R = 10
         let r = g.button_r.min(if sz == ButtonSize::Xs { 8. } else { 10. });
         let (icon_l, icon_r, label_s, disabled, selected, editor) = (self.icon, self.icon_end, self.label, self.disabled, self.selected, self.editor);
+        let (still, optical) = (self.still, self.optical);
         // a ghost's fills: `muted` (`muted/50` under the pointer in the dark); on a raised surface in the dark, a step up
-        let (ghost_hover, ghost_on) = super::toolbar::ghost_fills(false);
+        let (ghost_hover, ghost_on) = if self.on_wash { (color::background(), color::background()) } else { super::toolbar::ghost_fills(false) };
         under(self.base, |d| {
             let d = d.flex_none().h(px(sz.h())).flex().items_center().justify_center().gap(px(sz.gap())).rounded(px(r))
                 .text_size(px(if sz == ButtonSize::Xs { g.text_xs } else { g.text })).text_color(fg).whitespace_nowrap()
@@ -128,7 +142,7 @@ impl RenderOnce for Button {
                 ButtonVariant::Primary => d.bg(color::primary()).when(!disabled, |d| d.hover(|s| s.bg(color::primary_hover()))),
                 ButtonVariant::Outline => d.border_1().border_color(if dark { color::input() } else { color::border() })
                     .bg(if selected { color::muted() } else if dark { color::field() } else { color::background() }).shadow(shadow::xs())
-                    .when(!disabled, |d| d.hover(|s| s.bg(if dark { color::field_hover() } else { color::muted() }))),
+                    .when(!disabled && !still, |d| d.hover(|s| s.bg(if dark { color::field_hover() } else { color::muted() }))),
                 ButtonVariant::Secondary => d.bg(color::secondary()).when(!disabled, |d| d.hover(|s| s.bg(color::secondary_hover()))),
                 ButtonVariant::Ghost => d.when(selected, |d| d.bg(ghost_on))
                     .when(!disabled, |d| d.hover(move |s| s.bg(if selected { ghost_on } else { ghost_hover }))),
@@ -138,7 +152,7 @@ impl RenderOnce for Button {
             // `active:translate-y-px`, not on a menu's trigger (`aria-haspopup`): those come `selected` while open
             let d = d.when(!disabled && !selected && !placed, |d| d.relative().active(|s| s.top(px(1.))));
             d.when_some(icon_l, |d, n| d.child(if editor { crate::editor_ui::icon(&n, sz.icon(square), fg) } else { icon(&n, sz.icon(square), fg) }))
-                .when_some(label_s, |d, s| d.child(label(s)))
+                .when_some(label_s, |d, s| d.child(if optical { label(s).optical() } else { label(s) }))
                 .when_some(icon_r, |d, n| d.child(icon(&n, sz.icon(square), fg)))
         })
     }

@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="최신 릴리스"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI 상태"></a>
+  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&event=schedule&label=CI" alt="CI 상태"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS, Windows, Linux 지원">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Rust와 GPUI로 제작">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT 라이선스"></a>
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="픽셀 아트 초원을 배경으로 한 Quiet.md. 왼쪽 사이드바에 폴더가 있고, 홈에서는 각 폴더가 그림이 든 노트 카드 묶음으로 보입니다.">
+  <img src="docs/images/readme-home.webp" width="100%" alt="픽셀 아트 초원을 배경으로 한 Quiet.md. 왼쪽 사이드바에 폴더가 있고, 최상위 폴더 페이지에서는 각 폴더가 그림이 든 노트 카드 묶음으로 보입니다.">
 </p>
 
 > [!NOTE]
@@ -43,7 +43,7 @@
 
 ## Quiet.md를 쓰는 이유
 
-**📁 노트는 그냥 파일입니다.** 계정도 클라우드도 없고, 기본적으로 네트워크로 아무것도 보내지 않습니다(선택 사항인 업데이트 확인과, 화이트보드에 한중일 손글씨 글꼴이 처음 필요할 때나 내려받을 수 있는 문서 글꼴을 고를 때 받는 글꼴 파일 제외). 사이드바의 폴더는 모두 디스크에 있는 진짜 폴더이고, 노트는 각각 제목으로 이름 붙은 파일입니다. Markdown은 `.md`, 서식 있는 문서는 `.xml`입니다. iCloud, Git 등 원하는 방법으로 동기화하세요. Quiet.md를 그만 써도 파일은 그 자리에 그대로 있습니다.
+**📁 노트는 그냥 파일입니다.** 계정도 클라우드도 없고, 기본적으로 네트워크로 아무것도 보내지 않습니다(선택 사항인 업데이트 확인, 앱과 명령줄 도구 `quiet`가 하루에 한 번 보내는 익명 사용 횟수(앱을 연 횟수 같은 횟수만 보내며 ‘설정 › 일반 › 익명 사용 통계’에서 끌 수 있음), 화이트보드에 한중일 손글씨 글꼴이 처음 필요할 때나 내려받을 수 있는 문서 글꼴을 고를 때 받는 글꼴 파일 제외). 사이드바의 폴더는 모두 디스크에 있는 진짜 폴더이고, 노트는 각각 제목으로 이름 붙은 파일입니다. Markdown은 `.md`, 서식 있는 문서는 `.xml`입니다. iCloud, Git 등 원하는 방법으로 동기화하세요. Quiet.md를 그만 써도 파일은 그 자리에 그대로 있습니다.
 
 **⚡ 네이티브라서 빠릅니다.** 인터페이스 전체를 Rust와 [GPUI](https://www.gpui.rs/)가 GPU로 그립니다. Electron도 WebView도 없습니다. 100만 자짜리 노트에서도 입력은 프레임당 약 5 ms이고, 120 Hz 디스플레이가 한 프레임에 주는 시간은 8.3 ms입니다.
 
@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Quiet.md에서 연 긴 노트. 제목, 인라인 수식, 이온 농도 표가 있습니다.">
 </p>
 
-제목, 목록, 할 일, 인용, 콜아웃, 단 나누기, 셀 병합이 되는 표, 구문 강조 코드, LaTeX 수식, 이미지, 파일, 커버. 쓰는 동안 Markdown 단축 입력이 동작하고, 나머지는 `/` 메뉴에 있습니다. 다른 노트를 멘션하면 링크가 되고, 그 노트에는 백링크가 표시됩니다.
+제목, 목록, 할 일, 인용, 콜아웃, 단 나누기, 셀 병합이 되는 표, 구문 강조 코드, LaTeX 수식, 이미지, 파일, 커버. 쓰는 동안 Markdown 단축 입력이 동작하고, 나머지는 `/` 메뉴에 있습니다. 다른 노트를 멘션하면 링크가 되고, 그 노트에는 백링크가 표시됩니다. Mermaid 코드 블록은 바로 다이어그램으로 그려집니다. 데이터 테이블은 단일 선택, 날짜, 숫자, 수식, 조회, 관계 등의 필드로 기록을 담고, 보기마다 필터·정렬·그룹을 쓸 수 있으며, ‘노트’ 열의 각 칸은 진짜 노트입니다. ‘…’ 메뉴에는 집중 모드, 타자기 모드, 문단 집중이 있고, ‘보기’ › ‘확대’는 본문만 키웁니다.
 
 ### 그리기
 
@@ -69,25 +69,39 @@
 
 ### 진짜 폴더로 정리하기
 
-홈에서는 각 폴더가 안이 들여다보이는 종이 묶음으로 보입니다. 노트를 폴더 위에 잠시 올려 두면 폴더가 열리고, 폴더 안에 폴더를 넣을 수 있으며, 이동은 실행 취소할 수 있습니다. 노트를 고정하거나 즐겨찾기에 넣고, `⌘ J`로 모든 제목과 본문을 검색하고, 노트 안에서 찾아 바꾸기를 할 수 있습니다. 정규 표현식도 쓸 수 있습니다. 삭제한 노트는 먼저 휴지통으로 갑니다. 컴퓨터의 다른 곳에 있는 Markdown 파일과 폴더는 **이 컴퓨터의 파일**에서 열어 그 자리에서 편집할 수 있습니다.
+사이드바는 최상위 폴더별로 묶입니다. 폴더를 열면 그 페이지에 하위 폴더가 안이 들여다보이는 종이 묶음으로 보이고, 목록 보기는 원하는 열로 정렬됩니다. 컴퓨터의 어떤 폴더든 **폴더 추가**로 그 자리 그대로 씁니다. 노트를 폴더 위에 잠시 올려 두면 폴더가 열리고, 폴더 안에 폴더를 넣을 수 있으며, 페이지와 폴더를 다른 최상위 폴더로도 옮길 수 있고, 이동은 언제나 실행 취소할 수 있습니다. 노트를 사이드바 맨 위에 고정하고, 검색 아이콘이나 `⌘ J`로 모든 제목과 본문을 검색하고, 노트 안에서 찾아 바꾸기를 할 수 있습니다. 정규 표현식도 쓸 수 있습니다. 삭제한 노트는 먼저 휴지통으로 가고, 며칠 둘지는 직접 정합니다. 따로 연 Markdown 파일은 자기 창에서 그 자리 그대로 편집합니다.
 
 ### 노트 가져오기
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md의 첫 실행 화면. 찾아낸 Obsidian 보관소를 가져오겠냐고 묻고 있습니다.">
-</p>
-
-처음 실행하면 Quiet.md가 Obsidian, Logseq, iA Writer, Typora 라이브러리를 찾아 복사해 옵니다. 원본은 건드리지 않습니다. Obsidian의 `[[위키링크]]`도 그대로 동작해서, 클릭하면 가리키는 노트가 열립니다. 나중에도 Markdown 파일과 폴더를 홈이나 사이드바의 폴더로 바로 끌어다 놓을 수 있습니다. 노트는 Markdown이나 PDF로 내보내거나 바로 인쇄할 수 있습니다.
+‘다른 앱에서 가져오기…’(파일 메뉴)는 이 컴퓨터의 Obsidian, Logseq, iA Writer, Typora 라이브러리와 SiYuan 작업 공간을 찾아 복사해 옵니다. 원본은 건드리지 않습니다. Obsidian의 `[[위키링크]]`도 그대로 동작해서, 클릭하면 가리키는 노트가 열립니다. 나중에도 Markdown 파일과 폴더를 폴더 페이지나 사이드바의 폴더로 바로 끌어다 놓을 수 있습니다. 노트는 Markdown이나 PDF로 내보내거나 바로 인쇄할 수 있습니다.
 
 ### 그 밖에
 
 - **버전 기록**: 노트는 저장할 때마다 스냅숏을 남깁니다(기본 20개, 최대 30개). 하나를 열면 바뀐 부분을 그 자리에서 보여 주고, 클릭 한 번으로 복원하거나 이름을 붙일 수 있습니다.
 - **빠른 노트**: macOS에서는 전역 단축키(기본 `⌥ Space`)로 어떤 앱 위에서든 작은 노트 창을 엽니다.
 - **모양**: Craft, Feishu, Notion, Obsidian 네 가지 기본 스타일에 각각 다크 모드가 있고, CSS로 직접 만들 수도 있습니다([docs/THEMES.md](docs/THEMES.md)). 인터페이스 글꼴과 문서 글꼴도 고를 수 있습니다.
-- **단축키**: `⌘ /`를 누르면 모든 단축키가 보이고, 무엇이든 바꿀 수 있습니다. Windows와 Linux에서는 ⌘ 대신 Ctrl, ⌥ 대신 Alt를 씁니다.
+- **단축키**: `⌘ /`를 누르면 모든 단축키가 보이고, 무엇이든 바꾸거나 지울 수 있습니다. Windows와 Linux에서는 ⌘ 대신 Ctrl, ⌥ 대신 Alt를 씁니다.
+- **명령줄과 에이전트**: 앱에 함께 들어 있는 명령줄 도구 `quiet`로 Claude Code, Codex 같은 AI 에이전트가 앱과 같은 엔진으로 라이브러리를 읽고 씁니다. ‘설정 › 에이전트 연결’에는 에이전트에게 붙여 넣을 한 줄이 있어 에이전트가 스스로 설치하고, macOS에서는 명령줄 도구를 한 번에 설치합니다. 자세한 내용은 [영어 README](README.md#work-with-agents)를 보세요.
 - **언어**: 영어, 중국어 간체, 중국어 번체, 일본어, 한국어, 스페인어, 프랑스어, 아랍어, 튀르키예어. 아랍어는 글자가 제대로 이어지고 오른쪽에서 왼쪽으로 표시됩니다.
 - **정리**: **설정 › 라이브러리**에서 어떤 노트도 더 이상 쓰지 않는 이미지와 파일을 찾아, 확인한 뒤에 옮깁니다.
 - **업데이트**: 새 버전은 서명을 검증한 뒤 앱 안에서 설치됩니다. 자동 확인은 끌 수 있습니다.
+
+## 로드맵
+
+- [x] 서식 있는 문서: 제목, 목록, 콜아웃, 표, 단 나누기, 코드, 수식, 이미지, 파일
+- [x] Markdown 파일을 그 자리에서 열고 편집
+- [x] 보드: 손으로 그린 듯한 다이어그램과 스케치, 노트 안에서도 따로도
+- [x] 어떤 폴더든 그 자리에서 열어 사이드바에 나란히
+- [x] Obsidian, Logseq, SiYuan, Typora, iA Writer, 아무 Markdown 폴더에서 가져오기
+- [x] 글쓰기 모드: 집중 모드, 타자기 모드, 문단 집중
+- [x] 테마, 다크 모드, 9개 언어
+- [x] AI 에이전트를 위한 `quiet` CLI와 스킬
+- [ ] 데이터 테이블(진행 중)
+- [ ] Mermaid 다이어그램(진행 중)
+- [ ] 모바일 지원: iPhone, iPad, Android(진행 중)
+- [ ] 기기 간 동기화(진행 중)
+- [ ] 문서 속성
+- [ ] 웹 클리퍼
 
 ## 다운로드
 
@@ -112,7 +126,7 @@
 
 [Quiet.md](https://quiet.md/?lang=en)에서도 내려받을 수 있습니다. 모든 릴리스와 SHA-256 체크섬은 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)에 있습니다.
 
-처음 실행하면 인터페이스 언어, 라이브러리 위치, 빠른 메모 단축키를 고르고, Obsidian, Logseq, iA Writer, Typora의 노트를 복사해 가져올 수 있습니다. 빈 라이브러리에는 **Getting started** 가이드가 들어갑니다. 주요 기능을 10분 만에 둘러보는 안내입니다. 이미 있는 노트는 덮어쓰지 않습니다.
+처음 실행하면 도큐멘트의 **Quiet Notes** 폴더(이전 버전이 만든 `Quiet.md` 폴더가 있으면 그 폴더)가 바로 열리고, 그 안에 **Getting started** 가이드가 들어 있습니다. 주요 기능을 10분 만에 둘러보는 안내입니다. 이미 있는 노트는 덮어쓰지 않습니다. 다른 폴더 추가나 다른 앱의 노트 가져오기는 언제든 파일 메뉴에서 할 수 있습니다.
 
 ## 성능
 
@@ -171,5 +185,5 @@ Quiet.md를 함께 만들어 주신 모든 분께 감사드립니다. 이슈와 
 
 다음은 MIT 라이선스에 포함되지 않으므로, 포크에서는 다른 것으로 바꿔야 합니다.
 
-- `assets/icons/`에 있는 Nucleo 아이콘 70개는 Nucleo 상용 라이선스를 따릅니다. 아이콘만 따로 추출하거나 재배포하지 마세요.
+- `assets/icons/`의 Nucleo 아이콘 82개와 `assets/editor-icons/`의 24개는 Nucleo 상용 라이선스를 따릅니다. 아이콘만 따로 추출하거나 재배포하지 마세요.
 - "Quiet.md"라는 이름과 앱 아이콘.

@@ -12,12 +12,10 @@ pub(super) fn step(phase: &str, ws: &mut Workspace, window: &mut Window, cx: &mu
                 && actual.right() <= visible.right() && actual.bottom() <= visible.bottom(),
                 "frame {actual:?} exceeds work area {visible:?}");
             assert_eq!(crate::settings::lang(), crate::settings::Lang::Fr);
-            ws.row_menu = Some(RowMenu { id: ws.current.clone().unwrap(), pos: point(px(20.), px(100.)), corner: Anchor::TopLeft, batch: false, sub: false });
+            ws.row_menu = Some(RowMenu { id: ws.current.clone().unwrap(), pos: point(px(20.), px(100.)), corner: Anchor::TopLeft, from: None, batch: false, sub: false });
             cx.notify();
         }
         "menu" => {
-            let width = ws.row_menu_w.get().unwrap();
-            assert!(width > 180., "French menu remained at its fixed width: {width}");
             ws.row_menu = None;
             ws.open_paths(&[dir.join("Source.md")], window, cx);
         }

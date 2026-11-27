@@ -299,12 +299,12 @@ fn file_block_from_path(p: &Path) -> Option<Block> {
     Some(Block::new(BlockKind::File(f), RichText::default()))
 }
 
-/// Opens the attachment right away (the card's 预览, the video's play).
+/// Previews the attachment right away (the card's 预览, the video's play).
 fn open_listener(p: Option<PathBuf>, cx: &mut Context<Editor>) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
     cx.listener(move |e: &mut Editor, _: &MouseDownEvent, window, cx| {
         cx.stop_propagation();
         window.prevent_default();
-        e.open_file(p.as_deref(), cx);
+        e.preview_file(p.as_deref(), cx);
     })
 }
 
@@ -360,11 +360,14 @@ impl R<'_> {
                 .absolute()
                 .inset_0()
         });
-        // A click on the selected attachment (any click when reading) opens it.
+        // A click on the selected attachment (any click when reading) opens it;
+        // so does a double click on a file that opens in a window of its own
+        // (the first click selected it; asked twice, that window only comes forward).
         let open_on_click = {
             let p = path.clone();
+            let own = p.as_deref().is_some_and(crate::local_files::opens_here);
             cx.listener(move |e: &mut Editor, ev: &MouseDownEvent, window, cx| {
-                if ev.click_count == 1 && !ev.modifiers.shift && (e.read_only || e.active_file(e.focus.is_focused(window)) == Some(id)) {
+                if (ev.click_count == 1 || own && ev.click_count == 2) && !ev.modifiers.shift && (e.read_only || e.active_file(e.focus.is_focused(window)) == Some(id)) {
                     cx.stop_propagation();
                     window.prevent_default();
                     e.open_file(p.as_deref(), cx);
@@ -540,7 +543,7 @@ impl R<'_> {
                     .rounded(px(RADIUS))
                     .border_1()
                     .border_color(border)
-                    .shadow(theme::shadow_button())
+                    .shadow(crate::design::shadow::rest())
                     .cursor_pointer()
                     .when(menu_on, |d| d.child(ring().rounded(px(RADIUS + 2.))))
                     .child(div().rounded(px(RADIUS - 1.)).overflow_hidden().child(content).child(footer))
@@ -581,7 +584,7 @@ impl R<'_> {
                     .border_1()
                     .border_color(border)
                     .bg(crate::theme::raised(Theme::bg_body()))
-                    .shadow(theme::shadow_button())
+                    .shadow(crate::design::shadow::rest())
                     .cursor_pointer()
                     .when(menu_on, |d| d.child(ring().rounded(px(RADIUS + 2.))))
                     .child(div().flex_none().size(px(48.)).mt(px(8.)).mb(px(8.)).ml(px(8.)).mr(px(12.)).child(type_icon(kind, 48.)))
@@ -638,11 +641,35 @@ impl Editor {
         .then_some(h)
     }
 
+    /// 打开: a file Quiet.md edits (`local_files::opens_here`) in a window of
+    /// its own, where it is; any other as `preview_file`.
     pub(super) fn open_file(&mut self, p: Option<&Path>, cx: &mut Context<Self>) {
         match p.filter(|p| p.fs_is_file()) {
-            Some(p) => quick_look(p),
+            Some(p) if crate::local_files::opens_here(p) => cx.emit(super::view::EditorEvent::OpenFile(p.to_path_buf())),
+            _ => self.preview_file(p, cx),
+        }
+    }
+
+    /// 预览 (the eye, 全屏, a video's play): Quick Look, whatever the file is.
+    pub(super) fn preview_file(&mut self, p: Option<&Path>, cx: &mut Context<Self>) {
+        match p.filter(|p| p.fs_is_file()) {
+            // Quick Look is the Mac's (`qlmanage`); elsewhere the system's own app for the file, or
+            // the file shown in its folder when opening it would run a program
+            Some(p) if cfg!(target_os = "macos") || crate::devtools::scripted() || cfg!(target_family = "wasm") => quick_look(p),
+            Some(p) if crate::local_files::runs_program(p) => cx.reveal_path(p),
+            Some(p) => cx.open_with_system(p),
             None => self.toast(crate::settings::text("文件不存在"), cx),
         }
+    }
+
+    /// Attachments changed on disk (one was edited in its own window, the
+    /// window came forward): sizes and previews are read again.
+    pub(crate) fn files_changed(&mut self, cx: &mut Context<Self>) {
+        self.file.sizes.borrow_mut().clear();
+        // One still being made stays queued; a preview is kept by the file's size and time (`thumb_dir`).
+        self.file.thumbs.borrow_mut().retain(|_, t| *t == Thumb::Pending);
+        self.img.generation += 1;
+        cx.notify();
     }
 
     /// 下载: a copy where the save panel says (Downloads first).
@@ -790,7 +817,7 @@ impl Editor {
                     cx.listener(move |e, _, window, cx| {
                         cx.stop_propagation();
                         window.prevent_default();
-                        e.open_file(p.as_deref(), cx);
+                        e.preview_file(p.as_deref(), cx);
                     }),
                 ),
             );

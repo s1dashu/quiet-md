@@ -24,13 +24,20 @@ pub fn open_last(cx: &mut App) {
     let id = cx.try_global::<LastDocument>().and_then(|s| s.0.clone()).filter(|id| entries.iter().any(|e| &e.id == id))
         .or_else(|| entries.iter().max_by_key(|e| e.meta.opened).map(|e| e.id.clone()));
     let Some(id) = id else { return };
+    show_document(id, cx);
+}
+
+/// The window showing document `id` comes forward; none does: a window of its own.
+pub fn show_document(id: String, cx: &mut App) {
     for handle in cx.windows() {
         if let Some(handle) = handle.downcast::<crate::app::Workspace>()
             && handle.update(cx, |w, window, _| {
                 if w.current.as_ref() != Some(&id) { return false; }
-                window.activate_window(); true
+                // A scripted run never takes the keyboard.
+                if !crate::devtools::scripted() { window.activate_window(); }
+                true
             }).unwrap_or(false)
-        { cx.activate(true); return; }
+        { if !crate::devtools::scripted() { cx.activate(true); } return; }
     }
     open_document(Some(id), cx);
 }
@@ -71,14 +78,15 @@ pub fn open_document(document: Option<String>, cx: &mut App) {
         titlebar: Some(TitlebarOptions {
             title: Some(crate::settings::text("Quiet.md · 快速笔记").into()),
             appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),
-            traffic_light_position: Some(point(px(20.), px(crate::app::HEADER_H / 2. - 7.))),
+            traffic_light_position: Some(crate::focus::lights_at()),
         }),
         window_min_size: Some(size(px(480.), px(480.))),
         app_owns_titlebar_drag: true,
+        focus: !crate::devtools::scripted(),
         ..Default::default()
-    }, |window, cx| cx.new(|cx| crate::app::Workspace::new_document_window(document, window, cx)));
+    }, |window, cx| { crate::devtools::opened(window, cx); cx.new(|cx| crate::app::Workspace::new_document_window(document, window, cx)) });
     match result {
-        Ok(handle) => { cx.global_mut::<QuickWindows>().0.push(handle); cx.activate(true); },
+        Ok(handle) => { cx.global_mut::<QuickWindows>().0.push(handle); if !crate::devtools::scripted() { cx.activate(true); } },
         Err(e) => eprintln!("无法打开快速笔记：{e}"),
     }
 }
@@ -143,14 +151,15 @@ mod hotkey {
 
 pub fn install(cx: &mut App) -> bool {
     cx.on_action(|_: &QuickNew, cx| open(cx));
-    // Settings › 快速笔记 shows a failure; no alert on every launch.
-    crate::settings::prefs().quick_hotkey && register(cx)
+    // Settings › 快捷键 shows a failure under its row; no alert on every launch.
+    register(cx)
 }
 
 /// Why each global hotkey (快速笔记, 打开上次的文档) isn't registered, if it failed.
 static HOTKEY_ERROR: std::sync::Mutex<[Option<String>; 2]> = std::sync::Mutex::new([None, None]);
-pub fn hotkey_error() -> Option<String> { HOTKEY_ERROR.lock().unwrap().iter().flatten().next().cloned() }
-/// Register the global hotkeys from the shortcuts file.
+pub fn hotkey_error(id: u32) -> Option<String> { HOTKEY_ERROR.lock().unwrap()[id as usize - 1].clone() }
+/// Register the global hotkeys from the shortcuts file, each on its own: a cleared one is let go.
+/// Whether 快速笔记's went through.
 pub fn register(cx: &mut App) -> bool {
     let r = set_hotkey(&crate::shortcuts::global_key(), cx);
     if let Err(e) = &r { eprintln!("全局快捷键注册失败：{e}"); }
@@ -250,7 +259,8 @@ fn set(id: u32, combo: &str, cx: &mut App) -> anyhow::Result<()> {
 pub fn suspend_hotkey() { #[cfg(target_os = "macos")] hotkey::suspend(); *HOTKEY_ERROR.lock().unwrap() = [None, None]; }
 
 #[cfg(not(target_os = "macos"))]
-fn set(id: u32, _: &str, _: &mut App) -> anyhow::Result<()> {
+fn set(id: u32, combo: &str, _: &mut App) -> anyhow::Result<()> {
+    if combo.is_empty() { HOTKEY_ERROR.lock().unwrap()[id as usize - 1] = None; return Ok(()); }
     let error = crate::settings::tr("当前系统暂不支持全局快捷键", "Global shortcuts are not supported on this platform yet");
     HOTKEY_ERROR.lock().unwrap()[id as usize - 1] = Some(error.into());
     Err(anyhow::anyhow!(error))

@@ -147,7 +147,24 @@ fn font_px(st: &[(String, String)]) -> Option<f32> {
 }
 
 fn hidden(st: &[(String, String)]) -> bool {
-    st.iter().any(|(k, v)| (k == "display" && v.starts_with("none")) || (k == "visibility" && v == "hidden"))
+    // `mso-list:Ignore`: Word's list marker, which the item kind stands for.
+    st.iter().any(|(k, v)| (k == "display" && v.starts_with("none")) || (k == "visibility" && v == "hidden") || (k == "mso-list" && v == "ignore"))
+}
+
+/// Word's list paragraph (`mso-list:l0 level2 lfo1`): its level, from 1.
+fn word_list_level(st: &[(String, String)]) -> Option<usize> {
+    let v = &st.iter().find(|(k, _)| k == "mso-list")?.1;
+    v.split_whitespace().find_map(|w| w.strip_prefix("level")?.parse().ok()).filter(|&l| l >= 1)
+}
+
+/// The text of Word's list marker (`1.`, `a)`, `一、`, `·`, `o`).
+fn word_marker(n: &Handle) -> Option<String> {
+    if style(n).iter().any(|(k, v)| k == "mso-list" && v == "ignore") {
+        let mut s = String::new();
+        raw_text(n, &mut s);
+        return Some(s.trim().to_string());
+    }
+    n.children.borrow().iter().find_map(word_marker)
 }
 
 fn align_of(n: &Handle, st: &[(String, String)]) -> Option<Align> {
@@ -359,6 +376,24 @@ fn node(n: &Handle, ctx: &Ctx, out: &mut Vec<Block>, para: &mut RichText) {
                 "table" => {
                     flush(para, ctx, out);
                     out.extend(table(n, &bctx));
+                }
+                // Word's lists are paragraphs with a level; deeper ones go
+                // under the item before them.
+                _ if t == "p" && word_list_level(&st).is_some() => {
+                    flush(para, ctx, out);
+                    let ordered = word_marker(n).is_some_and(|m| m.ends_with(['.', ')', '、', '）']));
+                    let b = item(n, &bctx, ordered, None);
+                    let (mut depth, mut list) = (0, &*out);
+                    while depth + 1 < word_list_level(&st).unwrap_or(1)
+                        && let Some(l) = list.last().filter(|l| matches!(l.kind, BlockKind::Bullet | BlockKind::Ordered { .. } | BlockKind::Todo { .. }))
+                    {
+                        (depth, list) = (depth + 1, &l.children);
+                    }
+                    let mut list = &mut *out;
+                    for _ in 0..depth {
+                        list = &mut list.last_mut().unwrap().children;
+                    }
+                    list.push(b);
                 }
                 // 高亮块: `.callout-block` carries the colours, the container
                 // above it the emoji id.
@@ -983,6 +1018,13 @@ fn md_blocks(lines: &[&str], off: Off, mut spans: Option<&mut Vec<(usize, usize)
         }
         let ind = indent_of(line);
         let body = line.trim();
+        // An empty paragraph, as Markdown files are written (`markdown::BLANK`).
+        if body == crate::markdown::BLANK {
+            out.push(Block::text(""));
+            last_list = false;
+            i += 1;
+            continue;
+        }
         if let Some((b, n)) = display_math(&lines[i..]) {
             out.push(b);
             i += n;
@@ -1254,7 +1296,7 @@ fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
 }
 
 /// Initial Markdown widths; saved DocxXML widths and manual resizing stay intact.
-fn pipe_table_widths(rows: &[Vec<TableCell>], ncols: usize) -> Vec<f32> {
+pub(crate) fn pipe_table_widths(rows: &[Vec<TableCell>], ncols: usize) -> Vec<f32> {
     use unicode_width::UnicodeWidthStr;
     let mut widths = vec![Table::MIN_WIDTH; ncols];
     for row in rows {
@@ -1312,6 +1354,17 @@ pub fn is_numeric_math(src: &str) -> bool {
 /// rules of the live shortcuts (`~x~` is underline), and paired `<u>…</u>`
 /// (how Markdown export writes underline; no other HTML). Paste turns escapes,
 /// images and `<…>` autolinks off.
+/// A numeric character reference at the start of `s` (`&#32;`, `&#xA0;`):
+/// the character and the reference's length.
+pub(crate) fn char_ref(s: &str) -> Option<(char, usize)> {
+    let body = s.strip_prefix("&#")?;
+    let (hex, digits) = match body.strip_prefix(['x', 'X']) { Some(h) => (true, h), None => (false, body) };
+    let n = digits.bytes().take_while(|b| if hex { b.is_ascii_hexdigit() } else { b.is_ascii_digit() }).count();
+    if n == 0 || n > if hex { 6 } else { 7 } || digits.as_bytes().get(n) != Some(&b';') { return None; }
+    let ch = char::from_u32(u32::from_str_radix(&digits[..n], if hex { 16 } else { 10 }).ok()?).filter(|&c| c != '\0')?;
+    Some((ch, s.len() - digits.len() + n + 1))
+}
+
 pub fn md_inline(s: &str) -> RichText {
     let mut out = RichText::default();
     let mut plain = String::new();
@@ -1331,6 +1384,18 @@ pub fn md_inline(s: &str) -> RichText {
         if c == '\\' && let Some(next) = rest[1..].chars().next().filter(char::is_ascii_punctuation) {
             plain.push(next);
             i += 1 + next.len_utf8();
+            continue;
+        }
+        // `<br>`, a line break inside the block, and `&#32;`, a character
+        // (a space a line would lose), as Markdown files are written.
+        if c == '<' && let Some(t) = ["<br>", "<br/>", "<br />"].into_iter().find(|t| rest.get(..t.len()).is_some_and(|r| r.eq_ignore_ascii_case(t))) {
+            plain.push('\n');
+            i += t.len();
+            continue;
+        }
+        if c == '&' && let Some((ch, n)) = char_ref(rest) {
+            plain.push(ch);
+            i += n;
             continue;
         }
         // Code span.
@@ -1901,6 +1966,39 @@ mod tests {
 
         let escaped = super::md_inline("\\＊不是");
         assert_eq!(escaped.text, "\\＊不是", "{escaped:?}");
+    }
+
+    #[test]
+    fn word_fragment() {
+        // Word for Windows' CF_HTML fragment: lists are paragraphs with
+        // `mso-list`, the marker in a `mso-list:Ignore` span.
+        let x = xml("<h1><span lang=EN-US>Heading one<o:p></o:p></span></h1>\
+            <p class=MsoNormal><b><span lang=EN-US>bold</span></b><span lang=EN-US> and <i>italic</i> <u>under</u><o:p></o:p></span></p>\
+            <p class=MsoListParagraphCxSpFirst style='margin-left:18.0pt;text-indent:-18.0pt;mso-list:l0 level1 lfo1'><![if !supportLists]><span lang=EN-US style='font-family:Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]><span lang=EN-US>One<o:p></o:p></span></p>\
+            <p class=MsoListParagraphCxSpLast style='margin-left:54.0pt;text-indent:-18.0pt;mso-list:l0 level2 lfo1'><![if !supportLists]><span style='font-family:\"Courier New\"'><span style='mso-list:Ignore'>o<span style='font:7.0pt \"Times New Roman\"'>&nbsp;&nbsp; </span></span></span><![endif]><span lang=EN-US>Sub<o:p></o:p></span></p>\
+            <p class=MsoListParagraph style='text-indent:-18.0pt;mso-list:l1 level1 lfo2'><!--[if !supportLists]--><span lang=EN-US><span style='mso-list:Ignore'>1.<span>&nbsp;&nbsp; </span></span></span><!--[endif]--><span>第一项<o:p></o:p></span></p>\
+            <p class=MsoListParagraph style='text-indent:-18.0pt;mso-list:l1 level1 lfo2'><![if !supportLists]><span><span style='mso-list:Ignore'>2.<span>&nbsp;&nbsp; </span></span></span><![endif]><span>Second<o:p></o:p></span></p>\
+            <table class=MsoTableGrid border=1><tr><td><p class=MsoNormal><span lang=EN-US>a<o:p></o:p></span></p></td><td><p class=MsoNormal><b>b</b></p></td></tr></table>");
+        assert!(x.contains("<h1>Heading one</h1>"), "{x}");
+        assert!(x.contains("<p><b>bold</b> and <em>italic</em> <u>under</u></p>"), "{x}");
+        assert!(x.contains("<ul>\n  <li>One\n    <ul>\n      <li>Sub</li>\n    </ul>\n  </li>\n</ul>"), "{x}");
+        assert!(x.contains("<ol>\n  <li>第一项</li>\n  <li>Second</li>\n</ol>"), "{x}");
+        assert!(x.contains("<td><p><b>b</b></p></td>"), "{x}");
+        assert!(!x.contains('·'), "{x}");
+    }
+
+    #[test]
+    fn browser_fragment() {
+        // Chrome's fragment of a web page: inline styles, no semantic marks.
+        let x = xml("<h2 style=\"color: rgb(31, 35, 40); font-family: -apple-system;\">安装</h2>\
+            <p style=\"margin: 0px;\"><span style=\"font-weight: 700;\">粗</span>和<span style=\"font-style: italic;\">斜</span>，\
+            <a href=\"https://example.com/a\" style=\"color: blue;\">链接</a>与<code style=\"font-size: 85%;\">npm i</code></p>\
+            <ul style=\"padding-left: 2em;\"><li style=\"margin-top: 0.25em;\">甲</li><li>乙<ul><li>丙</li></ul></li></ul>\
+            <div class=\"highlight\"><pre><span class=\"pl-k\">let</span> x = 1;</pre></div>");
+        assert!(x.contains("<h2>安装</h2>"), "{x}");
+        assert!(x.contains("<b>粗</b>和<em>斜</em>，<a href=\"https://example.com/a\">链接</a>与<code>npm i</code>"), "{x}");
+        assert!(x.contains("<li>乙\n    <ul>\n      <li>丙</li>"), "{x}");
+        assert!(x.contains("let x = 1;"), "{x}");
     }
 
     #[test]

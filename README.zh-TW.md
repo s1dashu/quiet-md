@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/s1dashu/quiet-md/releases/latest"><img src="https://img.shields.io/github/v/release/s1dashu/quiet-md?label=release&color=2f6feb" alt="最新版本"></a>
-  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&label=CI" alt="CI 狀態"></a>
+  <a href="https://github.com/s1dashu/quiet-md/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/s1dashu/quiet-md/ci.yml?branch=main&event=schedule&label=CI" alt="CI 狀態"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="macOS、Windows 與 Linux">
   <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="以 Rust 與 GPUI 打造">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/s1dashu/quiet-md?color=green" alt="MIT 授權條款"></a>
@@ -35,7 +35,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/readme-home.webp" width="100%" alt="像素風草坡背景上的 Quiet.md：左側側邊欄列出資料夾，首頁將每個資料夾顯示成一疊附圖的筆記卡片。">
+  <img src="docs/images/readme-home.webp" width="100%" alt="像素風草坡背景上的 Quiet.md：左側側邊欄列出資料夾，頂層資料夾頁將每個資料夾顯示成一疊附圖的筆記卡片。">
 </p>
 
 > [!NOTE]
@@ -43,7 +43,7 @@
 
 ## 為什麼選擇 Quiet.md
 
-**📁 筆記就是一般檔案。** 不需要帳號，沒有雲端，預設不連網（可選的更新檢查除外；白板第一次用到中日韓手寫字型、或者你選擇可下載的文件字型時，會下載對應的字型檔）。側邊欄裡的每個資料夾都是磁碟上真實的資料夾，每篇筆記都是以標題命名的檔案：Markdown 為 `.md`，富文字文件為 `.xml`。用 iCloud、Git 或任何同步工具都可以；哪天不再使用 Quiet.md，檔案也還留在原處。
+**📁 筆記就是一般檔案。** 不需要帳號，沒有雲端，預設不連網（以下除外：可選的更新檢查；應用程式和命令列工具 `quiet` 每天傳送一次匿名使用次數，只有計數，例如應用程式開了幾次，可在「設定 › 一般 › 匿名使用統計」關閉；白板第一次用到中日韓手寫字型、或者你選擇可下載的文件字型時，會下載對應的字型檔）。側邊欄裡的每個資料夾都是磁碟上真實的資料夾，每篇筆記都是以標題命名的檔案：Markdown 為 `.md`，富文字文件為 `.xml`。用 iCloud、Git 或任何同步工具都可以；哪天不再使用 Quiet.md，檔案也還留在原處。
 
 **⚡ 原生，而且快。** 整個介面由 Rust 與 [GPUI](https://www.gpui.rs/) 直接以 GPU 繪製，不是 Electron，也不是網頁套殼。在一篇 100 萬字的筆記裡打字，每格畫面約 5 ms；120 Hz 螢幕給每格畫面的時間是 8.3 ms。
 
@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="在 Quiet.md 開啟的一篇長筆記，包含標題、行內公式與一張離子濃度表。">
 </p>
 
-標題、清單、待辦事項、引文、提示框、分欄、可合併儲存格的表格、具語法醒目提示的程式碼、LaTeX 數學公式、圖片、附件與封面。邊寫邊用 Markdown 快速輸入，其餘的都在 `/` 選單裡。提及另一篇筆記即可建立連結，對方會列出反向引用。
+標題、清單、待辦事項、引文、提示框、分欄、可合併儲存格的表格、具語法醒目提示的程式碼、LaTeX 數學公式、圖片、附件與封面。邊寫邊用 Markdown 快速輸入，其餘的都在 `/` 選單裡。提及另一篇筆記即可建立連結，對方會列出反向引用。Mermaid 程式碼區塊直接顯示成圖表。資料表以單選、日期、數字、公式、查閱、關聯等欄位記錄資訊，檢視可以篩選、排序、分組，「筆記」欄的每一格都是一篇真實的筆記。「…」選單裡有專注模式、打字機模式和段落聚焦，「顯示」›「放大」只放大內文。
 
 ### 繪圖
 
@@ -69,25 +69,39 @@
 
 ### 用真實的資料夾整理
 
-首頁將每個資料夾顯示成一疊紙，裡面有什麼一目了然。把筆記拖到資料夾上稍候片刻，資料夾就會自動展開；資料夾裡還能再放資料夾，移動也能復原。筆記可以釘選、收藏；按 `⌘ J` 搜尋所有標題與內文，在筆記裡尋找與取代，也可以使用規則運算式。刪除的筆記會先移到垃圾桶。電腦上其他位置的 Markdown 檔案和資料夾，可以在「本機檔案」中開啟並就地編輯。
+側邊欄依頂層資料夾分組。打開一個資料夾，它的頁面會把子資料夾顯示成一疊紙，裡面有什麼一目了然；清單檢視可以依任一欄排序。電腦上的任何資料夾都能用「新增資料夾」加入，就地使用。把筆記拖到資料夾上稍候片刻，資料夾就會自動展開；資料夾裡還能再放資料夾，頁面和資料夾也能移到另一個頂層資料夾，每次移動都能復原。筆記可以釘選到側邊欄最上方；點搜尋圖示或按 `⌘ J` 搜尋所有標題與內文，在筆記裡尋找與取代，也可以使用規則運算式。刪除的筆記會先移到垃圾桶，保留幾天由你決定。單獨開啟的 Markdown 檔案在自己的視窗裡就地編輯。
 
 ### 帶上舊筆記
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次啟動的畫面，提示匯入它找到的 Obsidian 筆記庫。">
-</p>
-
-第一次開啟時，Quiet.md 會找到你的 Obsidian、Logseq、iA Writer 與 Typora 筆記庫並複製進來，原始檔案不會被更動。Obsidian 的 `[[雙向連結]]` 照樣能用，點一下就會開啟它指向的筆記。之後也可以把 Markdown 檔案和資料夾拖到首頁，或直接拖進側邊欄的某個資料夾。筆記也能匯出為 Markdown 或 PDF，或直接列印。
+「從其他應用程式匯入…」（在「檔案」選單裡）會找到這台電腦上的 Obsidian、Logseq、iA Writer、Typora 筆記庫與思源筆記工作空間並複製進來，原始檔案不會被更動。Obsidian 的 `[[雙向連結]]` 照樣能用，點一下就會開啟它指向的筆記。之後也可以把 Markdown 檔案和資料夾拖到資料夾頁，或直接拖進側邊欄的某個資料夾。筆記也能匯出為 Markdown 或 PDF，或直接列印。
 
 ### 還有更多
 
 - **版本紀錄**：每篇筆記在儲存時都會留下快照（預設 20 版，最多 30 版）。點開任一版就能在原處看到改了什麼，一鍵還原，也能為它命名。
 - **快速筆記**：在 macOS 上，全域快速鍵（預設 `⌥ Space`）會在任何應用程式上方開啟一個小筆記視窗。
 - **外觀**：內建 Craft、Feishu、Notion 與 Obsidian 四套樣式，每套皆有深色版本，也可以用 CSS 自行撰寫（見 [docs/THEMES.md](docs/THEMES.md)）。介面字型與文件字型都能選擇。
-- **快速鍵**：按下 `⌘ /` 檢視所有快速鍵，每一組都能重新設定。在 Windows 與 Linux 上，以 Ctrl 對應 ⌘、Alt 對應 ⌥。
+- **快速鍵**：按下 `⌘ /` 檢視所有快速鍵，每一組都能重新設定，也能清除。在 Windows 與 Linux 上，以 Ctrl 對應 ⌘、Alt 對應 ⌥。
+- **命令列與 Agent**：隨應用程式附帶的命令列工具 `quiet` 讓 Claude Code、Codex 等 AI Agent 讀寫你的文件庫，和你用的是同一個引擎。「設定 › 連接 Agent」提供一句話傳給 Agent，它會自己安裝好；macOS 上一鍵安裝命令列工具。詳見[英文 README](README.md#work-with-agents)。
 - **語言**：英文、簡體中文、繁體中文、日文、韓文、西班牙文、法文、阿拉伯文與土耳其文。阿拉伯文會正確連寫，由右至左排列。
 - **清理**：「設定 › 文件」能找出不再有任何筆記使用的圖片與檔案，確認後才會移出。
 - **更新**：新版本在應用程式內安裝，安裝前會驗證簽章。自動檢查可以關閉。
+
+## 路線圖
+
+- [x] 富文字文件：標題、清單、提示框、表格、分欄、程式碼、數學公式、圖片與附件
+- [x] Markdown 檔案，就地開啟、就地編輯
+- [x] 白板：手繪風格的圖解與草圖，可以放進筆記，也可以獨立存在
+- [x] 就地開啟任何資料夾，在側邊欄裡並排顯示
+- [x] 從 Obsidian、Logseq、思源筆記、Typora、iA Writer 與任何 Markdown 資料夾匯入
+- [x] 寫作模式：專注模式、打字機模式和段落聚焦
+- [x] 主題、深色模式與九種介面語言
+- [x] 給 AI Agent 使用的 `quiet` 命令列工具與 skill
+- [ ] 資料表（進行中）
+- [ ] Mermaid 圖表（進行中）
+- [ ] 行動裝置：iPhone、iPad 與 Android（進行中）
+- [ ] 跨裝置同步（進行中）
+- [ ] 文件屬性
+- [ ] 網頁剪輯
 
 ## 下載
 
@@ -112,7 +126,7 @@
 
 你也可以前往 [Quiet.md](https://quiet.md/?lang=zh-Hant) 官方網站下載，所有發行版本與對應的 SHA-256 雜湊值皆公布於 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)。
 
-首次啟動時，Quiet.md 會詢問介面語言、文件庫儲存位置與快速筆記快速鍵，並提供從 Obsidian、Logseq、iA Writer 或 Typora 複製匯入既有筆記的選項。全新的空白文件庫會附帶一份 **Getting started** 入門指南，帶你在十分鐘內逛完主要功能，且絕不會覆寫任何既有筆記。
+首次啟動會直接開啟「文件」裡的 **Quiet Notes** 資料夾（先前版本建過 `Quiet.md` 資料夾的，就沿用它），裡面附有一份 **Getting started** 入門指南，帶你在十分鐘內逛完主要功能，且絕不會覆寫任何既有筆記。其他資料夾或其他應用程式裡的筆記，隨時都能從「檔案」選單加入或匯入。
 
 ## 效能表現
 
@@ -171,5 +185,5 @@
 
 以下項目不包含在 MIT 授權範圍內，建立衍生分支（Fork）時請自行替換：
 
-- `assets/icons/` 目錄下的 70 個 Nucleo 圖示受商業 Nucleo 授權保護，請勿單獨抽離或重新散佈。
+- `assets/icons/` 目錄下的 82 個和 `assets/editor-icons/` 目錄下的 24 個 Nucleo 圖示受商業 Nucleo 授權保護，請勿單獨抽離或重新散佈。
 - 「Quiet.md」名稱與應用程式圖示。

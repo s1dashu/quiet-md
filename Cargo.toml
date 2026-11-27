@@ -11,21 +11,18 @@ categories = ["text-editors"]
 
 # `devtools`: the FDL_SCRIPT driver for tools/harness (`cargo build --release
 # --features devtools`). Off in release builds: shipped apps cannot be scripted.
-# `datatable`: 数据表 (`.sqlite` tables, `BlockKind::DataTable`) while it is
-# still being polished. Off: no way to make one; existing ones show a read-only
-# placeholder and are left as they are (`crate::DATATABLE`).
 [features]
 devtools = ["embed-xiaolai"]
 # `embed-xiaolai`: the board's CJK font (14 MB) compiled in instead of fetched
 # when first needed (src/font_downloads.rs). On with `devtools`, so harness
 # screenshots never depend on the network; off in shipped builds.
 embed-xiaolai = []
-datatable = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
 [workspace]
-members = ["crates/core", "crates/cli"]
+members = ["crates/core", "crates/cli", "vendor/xim-ctext"]
 # vendor/zed holds path dependencies with self-contained manifests, not members.
+# vendor/xim-ctext is a member so its tests run (vendor/xim-ctext/README.md).
 exclude = ["vendor", "tools/vendor-sync"]
 default-members = [".", "crates/core", "crates/cli"]
 
@@ -51,6 +48,9 @@ markup5ever_rcdom = "0.3"
 base64 = "0.22"
 # the board's 复制为 PNG rasterizes its SVG (the same resvg GPUI draws SVGs with)
 resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+# Mermaid diagrams (src/mermaid.rs): parsed, laid out and written as SVG in
+# Rust. Not the default features: those add ELK (EPL-2.0) and every family.
+merman = { version = "0.11.0", default-features = false, features = ["svg", "layout-cytoscape", "diagram-flowchart", "diagram-sequence", "diagram-class", "diagram-state", "diagram-er", "diagram-gantt", "diagram-pie", "diagram-mindmap", "diagram-journey", "diagram-timeline", "diagram-git-graph", "diagram-quadrant-chart", "diagram-xychart"] }
 # the board's Xiaolai font is stored deflated (src/board/fonts.rs)
 miniz_oxide = "0.9"
 # 设置's font lists read what each installed family is (src/font_classes.rs)
@@ -96,9 +96,11 @@ objc = "0.2"
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 gpui_apple = { path = "vendor/zed/crates/gpui_apple", features = ["font-kit"] }
 
-# A window-less text system for the bundled emoji font test (src/editor/emoji.rs).
+# A window-less text system for the bundled emoji font test (src/editor/emoji.rs)
+# and the system font test (src/theme.rs).
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 gpui_wgpu = { path = "vendor/zed/crates/gpui_wgpu" }
+gpui_linux = { path = "vendor/zed/crates/gpui_linux" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-registry = "0.5"
@@ -108,6 +110,12 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gd
 
 # GPUI is vendored from the Zed repository: an upstream snapshot plus our
 # patch series, kept in sync by tools/vendor-sync (vendor/PATCHES.md).
+
+# zed-xim (GPUI's X11 input method client) crashed on any compound text but
+# UTF-8 and JIS, such as Rime's GB2312 through IBus (#465): our copy decodes
+# all of it and never fails (vendor/xim-ctext/README.md).
+[patch.crates-io]
+xim-ctext = { path = "vendor/xim-ctext" }
 
 # Shipped packages (scripts/release.sh and the other packaging scripts) build
 # with `--profile dist` into target/dist: whole-program LTO and no symbol table,
@@ -122,6 +130,96 @@ codegen-units = 1
 strip = "symbols"
 debug = "line-tables-only"
 split-debuginfo = "packed"
+
+# Mermaid (merman and the crates only it pulls in) is built for size: it was
+# most of the growth it brought, and still draws a diagram in milliseconds.
+# `dist` inherits these. Name@version where another version is shared.
+[profile.release.package.arraydeque]
+opt-level = "s"
+[profile.release.package."base64@0.23.1"]
+opt-level = "s"
+[profile.release.package."block-buffer@0.12.1"]
+opt-level = "s"
+[profile.release.package.by_address]
+opt-level = "s"
+[profile.release.package."const-oid"]
+opt-level = "s"
+[profile.release.package."cpufeatures@0.3.1"]
+opt-level = "s"
+[profile.release.package."crypto-common@0.2.2"]
+opt-level = "s"
+[profile.release.package.cssparser]
+opt-level = "s"
+[profile.release.package."data-encoding"]
+opt-level = "s"
+[profile.release.package."digest@0.11.3"]
+opt-level = "s"
+[profile.release.package.dtoa]
+opt-level = "s"
+[profile.release.package."dtoa-short"]
+opt-level = "s"
+[profile.release.package.dugong]
+opt-level = "s"
+[profile.release.package."dugong-graphlib"]
+opt-level = "s"
+[profile.release.package."granit-parser"]
+opt-level = "s"
+[profile.release.package."html5ever@0.40.1"]
+opt-level = "s"
+[profile.release.package.htmlize]
+opt-level = "s"
+[profile.release.package."hybrid-array"]
+opt-level = "s"
+[profile.release.package.json5]
+opt-level = "s"
+[profile.release.package."lalrpop-util"]
+opt-level = "s"
+[profile.release.package.manatee]
+opt-level = "s"
+[profile.release.package."markup5ever@0.40.0"]
+opt-level = "s"
+[profile.release.package.merman]
+opt-level = "s"
+[profile.release.package."merman-core"]
+opt-level = "s"
+[profile.release.package."merman-markup"]
+opt-level = "s"
+[profile.release.package."merman-model"]
+opt-level = "s"
+[profile.release.package."merman-render"]
+opt-level = "s"
+[profile.release.package."merman-theme-contract"]
+opt-level = "s"
+[profile.release.package."merman-unicode-linebreak"]
+opt-level = "s"
+[profile.release.package.palette]
+opt-level = "s"
+[profile.release.package.palette_math]
+opt-level = "s"
+[profile.release.package.pastey]
+opt-level = "s"
+[profile.release.package."pulldown-cmark"]
+opt-level = "s"
+[profile.release.package."quick-xml@0.42.0"]
+opt-level = "s"
+[profile.release.package."roughr-merman"]
+opt-level = "s"
+[profile.release.package."ryu-js"]
+opt-level = "s"
+[profile.release.package.serde_json_canonicalizer]
+opt-level = "s"
+[profile.release.package."sha2@0.11.2"]
+opt-level = "s"
+[profile.release.package."string_cache@0.11.0"]
+opt-level = "s"
+[profile.release.package."tendril@0.5.1"]
+opt-level = "s"
+[profile.release.package."ucd-trie"]
+opt-level = "s"
+[profile.release.package.unicase]
+opt-level = "s"
+[profile.release.package.web_atoms]
+opt-level = "s"
 
 # The web demo (web/build.sh): small over fast, then wasm-opt -Oz.
 [profile.web]

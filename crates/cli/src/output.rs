@@ -25,14 +25,14 @@ fn size(n: u64) -> String { if n >= 1000 { format!("{:.1}k", n as f64 / 1000.) }
 fn cell(v: &Value, k: &str) -> String { s(v, k).replace('|', "\\|").replace('\n', " ") }
 
 /// Compact text for people and agents alike; `--json` has every field.
-/// Paths start at 主页: the top-level folder's name first.
+/// Paths start with the top-level folder's name.
 pub fn text(op: &str, v: &Value) -> String {
     let mut o = String::new();
     match op {
         "ls" => for e in v.as_array().into_iter().flatten() {
-            let mark = format!("{}{}", if e.get("pinned").is_some() { " pinned" } else { "" }, if e.get("starred").is_some() { " starred" } else { "" });
+            let mark = if e.get("pinned").is_some() { " pinned" } else { "" };
             if e.get("top").is_some() {
-                // A top-level folder on 主页: where it is on disk, and whether it opens.
+                // A top-level folder: where it is on disk, and whether it opens.
                 let state = match e.get("documents") { Some(n) => format!("{n} documents{}", if e.get("default").is_some() { ", new documents go here" } else { "" }), None => format!("unavailable: {}", s(e, "error")) };
                 o += &format!("{}/  ({state})  {}\n", s(e, "path"), s(e, "dir"));
             } else if s(e, "kind") == "folder" { o += &format!("{}/\n", s(e, "path")); } else { o += &format!("{}  [{}] {}{mark}\n", s(e, "path"), s(e, "kind"), s(e, "modified")); }
@@ -47,7 +47,7 @@ pub fn text(op: &str, v: &Value) -> String {
                 if let Some(n) = r.get("more_hits") { o += &format!("  … {n} more blocks match (quiet blocks DOC --grep WORD)\n"); }
             }
         }
-        "outline" | "open" => {
+        "outline" | "load" | "open" => {
             o += &format!("{}  [{}] rev {}  {} blocks, {} chars\n", s(v, "path"), s(v, "kind"), s(v, "rev"), s(v, "block_count"), size(v["chars"].as_u64().unwrap_or(0)));
             for h in list(v, "headings") {
                 let l = h["level"].as_u64().unwrap_or(1) as usize;
@@ -67,12 +67,65 @@ pub fn text(op: &str, v: &Value) -> String {
             o += "back:\n";
             for l in list(v, "back") { o += &format!("  ← {}  {}\n", s(l, "from"), l["text"].as_array().map(|t| t.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" / ")).unwrap_or_default()); }
         }
+        "table" if v.get("text").is_some() => { o += &s(v, "text"); if !o.ends_with('\n') { o.push('\n'); } o += &stats(v); }
         "table" => {
             let fields: Vec<String> = list(v, "fields").filter_map(Value::as_str).map(str::to_string).collect();
-            let types: Vec<String> = list(v, "schema").map(|f| format!("{}: {}{}", s(f, "name"), s(f, "type"), if f.get("computed").is_some() { " (computed)" } else { "" })).collect();
-            o += &format!("{} › {}  ({} rows)\nfields: {}\n| _id | {} |\n| --- |{}\n", s(v, "src"), s(v, "table"), s(v, "total"), types.join(", "), fields.join(" | "), " --- |".repeat(fields.len()));
-            for r in list(v, "rows") { o += &format!("| {} | {} |\n", s(r, "_id"), fields.iter().map(|f| cell(r, f)).collect::<Vec<_>>().join(" | ")); }
+            let types: Vec<String> = list(v, "schema").filter(|f| fields.contains(&s(f, "name"))).map(|f| {
+                let mut d = s(f, "type");
+                if let Some(x) = f.get("options").and_then(Value::as_array).filter(|l| !l.is_empty()) { d += &format!(" [{}]", x.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("/")); }
+                for (k, sign) in [("formula", "="), ("link", "→"), ("lookup", "←")] { if f.get(k).is_some() { d += &format!(" {sign} {}", s(f, k)); } }
+                if f.get("computed").is_some() { d += " (computed)"; }
+                format!("{}: {d}", s(f, "name"))
+            }).collect();
+            let view = if v["view"].is_string() { format!(" › {}", s(v, "view")) } else { String::new() };
+            let of = v.get("records").map(|n| format!(" of {n}")).unwrap_or_default();
+            o += &format!("{} › {}{view}  ({} rows{of})\n", s(v, "src"), s(v, "table"), s(v, "total"));
+            let tables: Vec<&str> = list(v, "tables").filter_map(Value::as_str).collect();
+            if tables.len() > 1 { o += &format!("tables: {}\n", tables.join(", ")); }
+            o += &format!("views: {}\n", list(v, "views").map(|w| format!("{} ({})", s(w, "name"), s(w, "kind"))).collect::<Vec<_>>().join(", "));
+            if v.get("where").is_some() { o += &format!("where: {}\n", s(v, "where")); }
+            o += &format!("fields: {}\n", types.join(", "));
+            let head = format!("| _id | {} |\n| --- |{}\n", fields.join(" | "), " --- |".repeat(fields.len()));
+            let line = |r: &Value| format!("| {} | {} |\n", s(r, "_id"), fields.iter().map(|f| cell(r, f)).collect::<Vec<_>>().join(" | "));
+            fn groups(o: &mut String, gs: &Value, depth: usize, head: &str, line: &dyn Fn(&Value) -> String) {
+                for g in gs.as_array().into_iter().flatten() {
+                    let label = if s(g, "value").is_empty() { "(empty)".to_string() } else { s(g, "value") };
+                    *o += &format!("\n{} {} = {}  ({} row{})\n", "#".repeat(depth + 2), s(g, "field"), label, s(g, "count"), if g["count"] == 1 { "" } else { "s" });
+                    if g.get("groups").is_some() { groups(o, &g["groups"], depth + 1, head, line); } else { *o += head; for r in list(g, "rows") { *o += &line(r); } }
+                }
+            }
+            if v.get("groups").is_some() { groups(&mut o, &v["groups"], 0, &head, &line); } else { o += &head; for r in list(v, "rows") { o += &line(r); } }
             if let Some(n) = v.get("more") { o += &format!("… {n} more rows (--offset / --limit)\n"); }
+            o += &stats(v);
+        }
+        "table_views" => {
+            o += &format!("{} › {}\n", s(v, "src"), s(v, "table"));
+            for w in list(v, "views") { o += &view_line(w); }
+        }
+        "table_view_add" => o += &format!("added view {}", view_line(&v["added"])),
+        "table_view_set" => o += &format!("{}view {}", if v["changed"] == true { "set " } else { "unchanged " }, view_line(&v["view"])),
+        "table_view_rename" => o += &format!("renamed view {} → {}\n", s(v, "view"), s(v, "renamed")),
+        "table_view_delete" => o += &format!("deleted view {}\n", s(v, "deleted")),
+        "table_field_add" => o += &format!("added field {} ({}){}\n", s(v, "added"), s(v, "type"), v.get("mirror").map(|m| format!(", its mirror {}", m.as_str().unwrap_or(""))).unwrap_or_default()),
+        "table_field_change" if v["changed"] != true => o += &format!("field {}: nothing to change\n", s(v, "field")),
+        "table_field_change" => {
+            o += &format!("changed field {} ({})", s(v, "field"), s(v, "type"));
+            if let Some(n) = v.get("lost") { o += &format!(": {} value(s) converted, {n} lost", s(v, "converted")); }
+            if let Some(n) = v.get("cells_cleared") { o += &format!(", {n} cell(s) lost a removed option"); }
+            o += "\n";
+            for l in list(v, "lost_rows") { o += &format!("  {} was {:?}\n", s(l, "row"), s(l, "was")); }
+        }
+        "table_field_delete" => {
+            o += &format!("deleted field(s) {}\n", list(v, "deleted").filter_map(Value::as_str).collect::<Vec<_>>().join(", "));
+            if let Some(m) = v.get("mirrors_deleted") { o += &format!("  with their mirror field(s) {}\n", refs(m)); }
+            if let Some(b) = v.get("broken") { o += &format!("  these now show #引用失效: {}\n", refs(b)); }
+        }
+        "table_new" => o += &format!("added table {} ({} fields, {} rows)\n", s(v, "added"), list(v, "fields").count(), s(v, "rows")),
+        "table_rename" => o += &format!("renamed table {} → {}\n", s(v, "table"), s(v, "renamed")),
+        "table_remove" => o += &format!("removed table {}{}\n", s(v, "removed"), if list(v, "unlinked").count() > 0 { format!(" (links from {} turned to text)", refs(&v["unlinked"])) } else { String::new() }),
+        "table_import" => {
+            o += &format!("imported {} row(s) into {}\n", list(v, "added").count(), s(v, "table"));
+            for f in list(v, "created_fields") { o += &format!("  new field {} ({})\n", s(f, "name"), s(f, "type")); }
         }
         "board" => {
             let labels = list(v, "elements").filter(|e| e.get("in").is_some()).count();
@@ -111,17 +164,38 @@ pub fn text(op: &str, v: &Value) -> String {
         "move" => o += &format!("moved to {}\n", refs(&v["moved"])),
         "set" => o += &format!("set {}\n", refs(&v["set"])),
         "table_add" => o += &format!("added {}\n", refs(&v["added"])),
+        "table_update" if list(v, "updated").count() == 0 => o += "updated no rows: none matched\n",
         "table_update" => o += &format!("updated {}\n", refs(&v["updated"])),
-        "table_delete" => o += &format!("deleted {} row(s)\n", s(v, "deleted")),
+        "table_delete" => o += &format!("deleted {} row(s){}\n", s(v, "deleted"), if list(v, "rows").count() > 0 { format!(": {}", list(v, "rows").filter_map(Value::as_str).collect::<Vec<_>>().join(", ")) } else { String::new() }),
         "board_add" => o += &format!("added {}\n", refs(&v["added"])),
         "board_remove" => o += &format!("removed {} element(s)\n", s(v, "removed")),
-        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" => {}
+        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" | "pin" | "unpin" | "duplicate" => {}
         _ => o += &format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default()),
     }
     o
 }
 
-/// What a commit wrote (or, `dry`, would write), by paths from 主页.
+/// A table read's 统计, a line per field.
+fn stats(v: &Value) -> String {
+    let mut o = String::new();
+    if v.get("stats").is_none() { return o; }
+    o += "stats:\n";
+    for x in list(v, "stats") { o += &format!("  {}: {}\n", s(x, "field"), crate::tables::STATS.iter().filter(|k| x.get(**k).is_some()).map(|k| format!("{k} {}", s(x, k))).collect::<Vec<_>>().join(", ")); }
+    o
+}
+
+/// A view and its settings on one line.
+fn view_line(w: &Value) -> String {
+    let mut parts = vec![format!("{} ({}) {} rows", s(w, "name"), s(w, "kind"), s(w, "rows"))];
+    let join = |k: &str| list(w, k).filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+    if w.get("where").is_some() { parts.push(format!("where {}", s(w, "where"))); }
+    for k in ["sort", "group", "hidden", "order"] { if w.get(k).is_some() { parts.push(format!("{k} {}", join(k))); } }
+    for k in ["stack", "date", "end"] { if w.get(k).is_some() { parts.push(format!("{k} {}", s(w, k))); } }
+    if let Some(st) = w.get("stats").and_then(Value::as_object) { parts.push(format!("stats {}", st.iter().map(|(f, x)| format!("{f}={}", x.as_str().unwrap_or(""))).collect::<Vec<_>>().join(", "))); }
+    format!("{}\n", parts.join(" · "))
+}
+
+/// What a commit wrote (or, `dry`, would write), by full paths (the top-level folder first).
 pub fn report(r: &Value, dry: bool) -> String {
     let mut o = String::new();
     for c in r.as_array().into_iter().flatten() {

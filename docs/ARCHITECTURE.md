@@ -6,17 +6,16 @@ The Cargo workspace contains three crates:
 
 - **`crates/core` (`fdl_core`, about 36,000 lines, including 20,000 for whiteboards)** contains the document model, DocxXML, editing and undo, the on-disk library, Markdown and HTML import, Markdown export, and whiteboard models and algorithms. It builds and tests independently of GPUI with `cargo test -p fdl_core`. The fuzzer lives here too.
 - **The root crate (`quiet_md`)** owns windows, views, rendering, menus and overlays. `main.rs` re-exports the core modules at the crate root, and `editor/mod.rs` re-exports `editor::core` and `editor::table_ops`. The application can therefore use paths such as `crate::model` and `super::core`.
-- **`crates/cli` (`quiet_cli`, the `quiet` binary)** is the library from the command line, for people and agents. Each command is one operation of `Session` (`session.rs`) with JSON in and out: documents and blocks there, 数据表 rows in `tables.rs`, boards in `boards.rs`, versions, the trash and import in `library.rs`. `quiet run` gives the same operations to a JavaScript script in an embedded QuickJS (`js.rs`, `prelude.js`) with no files or network; `quiet mcp` (`mcp.rs`) serves them as two MCP tools. Changes stay in memory until the command or script ends, then are written in one commit through `Store` (its write lock, versions and link rewriting); a file changed on disk in the meantime stops the commit. Edits go through `editor::Core`, as in the app. Block refs carry a fingerprint of the block (`#3~k7f2`) so a ref from an earlier read finds its block or fails. `src/guide.md` is the agents' guide, printed by `quiet skill`; `help.rs` holds each command's help. See [the CLI design](design/CLI.md).
+- **`crates/cli` (`quiet_cli`, the `quiet` binary)** is the library from the command line, for people and agents. Each command is one operation of `Session` (`session.rs`) with JSON in and out: documents and blocks there, 数据表 rows in `tables.rs`, boards in `boards.rs`, versions, the trash and import in `library.rs`. `quiet run` gives the same operations to a JavaScript script in an embedded QuickJS (`js.rs`, `prelude.js`) with no files or network; `quiet mcp` (`mcp.rs`) serves them as two MCP tools. Changes stay in memory until the command or script ends, then are written in one commit through `Store` (its write lock, versions and link rewriting); a file changed on disk in the meantime stops the commit. Edits go through `editor::Core`, as in the app. Block refs carry a fingerprint of the block (`#3~k7f2`) so a ref from an earlier read finds its block or fails. The agent skill lives at the top of the repository in `skills/quiet-md/` (installed with `npx skills add s1dashu/quiet-md`); its `references/guide.md` is compiled in and printed by `quiet guide`; `help.rs` holds each command's help. See [the CLI design](design/CLI.md).
 
 Dependencies flow from the application and the CLI to core. Within the workspace, core may reference only core modules.
 
 ```text
 main.rs — window
-  ├─ onboarding.rs — first launch, replaced by Workspace in the same window after library selection
   └─ app.rs — Workspace (window root view)
        ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
        ├─ meta.rs — FORMAT 5/6: metadata, deletions and hand order split by device, merged field by field [core]
-       ├─ sidebar / home / search / trash / tree / docmenu / docinfo / modes
+       ├─ sidebar / folder_page / search / trash / tree / docmenu / docinfo / modes
        └─ editor::Editor (view.rs) — open document
             └─ editor::Core (core.rs) — document, selection and undo stack [core]
 ```
@@ -30,7 +29,7 @@ main.rs — window
 | Editing engine | `editor/core.rs`, `editor/table_ops.rs` | Typing, deletion, merging, indentation, conversion, dragging, tables, folding, inline objects and undo. Lives in `fdl_core` for unit testing and fuzzing without GPUI. |
 | Editor view | `editor/view.rs` and other `editor/*` modules | Translates keyboard and pointer events into Core calls and handles overlays, menus and block interactions. |
 | Rendering | `editor/render.rs`, `editor/text.rs` | Reads blocks and creates GPUI elements. `text.rs` draws rich text. |
-| Application | `app.rs` and other top-level modules | Sidebar, home, search, trash, document tree, import, export and printing. Uses `Store` for disk I/O. |
+| Application | `app.rs` and other top-level modules | Sidebar, folder pages, search, trash, document tree, import, export and printing. Uses `Store` for disk I/O. |
 
 ## Editing flow
 
@@ -88,7 +87,7 @@ This approach copies the entire document at each history step. A historical benc
 ## Memory and caches
 
 - A shared cache protects document images visible in any window. Above 64 MiB of offscreen decoded images it evicts the least recently used first. Other offscreen entries expire after 30 seconds. A sweep every two seconds also cleans the GPU atlas. Up to two decodes run concurrently and stale queued requests are skipped. Original images retain full resolution and animated images keep their decoding and playback behavior.
-- Images with explicit dimensions start loading when actually painted in the visible region. Images clipped out of home cards avoid early decoding. Home caches up to 128 recently used document previews.
+- Images with explicit dimensions start loading when actually painted in the visible region. Images clipped out of folder page cards avoid early decoding. Folder pages cache up to 128 recently used document previews.
 - The parse cache, window lists and file history share full-text search strings via `Arc<str>`. After a successful save when switching documents, the app releases the old document's full XML conflict-detection baseline if no other window uses it. Reopening reestablishes the baseline.
 - Metal and DirectX allocate intermediate path textures on demand and reclaim them on subsequent frames without paths. Apple GPUs use on-chip memory for multisampling at the same antialiasing sample count.
 
@@ -101,9 +100,12 @@ This approach copies the entire document at each history step. A historical benc
 | `model.rs` | Document model, inline object types and `display_title` |
 | `docxml.rs` | DocxXML parsing and serialization, including `to_inline` for inline objects |
 | `store.rs` | Library I/O, index recovery, trash, settings and `image_path` |
-| `home.rs` | `Home`, the one root: the top-level folders on 主页 (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
+| `shown.rs` | What a folder shows: the files it lists (`LIBRARY_FILES`, checked by content for `.xml` and `.sqlite`), the folders the scan does not go into (`skips_dir`), the `.gitignore` subset (`Ignore`) and the look before 添加文件夹 (`survey`). See FORMAT.md, "What a folder shows" |
+| `across.rs` | A page or folder moved into another top-level folder (`Store::move_across`): files renamed or copied over, ids and index fields kept, pictures copied into the target's `.assets/`, mentions across the edge written by id; see the last section |
+| `top_folders.rs` | `TopFolders`: the top-level folders the sidebar lists (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
+| `clip_html.rs` | Copied blocks as HTML for other apps, and Windows' CF_HTML envelope (written on copy, unwrapped on paste) |
 | `lang.rs` | Code language table |
 | `spacing.rs` | Where a space goes between 汉字 and Latin letters or digits (盘古之白), for typing with the preference on and Edit › 整理本文空格 |
 | `palette.rs` | RGBA text, background and callout palettes independent of GPUI. `theme.rs` converts them to GPUI colors. |
@@ -135,18 +137,20 @@ Whiteboard and history modules in core:
 | `main.rs` | Entry point, `FDL_SCRIPT` mode (devtools builds only), `--self-test` and core module re-exports |
 | `guides.rs` | Seeds an empty library with the bundled Getting Started guides once |
 | `app.rs` | `Workspace`, the two-pane window, open/create/save/delete actions, save state and reminder scheduling |
-| `shared_store.rs` | The `Home` the windows share: each call goes to the top-level folder a document is in; with two or more, each folder shows as a row of the sidebar tree (`top_row`) |
+| `entries.rs` | `Entries`, the window's pages and folders: read as a slice, changed only through `set` / `edit` / `take`, which move its `generation`; the sidebar's rows and the folder page's cards are rebuilt when it moves |
+| `shared_store.rs` | The `TopFolders` the windows share: each call goes to the top-level folder a document is in; each folder, one or many, shows as a row of the sidebar tree and a card on a folder page (`top_row`) |
 | `html.rs` / `printing.rs` / `transfer.rs` | HTML/PDF export, printing and import/export UI |
-| `clipboard.rs` | System clipboard HTML and the simulated clipboard in script mode |
+| `clipboard.rs` | System clipboard HTML (macOS `public.html`, Windows CF_HTML, Linux `text/html`), our copies' clipboard item, and the simulated clipboard in script mode |
+| `tree_writes.rs` | Sidebar drops, renames and a file name following its title: shown at once, written off the window's thread, one at a time and by id (see the last section) |
 | `sidebar.rs` / `tree.rs` | Sidebar and document tree, including child pages (a folder's own document, see FORMAT.md and core's `subdocs.rs`) and Move to |
-| `home.rs` / `trash.rs` | Home and trash |
+| `folder_page.rs` (with `folder_header.rs`, `thumb_style.rs`, `thumb_text.rs`) / `folder_card.rs` / `trash.rs` | A folder's page (header, cards or list, thumbnails), its folder cards and dragging into them, and the trash |
 | `search.rs` | Search dialog and advanced search |
 | `docmenu.rs` / `docinfo.rs` / `modes.rs` | More menu, document information, edit/read mode switch and shortcut panel |
-| `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, `shadow_*`, type scale and note panel dimensions |
-| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, shadows); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card` the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
+| `theme.rs` | `craft` scale, semantic `Theme::*` colors, named display colors, type scale and note panel dimensions |
+| `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card` the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据表) |
 | `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints, toasts and single-line input |
 | `highlight.rs` | Code highlighting |
-| `mermaid.rs` | Mermaid code blocks drawn as diagrams: bundled mermaid.js in an off-screen web view (macOS, Windows), SVG cached by source and theme |
+| `mermaid.rs` | Mermaid code blocks drawn as diagrams: merman (pure Rust) writes the SVG on a background thread, coloured from the Theme tokens, text measured by GPUI's resvg; cached in memory by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |
@@ -184,6 +188,14 @@ User titles, body text, attachment names and saved button labels are user conten
 
 ## Undo for folders and file operations
 
-Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `home_folder.rs` implement folder pages, dragging and animation.
+Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation.
 
-Create, duplicate, rename, move, delete and restore operations have their own undo history. Under the write lock, the store records successful file operations so changes from other instances stay outside the current operation. After an asynchronous drop reaches disk, the actual record replaces the preview record. Undo checks file state and hierarchy and reads current content from disk, leaving older body snapshots out of file-operation undo. When a management action changes a title, it adjusts caret boundaries in the editor and its history snapshots.
+Create, duplicate, rename, move, delete and restore operations have their own undo history. Under the write lock, the store records successful file operations so changes from other instances stay outside the current operation. After an asynchronous drop or rename reaches disk, the actual record replaces the preview record. Undo checks file state and hierarchy and reads current content from disk, leaving older body snapshots out of file-operation undo. When a management action changes a title, it adjusts caret boundaries in the editor and its history snapshots.
+
+Renaming a folder rewrites every link into and out of it, each file synced to disk: over a second for a few hundred pages. So a drop in the sidebar, 移动到, 重命名 and the file name that follows a title typed in the editor are shown at once and written afterwards (`tree_writes.rs`): the rows change, the write is queued, and a copy of the library (`Store::tree_writer`) makes the queued writes one at a time off the window's thread. A write names its page by id, so one queued behind a rename finds the page where it then is. Until a write lands, the window's library still holds the old paths: opening, deleting or importing into a page it moves waits for it (`after_tree_writes`), as does the open document's autosave; a save that cannot wait (⌘S, leaving the document, quitting) first makes every queued write on the window's thread (`settle_tree_writes`); any other write takes the library lock behind it and reads the index again. When a rename lands, the library takes over the writer (`SharedStore::adopt_written`); when it fails, the rows go back, a toast says why and the row returns to its field with what was typed. A top-level folder's rename is one rename of one folder and stays on the window's thread.
+
+A drop or 移动到 into another top-level folder is the same queued write with a writer of each library (`tree_writes.rs`, `save_cross_write`): `Store::move_across` hands the entries over (core's `across.rs`), both libraries take over their writers, and the window looks owners up again. The entries keep their ids, so the open document, the rows and the mentions from other top-level folders still find them; the open document's save baseline goes along (`SharedStore::hand_loaded`). Its undo record holds the move as one between the two libraries (`file_history.rs`, `Across`), undone by moving the page back to the folder and order numbers it had.
+
+The queue belongs to the window that made the rename or move. Another window on the same library learns of it when the write has landed and it lists the library again: until then, opening a page of that folder there can fail (its file is no longer where that window's rows say), and opening it again works. Nothing is written to the wrong place meanwhile: every write waits for the library lock and reads the index again under it.
+
+A move or rename writes only the files whose text changes (`Store::relocate`). A mention, a link and a Markdown file's pictures are paths from the file itself, so inside a folder that moves whole, whatever points inside it reads the same afterwards. What is rewritten is what crosses the folder's edge: files outside pointing in, files inside pointing out when their depth changes, and a DocxXML page's pictures named from the library's top through the folder. `relocate` tells which files those are from what `list` parsed (`Parsed::links`, `Parsed::files`) without reading the others. Pictures and attachments are read as paths on disk, so those that moved are pointed at their new place before the file is written.

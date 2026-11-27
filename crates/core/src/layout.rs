@@ -130,37 +130,82 @@ pub(super) fn rebase_link(from: &str, to: &str, href: &str, moved: &dyn Fn(&str)
 /// What a scan found: the folders and documents, relative to the library.
 #[derive(Default)]
 pub(super) struct Scan {
+    /// Folders with something listed in them (at any depth), after their contents.
     pub dirs: Vec<String>,
     pub docs: Vec<String>,
     /// iCloud placeholders (`.<name>.icloud`), by the path the file will have.
     pub pending: Vec<String>,
     /// A folder could not be read: what is missing may just be unreadable.
     pub partial: bool,
+    /// Folders gone into that hold nothing listed: not shown unless the user made them.
+    pub empty: Vec<String>,
+    /// Folders not gone into (`shown::skips_dir`, `.gitignore`): what is in them is not looked at.
+    pub skipped: Vec<String>,
+    /// Library files left out: ignored, or not ours inside (`shown::ours`).
+    pub left: Vec<String>,
 }
 
-/// Walk the library: its files (`DocKind::of_name`) and the folders holding them;
-/// names starting with `.` (`.quiet`, `.assets`, `.git` …) are not the user's notes.
-pub(super) fn scan(root: &Path) -> Scan {
-    fn walk(root: &Path, rel: &str, out: &mut Scan) {
-        let Ok(rd) = crate::vfs::read_dir(if rel.is_empty() { root.to_path_buf() } else { root.join(rel) }) else { out.partial = true; return };
+impl Scan {
+    /// Whether an entry with `key` (a folder's ends in `/`) is still there on disk
+    /// but not shown: in a folder not gone into, an empty folder, a file left out.
+    pub fn hider(&self) -> impl Fn(&str) -> bool + '_ {
+        let skipped: HashSet<&str> = self.skipped.iter().map(String::as_str).collect();
+        let empty: HashSet<&str> = self.empty.iter().map(String::as_str).collect();
+        let left: HashSet<&str> = self.left.iter().map(String::as_str).collect();
+        move |key: &str| {
+            let rel = key.trim_end_matches('/');
+            let mut up = rel;
+            while let Some((dir, _)) = up.rsplit_once('/') { if skipped.contains(dir) { return true } up = dir; }
+            if key.ends_with('/') { skipped.contains(rel) || empty.contains(rel) } else { left.contains(rel) }
+        }
+    }
+}
+
+/// Walk the library: its files (`DocKind::of_name`, and `ours` for what is inside
+/// one) and the folders holding them, not going into those `shown` skips; names
+/// starting with `.` (`.quiet`, `.assets`, `.git` …) are not the user's notes.
+/// `ours` is asked about a `.xml` and a `.sqlite` by path relative to the library
+/// and on disk; a caller that keeps no memory of it answers `shown::ours`.
+pub(super) fn scan(root: &Path, ours: &mut dyn FnMut(&str, &Path, DocKind, bool) -> bool) -> Scan {
+    /// True when something under `rel` is listed.
+    fn walk(root: &Path, rel: &str, rules: &mut Vec<crate::shown::Ignore>, ours: &mut dyn FnMut(&str, &Path, DocKind, bool) -> bool, out: &mut Scan) -> bool {
+        let dir = if rel.is_empty() { root.to_path_buf() } else { root.join(rel) };
+        let Ok(rd) = crate::vfs::read_dir(&dir) else { out.partial = true; return false };
+        let mut entries = vec![];
         for e in rd {
             let Ok(e) = e else { out.partial = true; continue };
             let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            let Ok(kind) = e.file_type() else { continue };
+            entries.push((name, kind));
+        }
+        let names: Vec<String> = entries.iter().map(|(n, _)| n.clone()).collect();
+        let pushed = crate::shown::Ignore::read(&dir, rel, entries.iter().any(|(n, k)| n == ".git" && k.fs_is_dir()), entries.iter().any(|(n, k)| n == ".gitignore" && k.fs_is_file()));
+        let n_rules = pushed.len();
+        rules.extend(pushed);
+        let mut shows = false;
+        for (name, kind) in entries {
             if let Some(real) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".icloud")) {
-                if crate::store::DocKind::of_name(real).is_some() { out.pending.push(join_rel(rel, real)); }
+                // Not downloaded: taken by its name, as reading it would download it.
+                let child = join_rel(rel, real);
+                if crate::store::DocKind::of_name(real).is_some() && !crate::shown::ignored(rules, &child, false) { out.pending.push(child); shows = true; }
                 continue;
             }
             if name.starts_with('.') { continue; }
-            let Ok(kind) = e.file_type() else { continue };
             // Symbolic links are not followed: a link to a parent would never end.
-            let dir = kind.fs_is_dir();
             let child = join_rel(rel, &name);
-            if dir { out.dirs.push(child.clone()); walk(root, &child, out); }
-            else if kind.fs_is_file() && crate::store::DocKind::of_name(&name).is_some() && !stem_of(&name).is_empty() { out.docs.push(child); }
+            if kind.fs_is_dir() {
+                if crate::shown::skips_dir(&name, base_name(rel), &names) || crate::shown::ignored(rules, &child, true) { out.skipped.push(child); continue; }
+                if walk(root, &child, rules, ours, out) { out.dirs.push(child); shows = true; } else { out.empty.push(child); }
+            } else if kind.fs_is_file() && let Some((k, md)) = crate::store::DocKind::of_name(&name) && !stem_of(&name).is_empty() {
+                if crate::shown::ignored(rules, &child, false) || !ours(&child, &dir.join(&name), k, md) { out.left.push(child); }
+                else { out.docs.push(child); shows = true; }
+            }
         }
+        rules.truncate(rules.len() - n_rules);
+        shows
     }
     let mut out = Scan::default();
-    walk(root, "", &mut out);
+    walk(root, "", &mut vec![], ours, &mut out);
     out
 }
 

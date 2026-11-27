@@ -2,6 +2,7 @@
 //! (design-spec §2–§3). Floating panels are in `overlays.rs`.
 
 use super::core::{self, Pos, TITLE, Unit};
+use super::drag::{Flow, Shift};
 use super::text::{LayoutCache, RichTextElement, TextSpec};
 use super::view::{BoundsMap, Editor, Menu};
 use crate::model::*;
@@ -40,6 +41,8 @@ pub(super) struct Frame {
     units: Rc<Vec<Unit>>,
     pub eqnos: Rc<HashMap<BlockId, u32>>,
     selected: Rc<HashSet<BlockId>>,
+    /// The block selection `selected` was computed for.
+    sel: Option<core::BlockSel>,
     focused: bool,
 }
 
@@ -65,6 +68,9 @@ pub(super) enum Reveal {
     Find(Pos),
     /// A block, put 24px below the top.
     Block(BlockId),
+    /// The caret's line back at this many px below the page's top (a zoom
+    /// keeps the line being read where it was).
+    At(f32),
 }
 
 /// `box-shadow: 0 0 0 1px` around a radius-8 bordered box. (A GPUI shadow
@@ -153,6 +159,11 @@ pub(super) struct Env {
 }
 
 const TEXT_PLACEHOLDER: &str = "输入“/”快速插入内容";
+/// 打字机模式 holds the caret's line this far down the page (0.5: the middle).
+pub(super) const TYPEWRITER_LINE: f32 = 0.5;
+/// 段落聚焦: the other paragraphs' opacity, and how long a change of paragraph eases (s).
+const FOCUS_DIM: f32 = 0.3;
+const FOCUS_FADE: f32 = 0.15;
 
 pub(super) fn margins(b: &Block, env: Env) -> (f32, f32) {
     if env.cell {
@@ -203,7 +214,7 @@ pub(super) fn visible_with_gaps(list: &[Block], env: Env) -> Vec<(usize, f32)> {
 pub(super) fn record_bounds(id: BlockId, map: BoundsMap) -> impl IntoElement {
     canvas(
         move |b, _, _| {
-            map.borrow_mut().insert(id, b);
+            map.borrow_mut().insert(id, super::drag::undrawn(b));
         },
         |_, _, _, _| {},
     )
@@ -328,15 +339,24 @@ impl R<'_> {
     /// A column of sibling blocks with collapsed margins and heading folding.
     pub fn blocks(&self, list: &[Block], env: Env, cx: &mut Context<Editor>) -> Div {
         let mut col = div().flex().flex_col().w_full();
+        // While blocks move: the container these are in, to make room in.
+        let flow = list.first().filter(|_| !self.ghost && self.ed.drag_fx_live()).and_then(|b| self.ed.core.parent_of(b.id)).map(|p| Flow::In(p.id));
+        let mut slot = flow.and_then(|f| self.ed.drag_slot_at(f));
         for (i, gap) in visible_with_gaps(list, env) {
+            if slot.is_some_and(|at| at <= i) {
+                slot = None;
+                col = col.child(self.ed.slot_el());
+            }
             // Nested rows are drawn here rather than by `render_item`, so the
             // 版本历史 tint has to be applied on this wrapper.
-            col = col.child(
-                div()
-                    .mt(px(gap))
-                    .when_some(self.ed.mark_fill(list[i].id), |d, fill| d.rounded(px(3.)).bg(fill))
-                    .child(self.block(&list[i], list, i, Env { root: false, ..env }, cx)),
-            );
+            let el = div()
+                .mt(px(gap))
+                .when_some(self.ed.mark_fill(list[i].id), |d, fill| d.rounded(px(3.)).bg(fill))
+                .child(self.block(&list[i], list, i, Env { root: false, ..env }, cx));
+            col = col.child(Shift::wrap(el, flow.and_then(|f| self.ed.drawn_shift(f, i, list[i].id))));
+        }
+        if slot.is_some() {
+            col = col.child(self.ed.slot_el());
         }
         col
     }
@@ -519,7 +539,7 @@ impl R<'_> {
             .child(record_bounds(b.id, self.bounds.clone()))
             .children(handle)
             .children(self.fold_button(b, env, cx))
-            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.5))
+            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.))
             .children(self.ed.drop_flash_el(b.id).filter(|_| !self.ghost))
             .when(atomic_caret && self.focused, |d| {
                 d.child(
@@ -661,6 +681,10 @@ impl R<'_> {
         if crate::settings::feishu() { return self.children_of_feishu(b, env, cx); }
 
         if b.children.is_empty() || b.folded || self.flat == Some(b.id) {
+            // The first child about to be dropped in.
+            if b.children.is_empty() && !self.ghost && self.ed.drag_slot_at(Flow::In(b.id)) == Some(0) {
+                return div().pl(px(theme::style().num("list.indent"))).child(self.ed.slot_el());
+            }
             return div();
         }
         let indent = theme::style().num("list.indent");
@@ -723,7 +747,7 @@ impl R<'_> {
                     .when(rtl, |d| d.ml(px(8.)))
                     .rounded(px(st.num("task.radius")))
                     .border_1()
-                    .when(!done, |d| d.border_color(Theme::todo_box()).bg(crate::theme::raised(Theme::bg_body())).hover(|s| s.border_color(Theme::primary())))
+                    .when(!done, |d| d.border_color(crate::theme::lift(Theme::todo_box(), 3.)).bg(crate::theme::raised(Theme::bg_body())).hover(|s| s.border_color(Theme::primary())))
                     .when(done, |d| d.border_color(fill).bg(fill))
                     .flex()
                     .items_center()
@@ -798,6 +822,9 @@ impl R<'_> {
             font: None,
             italic: false,
             font_runs: None,
+            metrics: None,
+            breaks: None,
+            shift: Point::default(),
         };
         // Line numbers follow the wrapped rows of the last layout.
         let rows_per_line: Vec<usize> = {
@@ -821,7 +848,7 @@ impl R<'_> {
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = b.folded;
         let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
-        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        let mermaid = !folded && lang == crate::mermaid::LANG;
         // A Mermaid block shows its diagram, under the code while the caret is in it.
         let reveal = editing && !self.ed.read_only;
         let diagram = if mermaid && !show_code { self.diagram(b, reveal, 36., 16., cx) } else { None };
@@ -1151,7 +1178,7 @@ impl Editor {
     /// The row of a Mermaid block the caret is in shows its code too.
     fn diagram_nonce(&self, focused: bool) -> Option<(BlockId, u64)> {
         let id = self.core.sel.head.block;
-        let on = crate::mermaid::SUPPORTED && focused && !self.read_only
+        let on = focused && !self.read_only
             && matches!(self.core.kind_of(id), Some(BlockKind::Code { lang, show_code: false, .. }) if lang == crate::mermaid::LANG);
         on.then(|| (id, 0x6d65_726d_u64.wrapping_mul(id.0 | 1)))
     }
@@ -1175,7 +1202,8 @@ impl Editor {
         self.core.doc.cover.as_ref().map(|_| cover_h.to_bits()).hash(&mut h);
         self.info.hidden.hash(&mut h);
         let mut keys = vec![h.finish()];
-        let links = self.links_key();
+        // The space below the last block changes with 打字机模式 and the page's height.
+        let links = self.links_key() ^ (self.below_h.to_bits() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         // Rows whose look depends on editor state, not the document.
         let mut nonces = self.grid_overrides();
         nonces.extend(self.image_nonces(focused).into_iter().chain(self.button_nonce()).chain(self.diagram_nonce(focused)));
@@ -1265,6 +1293,10 @@ impl Editor {
                 b = list.get(i);
                 list = b.map_or(&[][..], |b| b.children.as_slice());
             }
+            if let Some(&top) = path.first() {
+                let r = self.rendered_top.get().map_or((top, top), |(a, z)| (a.min(top), z.max(top)));
+                self.rendered_top.set(Some(r));
+            }
             let found = b.map(super::caption::captions_in).unwrap_or_default();
             if !found.is_empty() {
                 self.ensure_captions(found, window, cx);
@@ -1316,8 +1348,10 @@ impl Editor {
                 // Depth of the outermost selected ancestor, whose highlight
                 // spans its children's rows too.
                 let mut sel_depth = None;
-                // Rows of a dragged block's subtree fade with it.
+                // Rows of a dragged block's subtree go with it.
                 let mut dimmed = false;
+                // A dropped block gliding in takes the rows under it along.
+                let mut glide = None;
                 // Ancestors whose background spans this row.
                 let mut bgs = vec![];
                 for (d, &i) in outer.iter().enumerate() {
@@ -1329,6 +1363,9 @@ impl Editor {
                         bgs.push((d, fill));
                     }
                     dimmed |= self.is_dragged(b.id);
+                    if glide.is_none() && self.gliding(b.id) {
+                        glide = Some(b.id);
+                    }
                     list = &b.children;
                 }
                 let Some(b) = list.get(bi) else { return div().into_any_element() };
@@ -1338,11 +1375,12 @@ impl Editor {
                 r.flat = flattens(b).then_some(b.id);
                 let ends = |d: usize| !matches!(self.items.get(ix + 1), Some(Item::Block { path: next, .. }) if next.starts_with(&path[..=d]));
                 let last = sel_depth.is_some_and(ends);
-                div()
+                let shift = self.drawn_shift(Flow::Rows, ix, glide.unwrap_or(b.id));
+                let row = div()
                     .relative()
                     .pt(px(gap))
                     .pl(px(25. * depth as f32))
-                    .when(dimmed, |d| d.opacity(0.5))
+                    .when(dimmed, |d| d.opacity(0.))
                     .children(bgs.into_iter().map(|(d, fill)| {
                         div()
                             .absolute()
@@ -1365,25 +1403,124 @@ impl Editor {
                                 .when(last, |d| d.rounded_b(px(self.block_tint().1)))
                                 .bg(self.block_tint().0),
                         )
-                    })
-                    .into_any_element()
+                    });
+                if self.drag_fx_moving() {
+                    window.request_animation_frame();
+                }
+                Shift::wrap(row, shift)
             }
             Item::Below => div()
                 .id("below")
                 .w_full()
                 .children(self.refs_list(window, cx))
-                .child(div().h(px(200.)).w_full())
+                .child(div().h(px(self.below_h)).w_full())
                 .on_mouse_down(MouseButton::Left, cx.listener(Self::on_click_below))
                 .into_any_element(),
         };
         let targets = r.targets.into_inner();
         self.handle_targets.extend(targets);
-        let padded = div().w_full().pl(px(self.layout.ml)).pr(px(self.layout.mr)).child(content);
+        let a = self.item_opacity(ix);
+        let padded = div().w_full().pl(px(self.layout.ml)).pr(px(self.layout.mr)).when(a < 1., |d| d.opacity(a)).child(content);
         match cover {
             // The cover spans the whole pane, above the padded header.
             Some(c) => div().w_full().child(c).child(padded).into_any_element(),
             None => padded.into_any_element(),
         }
+    }
+
+    /// 打字机模式 applies: the caret is a caret in an editable page, not a
+    /// selection, a word the input method is composing, or a mouse drag.
+    pub(super) fn typewriter_on(&self) -> bool {
+        crate::settings::typewriter() && !self.read_only && self.marked.is_none() && !self.dragging
+            && self.core.block_sel.is_none() && self.core.sel.is_collapsed()
+    }
+
+    /// 放大 / 缩小 is about to change the text size: the line being read stays
+    /// where it is. A caret on the page keeps its height (in 打字机模式 the
+    /// middle); otherwise the row at the top keeps its share scrolled past.
+    pub fn hold_position(&mut self, ratio: f32) {
+        let view = self.list.viewport_bounds();
+        let h = self.core.sel.head;
+        let at = self.cache.borrow().get(&h.block).map(|l| l.position_for(h.offset).y);
+        match at.filter(|y| *y >= view.top() && *y < view.bottom()) {
+            Some(y) if self.core.block_sel.is_none() => {
+                let tw = self.typewriter_on();
+                self.reveal = Some((if tw { Reveal::Caret } else { Reveal::At(f32::from(y - view.top())) }, 0));
+                // 打字机模式: back on the middle in one go, not a glide.
+                self.tw_snap = tw;
+            }
+            _ => {
+                let top = self.list.logical_scroll_top();
+                self.list.scroll_to(ListOffset { item_ix: top.item_ix, offset_in_item: top.offset_in_item * ratio });
+            }
+        }
+    }
+
+    /// 放大 / 缩小's percentage in the note's corner.
+    pub fn show_zoom_badge(&mut self, pct: u32, cx: &mut Context<Self>) {
+        self.zoom_badge = Some((pct, web_time::Instant::now()));
+        cx.notify();
+    }
+
+    /// For scripts (`caret`): the caret line's middle and the page's height,
+    /// both from the page's top, and the page's top in the window, as last drawn.
+    #[cfg(feature = "devtools")]
+    pub fn caret_probe(&self) -> Option<(f32, f32, f32)> {
+        let h = self.core.sel.head;
+        let view = self.list.viewport_bounds();
+        let y = self.cache.borrow().get(&h.block).map(|l| l.position_for(h.offset).y + l.line_height / 2.)?;
+        Some((f32::from(y - view.top()), f32::from(view.size.height), f32::from(view.top())))
+    }
+
+    /// 段落聚焦: the rows that stay clear, first to last (the title is row 0):
+    /// the caret's, or every one the selection spans. `None` dims nothing.
+    fn lit_rows(&self) -> Option<(usize, usize)> {
+        if !crate::settings::paragraph_focus() || self.read_only { return None }
+        let (a, b) = match self.core.block_sel {
+            Some(s) => (s.anchor, s.head),
+            None => (self.core.sel.anchor.block, self.core.sel.head.block),
+        };
+        let (a, b) = (self.item_of(a)?, self.item_of(b)?);
+        Some((a.min(b), a.max(b)))
+    }
+
+    /// 段落聚焦's opacity for row `ix`, easing over `FOCUS_FADE` from the rows
+    /// lit before (丰富 motion; 克制 switches at once).
+    fn item_opacity(&self, ix: usize) -> f32 {
+        let Some(now) = self.lit else { return 1. };
+        let at = |r: (usize, usize)| if (r.0..=r.1).contains(&ix) { 1. } else { FOCUS_DIM };
+        match self.lit_fade {
+            Some((before, t0)) => {
+                let k = (t0.elapsed().as_secs_f32() / FOCUS_FADE).min(1.);
+                let (from, to) = (at(before), at(now));
+                from + (to - from) * (1. - (1. - k).powi(3))
+            }
+            None => at(now),
+        }
+    }
+
+    /// Follows the selection to the rows 段落聚焦 keeps clear (before the list
+    /// draws). Turning it on or off eases too: off is every row lit.
+    fn sync_lit(&mut self, window: &mut Window) {
+        const ALL: (usize, usize) = (0, usize::MAX);
+        let (to, from) = (self.lit_rows().unwrap_or(ALL), self.lit.unwrap_or(ALL));
+        if to != from {
+            self.lit_fade = crate::settings::motion_high().then(|| (from, web_time::Instant::now()));
+            self.lit = Some(to);
+        }
+        if let Some((_, t0)) = self.lit_fade {
+            if t0.elapsed().as_secs_f32() < FOCUS_FADE { window.request_animation_frame(); return }
+            self.lit_fade = None;
+        }
+        if self.lit == Some(ALL) { self.lit = None }
+    }
+
+    /// The space below the last block: 200px, or with 打字机模式 half the page,
+    /// so the last line can come up to the middle too. Read before the list
+    /// draws (its state is borrowed while it does) and kept in `below_h`.
+    fn below_height(&self) -> f32 {
+        let half = f32::from(self.list.viewport_bounds().size.height) * TYPEWRITER_LINE;
+        if crate::settings::typewriter() && !self.read_only { 200f32.max((half / 8.).ceil() * 8.) } else { 200. }
     }
 
     /// Applies the pending scroll request against this frame's layout. A
@@ -1403,7 +1540,7 @@ impl Editor {
             })
         };
         let (block, target) = match req {
-            Reveal::Caret => match self.core.block_sel {
+            Reveal::Caret | Reveal::At(_) => match self.core.block_sel {
                 Some(b) => (b.head, self.block_bounds.borrow().get(&b.head).copied()),
                 // A selected image has no text layout: keep its box in view.
                 None => {
@@ -1420,25 +1557,61 @@ impl Editor {
             {
                 self.list.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
                 self.reveal = Some((req, tries + 1));
+                // A caret off the page lands in the middle in one go, not a glide from the top.
+                self.tw_snap = true;
                 // `refresh` is a no-op while drawing.
                 window.request_animation_frame();
             }
             return;
         };
         let margin = px(40.);
+        // 打字机模式: a caret (not a selection, nor a word being composed) keeps
+        // its line in the middle; a line taller than the page reveals as usual.
+        let tw = matches!(req, Reveal::Caret) && self.typewriter_on() && t.size.height <= view.size.height - margin * 2.;
         let d = match req {
+            Reveal::Caret if tw => {
+                let d = t.center().y - (view.top() + view.size.height * TYPEWRITER_LINE);
+                if d.abs() < px(1.) { px(0.) } else { d }
+            }
             Reveal::Caret if t.top() < view.top() + margin => t.top() - (view.top() + margin),
             Reveal::Caret if t.bottom() > view.bottom() - margin => {
                 (t.bottom() - (view.bottom() - margin)).min(t.top() - view.top() - margin)
             }
             Reveal::Caret => px(0.),
+            Reveal::At(y) => t.top() - (view.top() + px(y)),
             // The find box covers the top right of the page.
+            // 打字机模式 brings a find hit to the middle too, where the caret will write.
+            Reveal::Find(_) if crate::settings::typewriter() && !self.read_only => t.center().y - (view.top() + view.size.height * TYPEWRITER_LINE),
             Reveal::Find(_) if t.top() >= view.top() + px(250.) && t.bottom() <= view.bottom() - margin => px(0.),
             Reveal::Find(_) => t.top() - (view.top() + view.size.height / 2.),
             Reveal::Block(_) => t.top() - view.top() - px(24.),
         };
-        if d != px(0.) {
-            self.list.scroll_by(d);
+        let at = self.list.scroll_px_offset_for_scrollbar().y;
+        // The page's start or end held the last glide steps: the line goes no
+        // further. (Some frames draw before a step lands: one still frame is no stop.)
+        let still = self.glide.map_or(0, |(_, before, n)| if (at - before).abs() < px(0.25) { n + 1 } else { 0 });
+        let held = tw && still >= 3;
+        // The caret's line is (or is on its way to) the middle: a resize keeps it there.
+        if matches!(req, Reveal::Caret) { self.tw_centred = tw; }
+        // A window resize, the sidebar or 专注模式 reflowed the page: no glide.
+        let snap = std::mem::take(&mut self.tw_snap);
+        if d == px(0.) || held {
+            self.glide = None;
+        } else {
+            // 丰富 glides there (the rest of the way shrinks by e^(−t/60ms),
+            // re-aimed each frame as the text moves); 克制 jumps, and so does a
+            // jump of more than a page (a big paste, undo far away).
+            let step = match tw && crate::settings::motion_high() && !snap && d.abs() <= view.size.height {
+                true => {
+                    let dt = self.glide.map_or(1. / 60., |(t, _, _)| t.elapsed().as_secs_f32().min(0.05));
+                    let s = d * (1. - (-dt / 0.06).exp());
+                    if s.abs() < px(1.) { d } else { s }
+                }
+                false => d,
+            };
+            self.list.scroll_by(step);
+            self.glide = (step != d).then(|| (web_time::Instant::now(), at, still));
+            if self.glide.is_some() { self.reveal = Some((req, 0)); }
             window.request_animation_frame();
         }
         // Unwrapped code scrolls sideways to keep the caret (or find hit) in view.
@@ -1465,13 +1638,20 @@ impl Editor {
         let lightbox = self.lightbox_el(window, cx);
         let board = self.board_el();
         self.sync_tables(window, cx);
-        let toast = self.toast_el(window);
+        let toast = self.toast_el(window, cx);
         let probes = std::mem::take(&mut *self.probes.borrow_mut());
         let origin0 = self.content_origin.get();
-        let counter = self.word_counter();
+        let zoom_badge = self.zoom_badge_el(window);
         let find_box = self.find_box(window, cx);
         if std::mem::take(&mut self.autoscroll) && self.reveal.is_none() {
             self.reveal = Some((Reveal::Caret, 0));
+        }
+        // 打字机模式: a page resized (the window, the sidebar, 专注模式) under a
+        // centred caret keeps its line in the middle, at once.
+        let size = window.viewport_size();
+        if self.tw_size.replace(size).is_some_and(|was| was != size) && self.tw_centred && self.typewriter_on() && self.reveal.is_none() {
+            self.reveal = Some((Reveal::Caret, 0));
+            self.tw_snap = true;
         }
         // The handle floats above everything (deferred), so the page viewport
         // doesn't clip it: hide it once its block's top scrolls out of view.
@@ -1487,6 +1667,7 @@ impl Editor {
         // Reads last frame's bar segments.
         self.table_autoscroll(window);
         self.block_autoscroll(window);
+        self.tick_drag_fx(window);
         self.text_autoscroll(window, cx);
         self.tick_drop_flash(window);
         if let Some((_, t0)) = self.fold_anim {
@@ -1497,6 +1678,7 @@ impl Editor {
         }
         self.cache.borrow_mut().clear();
         self.block_bounds.borrow_mut().clear();
+        self.rendered_top.set(None);
         self.tables.geo.borrow_mut().clear();
         self.tables.stuck.borrow_mut().clear();
         self.img.boxes.borrow_mut().clear();
@@ -1506,19 +1688,21 @@ impl Editor {
         }
         let focused = self.focus.is_focused(window);
         self.touch_frame(focused, window, cx);
+        self.below_h = self.below_height();
         self.sync_items(focused, super::cover::cover_height(window));
+        self.sync_lit(window);
         let generation = self.core.generation;
         let (units, eqnos) = match self.frame.generation == Some(generation) {
             true => (self.frame.units.clone(), self.frame.eqnos.clone()),
             false => (Rc::new(self.core.units()), Rc::new(equation_numbers(&self.core.doc))),
         };
-        self.frame = Frame {
-            generation: Some(generation),
-            units,
-            eqnos,
-            selected: Rc::new(self.core.block_sel_ids().into_iter().collect()),
-            focused,
+        // Walking a long document for the selected blocks costs ~10ms
+        // (1M chars): only when the selection or the document changed.
+        let selected = match self.frame.generation == Some(generation) && self.frame.sel == self.core.block_sel {
+            true => self.frame.selected.clone(),
+            false => Rc::new(self.core.block_sel_ids().into_iter().collect()),
         };
+        self.frame = Frame { generation: Some(generation), units, eqnos, selected, sel: self.core.block_sel, focused };
         // Filled in as the list renders its visible items.
         self.handle_targets.clear();
 
@@ -1732,6 +1916,7 @@ impl Editor {
             .font_family(theme::ui_family())
             .text_color(Theme::text())
             .on_mouse_move(cx.listener(Self::on_hover_move))
+            .on_scroll(cx.listener(|ed, _: &ScrollEvent, _, _| ed.wheel_stops_glide()))
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|ed, ev: &MouseUpEvent, window, cx| {
@@ -1769,7 +1954,7 @@ impl Editor {
             .children(table_overlay)
             .children(block_overlay)
             .children(image_layer)
-            .children(counter)
+            .children(zoom_badge)
             .children(find_box)
             .children(lightbox)
             .children(board)
@@ -1808,46 +1993,20 @@ impl Editor {
         })
     }
 
-    /// "N 字" chip at the bottom right while text is selected (§2).
-    fn word_counter(&self) -> Option<AnyElement> {
-        let n = if self.core.in_block_mode() {
-            let index = core::block_index(&self.core.doc);
-            self.core
-                .block_sel_ids()
-                .iter()
-                .filter_map(|id| index.get(id))
-                .map(|b| crate::docinfo::blocks_word_count(std::slice::from_ref(*b)))
-                .sum()
-        } else if self.core.sel.is_collapsed() {
-            return None;
-        } else {
-            crate::docinfo::word_count(&self.core.selected_text())
-        };
-        // Selection word count at the note's bottom right: an outline xs
-        // button's face (1px `border`, shadow-xs, radius 8, text-xs), not a
-        // button; opaque (`background`) as it floats over the text.
-        Some(
-            div()
-                .absolute()
-                .bottom(px(10.))
-                .right(px(34.))
-                .h(px(24.))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .rounded(px(8.))
-                .bg(crate::design::color::background())
-                .border_1()
-                .border_color(crate::design::color::border())
-                .shadow(crate::design::shadow::xs())
-                .font_family(crate::theme::ui_family())
-                .text_size(px(12.))
-                .text_color(crate::design::color::muted_foreground())
-                .child(crate::settings::localized(crate::settings::lang(), "{n} 字", || format!("{n} 字"), || format!("{n} {}", if n == 1 { "word" } else { "words" })))
-                .into_any_element(),
-        )
+    /// 放大 / 缩小's percentage at the note's bottom right (shadcn's `Badge`), a
+    /// second, then it fades.
+    fn zoom_badge_el(&self, window: &mut Window) -> Option<AnyElement> {
+        let (pct, t0) = self.zoom_badge.as_ref()?;
+        let e = t0.elapsed().as_secs_f32();
+        if e >= ZOOM_BADGE + 0.2 { return None }
+        window.request_animation_frame();
+        let a = if e > ZOOM_BADGE { (ZOOM_BADGE + 0.2 - e) / 0.2 } else { 1. };
+        Some(div().absolute().bottom(px(12.)).right(px(34.)).opacity(a).child(crate::design::Badge::new(format!("{pct}%"))).into_any_element())
     }
 }
+
+/// How long 放大 / 缩小's percentage stays before it fades (s).
+const ZOOM_BADGE: f32 = 1.;
 
 impl R<'_> {
 fn spec_for_feishu(&self, b: &Block, env: Env) -> TextSpec {
@@ -2017,7 +2176,7 @@ pub(super) fn block_feishu(&self, b: &Block, siblings: &[Block], idx: usize, env
             .child(record_bounds(b.id, self.bounds.clone()))
             .children(handle)
             .children(self.fold_button(b, env, cx))
-            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.5))
+            .when(!self.ghost && self.ed.is_dragged(b.id), |d| d.opacity(0.))
             .children(self.ed.drop_flash_el(b.id).filter(|_| !self.ghost))
             .when(atomic_caret && self.focused, |d| {
                 d.child(
@@ -2220,6 +2379,9 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
             font: None,
             italic: false,
             font_runs: None,
+            metrics: None,
+            breaks: None,
+            shift: Point::default(),
         };
         // Line numbers follow the wrapped rows of the last layout.
         let rows_per_line: Vec<usize> = {
@@ -2243,7 +2405,7 @@ fn code_block_feishu(&self, b: &Block, lang: &str, wrap: bool, cx: &mut Context<
         let editing = self.focused && self.ed.core.sel.head.block == id;
         let folded = b.folded;
         let show_code = matches!(b.kind, BlockKind::Code { show_code: true, .. });
-        let mermaid = !folded && lang == crate::mermaid::LANG && crate::mermaid::SUPPORTED;
+        let mermaid = !folded && lang == crate::mermaid::LANG;
         // A Mermaid block shows its diagram, under the code while the caret is in it.
         let reveal = editing && !self.ed.read_only;
         let diagram = if mermaid && !show_code { self.diagram(b, reveal, 40., 20., cx) } else { None };
@@ -2484,6 +2646,9 @@ impl R<'_> {
 fn children_of_feishu(&self, b: &Block, env: Env, cx: &mut Context<Editor>) -> Div {
 
         if b.children.is_empty() || b.folded || self.flat == Some(b.id) {
+            if b.children.is_empty() && !self.ghost && self.ed.drag_slot_at(Flow::In(b.id)) == Some(0) {
+                return div().pl(px(25.)).child(self.ed.slot_el());
+            }
             return div();
         }
         div().pl(px(25.)).mt(px(8.)).child(self.blocks(&b.children, Env { depth: env.depth + 1, width: env.width - 25., ..env }, cx))

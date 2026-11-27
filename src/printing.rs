@@ -107,7 +107,7 @@ pub(crate) mod native {
 
     /// A WKWebView `width` points wide in a window far off screen (never
     /// shown), loading `html`: (window, web view). `setup` gets its
-    /// configuration first. Also Mermaid's (mermaid.rs).
+    /// configuration first.
     pub(crate) fn offscreen(width: f64, html: &str, setup: impl FnOnce(*mut Object)) -> (*mut Object, *mut Object) {
         unsafe {
             let holder: *mut Object = msg_send![class!(NSWindow), alloc];
@@ -382,8 +382,8 @@ pub(crate) mod webview2 {
         res
     }
 
-    /// A WebView2 environment and a controller hosted in `host`. Also
-    /// Mermaid's (mermaid.rs). `Err` as for `print_in`.
+    /// A WebView2 environment and a controller hosted in `host`. `Err` as
+    /// for `print_in`.
     pub(crate) async fn controller(host: HWND, cx: &mut AsyncApp) -> Result<(ICoreWebView2Environment, ICoreWebView2Controller), Option<String>> {
         // The profile can't live next to the exe (Program Files is read-only).
         let data = dirs::data_local_dir().unwrap_or_else(fdl_core::vfs::temp_dir).join("quiet.md").join("WebView2");

@@ -374,8 +374,9 @@ pub fn paste(me: &mut BoardView, plain: bool, window: &mut Window, cx: &mut Cont
         None => {
             let item = cx.read_from_clipboard();
             let text = item.as_ref().and_then(|i| i.text());
+            let html = if plain { None } else { crate::clipboard::clipboard_html(item.as_ref()) };
             let images = item.map(|i| i.entries().iter().filter_map(|e| if let ClipboardEntry::Image(img) = e { Some(img.clone()) } else { None }).collect()).unwrap_or_default();
-            (text, if plain { None } else { crate::clipboard::clipboard_html() }, images)
+            (text, html, images)
         }
     };
     let data = parse_clipboard(text.as_deref(), html.as_deref(), plain);

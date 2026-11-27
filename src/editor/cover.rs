@@ -8,7 +8,7 @@ use super::emoji_picker::EmojiTarget;
 use super::overlays::at;
 use super::view::{Editor, EditorEvent, Menu};
 use crate::model::Cover;
-use crate::editor_theme::{self as theme, Theme, craft};
+use crate::editor_theme::{self as theme, Theme};
 use crate::editor_ui::{TipExt, icon};
 use crate::design::{Button, ButtonSize, ButtonVariant, MenuItem, Popover, Separator, color};
 use super::image::picture;
@@ -264,7 +264,9 @@ impl Editor {
             div()
                 .absolute()
                 .top(px(20.))
-                .left_0()
+                // optically flush: the first glyph, not the ghost's box, lines up with the title;
+                // the hover fill may stand out to the left (the ghost's px-2)
+                .left(px(-8.))
                 .h(px(28.))
                 .flex()
                 // A Markdown file has neither.
@@ -353,13 +355,13 @@ impl Editor {
                 ),
             });
         let tip = drag.filter(|d| !d.moved).map(|_| {
-            // A dark tip: near-black glass, white 12pt.
+            // A dark tip: near-black glass, white 12pt, in either look (a literal colour, as over a photo).
             div().absolute().inset_0().flex().items_center().justify_center().child(
                 div()
                     .px(px(12.))
                     .py(px(6.))
                     .rounded(px(8.))
-                    .bg(theme::ca(craft::N950, 0.72))
+                    .bg(theme::rgbaf(0x14, 0x15, 0x17, 0.72))
                     .text_size(px(12.))
                     .line_height(px(18.))
                     .text_color(gpui::white())
@@ -417,7 +419,7 @@ impl Editor {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         };
         let el = Popover::new("cover-menu")
-            .menu()
+            .menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(item("cover-pick", "image", crate::settings::text("选择图片")).on_click(cx.listener(|e, _, _, cx| e.open_cover_menu(Some(Menu::CoverPick { upload: false }), cx))))
             .when(loaded, |d| d.child(item("cover-move", "move", crate::settings::text("调整图片位置")).on_click(cx.listener(|e, _, _, cx| e.start_cover_drag(cx)))))
@@ -535,8 +537,8 @@ impl Editor {
                                     .rounded(px(6.))
                                     .border_1()
                                     .border_color(Theme::swatch_border())
-                                    .hover(|s| s.bg(theme::ca(craft::N1000, 0.15)))
-                                    .active(|s| s.bg(theme::ca(craft::N1000, 0.2))),
+                                    .hover(|s| s.bg(theme::rgbaf(0, 0, 0, 0.15)))
+                                    .active(|s| s.bg(theme::rgbaf(0, 0, 0, 0.2))),
                             )
                             .on_click(cx.listener(move |e, _, _, cx| e.apply_preset(&name, cx))),
                     );
@@ -553,6 +555,7 @@ impl Editor {
                 .overflow_y_scroll()
                 .track_scroll(&self.cover_ui.gallery_scroll)
                 .child(list)
+                .child(crate::design::scroll::bar("cover-gallery", &self.cover_ui.gallery_scroll, 0.))
                 .into_any_element()
         };
         // The second-level panel.

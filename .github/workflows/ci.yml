@@ -1,5 +1,8 @@
 name: CI
 
+# Pushes to main run only the quick job (clippy for Linux and the Windows cfg, a few
+# minutes). The full jobs (tests, packages, self-tests on macOS, Windows and Linux)
+# run on pull requests, every night and on workflow_dispatch (run it before a release).
 on:
   push:
     branches: [main]
@@ -10,19 +13,90 @@ on:
       - 'docs/**'
       - 'site/**'
   pull_request:
+  schedule:
+    # 07:00 UTC, 03:00 in UTC-4. The agent loop on the maintainer's machine reads it at 10:00.
+    - cron: '0 7 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # Only PRs cancel superseded runs; a push to main always finishes, so every main sha gets a result.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Per event, so a push to main never cancels the nightly or a manual full run.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  # Pushes and PRs cancel superseded runs; the nightly and manual full runs always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
+  quick:
+    # GitHub appends the matrix values: "quick (Linux clippy, …)"; a skipped run shows just "quick".
+    name: quick
+    if: github.event_name == 'push'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux clippy
+            target: x86_64-unknown-linux-gnu
+          # Type-checks the cfg(windows) code without a Windows runner; it never links.
+          - name: Windows cfg clippy
+            target: x86_64-pc-windows-gnu
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = x86_64-pc-windows-gnu ]; then sudo apt-get install -y gcc-mingw-w64-x86-64
+          else sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libfontconfig1-dev libfreetype6-dev libwayland-dev libx11-xcb-dev libvulkan-dev libssl-dev; fi
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: quick-${{ matrix.target }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Debug profile: only type-checks and lints, so it is much faster than check.py's release clippy.
+      - name: Clippy
+        env:
+          # mingw on 22.04 targets an old Windows by default; sqlite needs Vista+ APIs (GetTickCount64).
+          CFLAGS_x86_64_pc_windows_gnu: -D_WIN32_WINNT=0x0A00
+        run: |
+          cargo clippy --workspace --locked --all-targets --target ${{ matrix.target }} -- -D warnings
+          cargo clippy --workspace --locked --all-targets --target ${{ matrix.target }} --features devtools -- -D warnings
+
+  # Decides whether the full jobs run: always on PRs and manual runs; the nightly
+  # skips when main has not moved since the last nightly that finished.
+  gate:
+    name: full run gate
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      full: ${{ steps.gate.outputs.full }}
+    steps:
+      # The query runs on every full run, so manual runs exercise it too; only the nightly acts on it.
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          full=true
+          last=$(gh run list --repo "${{ github.repository }}" --workflow ci.yml --event schedule --branch main --status completed -L 20 \
+            --json headSha,conclusion --jq '[.[] | select(.conclusion != "cancelled")][0].headSha // ""')
+          echo "Last finished nightly: ${last:-none}"
+          if [ "${{ github.event_name }}" = schedule ] && [ "$last" = "${{ github.sha }}" ]; then
+            full=false; echo "No new commits since the last nightly; skipping."
+          fi
+          echo "full=$full" >> "$GITHUB_OUTPUT"
+
   check:
     name: test + clippy
+    needs: gate
+    if: needs.gate.outputs.full == 'true'
     # Exercise AppKit and Metal on macOS; Windows checks run separately.
     runs-on: macos-15
     timeout-minutes: 90
@@ -38,7 +112,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED=$(gh pr diff ${{ github.event.pull_request.number }} --name-only || true)
-            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)'; then
+            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)' && ! echo "$CHANGED" | grep -q '^skills/'; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "Only docs/site/markdown changed; skipping build."
             fi
@@ -86,7 +160,7 @@ jobs:
         if: steps.filter.outputs.skip != 'true'
         run: |
           sudo softwareupdate --install-rosetta --agree-to-license
-          cargo test --release --locked --target x86_64-apple-darwin --bin quiet_md update::tests
+          cargo test --release --locked --no-fail-fast --target x86_64-apple-darwin --bin quiet_md update::tests
 
       # The packages as shipped, end to end (src/selftest.rs): unpacked into a
       # path with spaces and CJK, each runs its built-in scenarios on a
@@ -124,6 +198,8 @@ jobs:
 
   windows-build:
     name: Windows x64 build
+    needs: gate
+    if: needs.gate.outputs.full == 'true'
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -137,7 +213,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED=$(gh pr diff ${{ github.event.pull_request.number }} --name-only || true)
-            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)'; then
+            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)' && ! echo "$CHANGED" | grep -q '^skills/'; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "Only docs/site/markdown changed; skipping build."
             fi
@@ -205,6 +281,8 @@ jobs:
 
   linux-build:
     name: Linux x64 build + checks
+    needs: gate
+    if: needs.gate.outputs.full == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -217,7 +295,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             CHANGED=$(gh pr diff ${{ github.event.pull_request.number }} --name-only || true)
-            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)'; then
+            if [ -n "$CHANGED" ] && ! echo "$CHANGED" | grep -q -v -E '^(.*\.md$|docs/|site/)' && ! echo "$CHANGED" | grep -q '^skills/'; then
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "Only docs/site/markdown changed; skipping build."
             fi

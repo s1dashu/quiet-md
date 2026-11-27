@@ -9,15 +9,15 @@ use super::view::{BlockAct, BlockSub, CtxKind, Editor, Mark, Menu};
 use crate::model::*;
 use crate::feishu_theme::{self as theme, Theme};
 use crate::editor_ui::{TipExt, icon};
-use crate::design::{Button, ButtonSize, Field, FieldSize, MenuItem, MenuLabel, MenuSeparator, Popover, Switch, Textarea, color};
+use crate::design::{Button, ButtonSize, Field, FieldSize, MenuItem, MenuLabel, MenuSeparator, Popover, Textarea, color};
 use crate::design::menu::{LABEL_H, PAD, ROW_H, SEP_H};
 use crate::design::toolbar::{TOOLBAR_H, TOOLBAR_PAD, toolbar_layout};
 use crate::design::{ButtonGroup, ButtonGroupSeparator, Toggle, Toolbar};
 use gpui::{prelude::FluentBuilder, *};
 
-const SLASH_W: f32 = 247.;
+const SLASH_W: f32 = crate::design::menu_w::MD;
 const SLASH_MAX_H: f32 = 351.;
-pub(super) const MENU_W: f32 = 247.;
+pub(super) const MENU_W: f32 = crate::design::menu_w::MD;
 /// Table handle: 44.5 left of the grid, centred on the column-dot row 16.5 above it.
 const TABLE_HANDLE_DX: f32 = 44.5;
 const TABLE_HANDLE_DY: f32 = 16.5 + 13.;
@@ -80,7 +80,7 @@ pub fn kind_icon(k: &BlockKind) -> &'static str {
             4 => "heading-4",
             5 => "heading-5",
             6 => "heading-6",
-            _ => "heading",
+            _ => "heading-6",
         },
         BlockKind::Bullet => "list",
         BlockKind::Ordered { .. } => "list-ordered",
@@ -95,8 +95,8 @@ pub fn kind_icon(k: &BlockKind) -> &'static str {
         BlockKind::Raw { .. } => "file-text",
         BlockKind::SubPageList => "list-tree",
         BlockKind::Countdown(_) => "timer",
-        BlockKind::Board(_) => "palette",
-        BlockKind::DataTable(_) => "table",
+        BlockKind::Board(_) => "board",
+        BlockKind::DataTable(_) => "doc-table",
         BlockKind::File(_) => "paperclip",
     }
 }
@@ -167,7 +167,7 @@ fn color_title(t: &'static str) -> Div {
 /// 在下方添加 ›: hovering opens the insert panel next to the handle menu.
 fn add_below_row(open: bool, cx: &Context<Editor>) -> MenuItem {
     row("bm-add", "square-plus", "在下方添加", true, open)
-        .on_mouse_move(cx.listener(|e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+        .on_mouse_move(crate::design::sub_move(cx.listener(|e: &mut Editor, _: &MouseMoveEvent, _, cx| {
             if let Some(Menu::Block { sub, .. }) = &mut e.menu
                 && !matches!(sub, Some(BlockSub::Add(_)))
             {
@@ -176,7 +176,7 @@ fn add_below_row(open: bool, cx: &Context<Editor>) -> MenuItem {
                 e.slash_scroll.set_offset(Point::default());
                 cx.notify();
             }
-        }))
+        })))
         .on_mouse_down(MouseButton::Left, cx.listener(|e: &mut Editor, _: &MouseDownEvent, _, cx| {
             cx.stop_propagation();
             // No hover on a touch screen: a tap opens it.
@@ -406,6 +406,15 @@ impl Editor {
         }
     }
 
+    /// The handle as the drag card carries it, white as the card, under the pointer
+    /// that grabbed it (the closed hand stays over its open-hand segments).
+    pub(super) fn handle_face(&self, id: BlockId) -> Option<AnyElement> {
+        let kind = self.core.kind_of(id)?;
+        let glyph = icon(kind_icon(kind), 12., kind_color(kind));
+        let face = crate::design::toolbar::block_handle(id.0, Some(glyph), 42., false);
+        Some(div().relative().child(face).child(div().absolute().inset_0().cursor(CursorStyle::ClosedHand)).into_any_element())
+    }
+
     // ---- slash / add menu
 
     /// The menu, plus the size picker when one is open.
@@ -432,11 +441,13 @@ impl Editor {
                 let p = point(r.left() + px(MENU_W), r.bottom() + px(4. + self.block_menu_add_y(*block)));
                 (p, p, *selected, Some(p))
             }
-            _ => { self.slash_bar.set(None); return None }
+            _ => return None,
         };
         let results = self.slash_results();
         let grid_basic = self.slash_grid();
-        let mut list = div()
+        // the scrollbar's lane, while the menu scrolls, widens it: the rows keep their width
+        let lane = self.slash_bar.room(PAD);
+        let mut list = self.slash_bar.make_room(div()
             .id("slash-list")
             .w(px(SLASH_W))
             .max_h(px(SLASH_MAX_H))
@@ -444,9 +455,9 @@ impl Editor {
             .track_scroll(&self.slash_scroll)
             .py(px(PAD))
             .flex()
-            .flex_col();
+            .flex_col(), PAD);
         let hover_sel = |n: usize| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 let cur = match (&mut e.slash, &mut e.menu) {
                     (Some(s), _) => &mut s.selected,
                     (None, Some(Menu::Add { selected, .. })) => selected,
@@ -458,7 +469,7 @@ impl Editor {
                     e.size_pick = (0, 0);
                     cx.notify();
                 }
-            })
+            }))
         };
         // In the "+" panel 表格 and 分栏 open a size picker instead of inserting.
         let add_panel = self.slash.is_none();
@@ -559,42 +570,17 @@ impl Editor {
             // The menu hangs right off the line box, no gap.
             (anchor_bottom, Anchor::TopLeft)
         };
-        // An overlay scrollbar, as macOS draws one (and the page's): a 4pt thumb with no
-        // track, 3pt in from the edge and clear of the rounded corners, over the rows
-        // rather than in a gutter. It shows when the menu opens and while the list
-        // scrolls (pointer or keyboard), and goes a second after the last move: one
-        // timer redraws then, rather than animating a fade frame by frame.
-        const SHOWN: std::time::Duration = std::time::Duration::from_millis(1000);
-        let off = -f32::from(self.slash_scroll.offset().y);
-        let now = std::time::Instant::now();
-        let shown = match self.slash_bar.get() {
-            Some((t, o)) if (o - off).abs() < 0.5 => now.duration_since(t) < SHOWN,
-            _ => {
-                self.slash_bar.set(Some((now, off)));
-                if content_h > content_h.min(SLASH_MAX_H) {
-                    cx.spawn(async move |e, cx| {
-                        cx.background_executor().timer(SHOWN).await;
-                        let _ = e.update(cx, |_, cx| cx.notify());
-                    }).detach();
-                }
-                true
-            }
-        };
-        let fade = if shown { 1. } else { 0. };
-        let thumb = (content_h > view_h && fade > 0.).then(|| {
-            let inset = crate::design::geo().menu_r;
-            let track = view_h - 2. * inset;
-            let h = (track * view_h / content_h).max(24.);
-            let top = inset + (track - h) * (off / (content_h - view_h)).clamp(0., 1.);
-            div().absolute().right(px(3.)).top(px(top)).w(px(4.)).h(px(h)).rounded_full().bg(crate::design::alpha(color::foreground(), 0.22 * fade))
-        });
+        // The shared scrollbar (shadcn's ScrollArea): shows while the pointer is over the menu or it scrolls.
+        let thumb = self.slash_bar.render(&self.slash_scroll);
+        // beside the handle menu's 在下方添加 it is that row's submenu
         let el = Popover::new("slash-menu")
+            .when(beside.is_some(), |d| d.submenu())
             .relative()
-            .w(px(SLASH_W))
+            .w(px(SLASH_W + lane))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_scroll(cx.listener(|_, _, _, cx| cx.notify()))
             .child(list)
-            .children(thumb);
+            .child(thumb);
         out.push(at(self.rel(pos), corner, el));
         let (kind, row_top) = picker_at?;
         // The picker hangs 4pt off the menu's right edge (as submenus do), centred on its row and
@@ -607,8 +593,8 @@ impl Editor {
         let menu_top = if corner == Anchor::TopLeft { pos.y } else { pos.y - px(view_h) };
         let off = -f32::from(self.slash_scroll.offset().y);
         let top = (f32::from(menu_top) + row_top - off + ROW_H / 2. - ph / 2.).min(vh - 8. - ph).max(8.);
-        let left = pos.x + px(SLASH_W + 4.);
-        out.push(at(self.rel(point(left, px(top))), Anchor::TopLeft, picker));
+        let left = pos.x + px(SLASH_W + lane + 4.);
+        out.push(at(self.rel(point(left, px(top))), Anchor::TopLeft, div().relative().child(picker).child(crate::design::submenu_area())));
         Some(())
     }
 
@@ -707,14 +693,14 @@ impl Editor {
             })
         };
         let set_sub = |s: Option<BlockSub>| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 if let Some(Menu::Block { sub, .. }) = &mut e.menu
                     && *sub != s
                 {
                     *sub = s;
                     cx.notify();
                 }
-            })
+            }))
         };
         let mut m = Popover::new("block-menu").menu().w(px(MENU_W));
         let mut turn = shape.turn_items();
@@ -790,6 +776,7 @@ impl Editor {
                 Some(
                     Popover::new("bm-indent-sub")
                         .menu()
+                        .submenu()
                         .absolute()
                         .left(px(MENU_W + 4.))
                         .top(px(indent_y - PAD))
@@ -811,7 +798,7 @@ impl Editor {
                 } else {
                     self.color_panel(Some(block), cx).into_any_element()
                 };
-                Some(div().absolute().left(px(MENU_W + 4.)).top(px(color_y - PAD)).child(p).into_any_element())
+                Some(div().absolute().left(px(MENU_W + 4.)).top(px(color_y - PAD)).child(p).child(crate::design::submenu_area()).into_any_element())
             }
             _ => None,
         };
@@ -1121,7 +1108,8 @@ impl Editor {
         };
         let q = self.lang_field.read(cx).text.clone();
         let langs = menus::filter_languages(&q);
-        let mut list = div().id("lang-list").max_h(px(288.)).overflow_y_scroll().flex().flex_col();
+        let lang_scroll = crate::design::scroll::handle("lang-list");
+        let mut list = crate::design::scroll::make_room(div().id("lang-list").max_h(px(288.)).overflow_y_scroll().track_scroll(&lang_scroll).flex().flex_col(), "lang-list", PAD);
         for (i, l) in langs.iter().enumerate() {
             let l: &'static str = l;
             let is_cur = current.eq_ignore_ascii_case(l);
@@ -1144,7 +1132,7 @@ impl Editor {
         }
         let el = Popover::new("lang-menu")
             .menu()
-            .w(px(240.))
+            .w(px(240.) + crate::design::scroll::room("lang-list", PAD))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 Field::new("lang-search")
@@ -1154,7 +1142,7 @@ impl Editor {
                     .child(icon("search", 14., color::muted_foreground()))
                     .child(self.lang_field.clone()),
             )
-            .child(list);
+            .child(list.child(crate::design::scroll::bar("lang-list", &lang_scroll, 0.)));
         // Under the language button, which sits ~267px left of the block's right
         // edge; above it when the list wouldn't fit below.
         let h = px(2. * PAD + 38. + (langs.len().max(1) as f32 * ROW_H).min(288.));
@@ -1260,7 +1248,8 @@ impl Editor {
         // instead of hanging past its edge (#95).
         let x_turn = at_x[0];
         let x_align = at_x[2];
-        let x_color = f32::min(at_x[11], tw - CALLOUT_PANEL_W).max(0.);
+        // a Markdown page has no colour button (nor the ones before it): nothing to place
+        let x_color = at_x.get(11).map_or(0., |&x| f32::min(x, tw - CALLOUT_PANEL_W).max(0.));
         let sep = ButtonGroupSeparator::new;
         let bar = Toolbar::new("toolbar")
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1321,7 +1310,7 @@ impl Editor {
 
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = Popover::new("tb-turn-menu").menu().min_w(px(200.)).max_h(turn_height).overflow_y_scroll().on_scroll(|_, _, cx| cx.stop_propagation());
+                let mut list = Popover::new("tb-turn-menu").menu().w(px(crate::design::menu_w::SM)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if self.markdown && matches!(k, BlockKind::Callout { .. }) {
@@ -1356,7 +1345,7 @@ impl Editor {
                 };
                 let list = Popover::new("tb-align-menu")
                     .menu()
-                    .w(px(180.))
+                    .w(px(crate::design::menu_w::SM))
                     .child(item("ta-l", "align-left", crate::settings::text("左对齐"), crate::shortcuts::hint("editor::AlignLeft", "⌘ + Shift + L"), Align::Left))
                     .child(item("ta-c", "align-center", crate::settings::text("居中对齐"), crate::shortcuts::hint("editor::AlignCenter", "⌘ + Shift + E"), Align::Center))
                     .child(item("ta-r", "align-right", crate::settings::text("右对齐"), crate::shortcuts::hint("editor::AlignRight", "⌘ + Shift + R"), Align::Right));
@@ -1629,7 +1618,7 @@ impl Editor {
         let x_color = if md { 0. } else { f32::min(at_x[13], w - CALLOUT_PANEL_W).max(0.) };
         let drop_el: Option<AnyElement> = match dropdown {
             Some(Menu::TurnInto) => {
-                let mut list = Popover::new("ttb-turn-menu").menu().min_w(px(200.)).max_h(turn_height).overflow_y_scroll().on_scroll(|_, _, cx| cx.stop_propagation());
+                let mut list = Popover::new("ttb-turn-menu").menu().w(px(crate::design::menu_w::SM)).fit(f32::from(turn_height)).on_scroll(|_, _, cx| cx.stop_propagation());
                 for (i, it) in TURN_ITEMS.iter().enumerate() {
                     let k = (it.kind)();
                     if matches!(k, BlockKind::Callout { .. }) {
@@ -1682,7 +1671,7 @@ impl Editor {
                 };
                 let list = Popover::new("ttb-align-menu")
                     .menu()
-                    .w(px(232.))
+                    .w(px(crate::design::menu_w::SM))
                     .child(h("tta-l", "align-left", crate::settings::text("左对齐"), crate::shortcuts::hint("editor::AlignLeft", "⌘ + Shift + L"), Align::Left))
                     .child(h("tta-c", "align-center", crate::settings::text("居中对齐"), crate::shortcuts::hint("editor::AlignCenter", "⌘ + Shift + E"), Align::Center))
                     .child(h("tta-r", "align-right", crate::settings::text("右对齐"), crate::shortcuts::hint("editor::AlignRight", "⌘ + Shift + R"), Align::Right))
@@ -1749,19 +1738,19 @@ impl Editor {
             })
         };
         let set_sub = |s: Option<BlockSub>| {
-            cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+            crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
                 if let Some(Menu::Block { sub, .. }) = &mut e.menu
                     && *sub != s
                 {
                     *sub = s;
                     cx.notify();
                 }
-            })
+            }))
         };
         let plain = |id: &'static str, ic: &'static str, label: &'static str, a: BlockAct| {
             row(id, ic, label, false, false).on_mouse_move(set_sub(None)).on_mouse_down(MouseButton::Left, act(a))
         };
-        let toggle = |id: &'static str, ic: &'static str, label: &'static str, on: bool, a: BlockAct| plain(id, ic, label, a).child(Switch::new(on));
+        let toggle = |id: &'static str, ic: &'static str, label: &'static str, on: bool, a: BlockAct| plain(id, ic, label, a).switch(on);
         let m = Popover::new("block-menu")
             .menu()
             .w(px(MENU_W))
@@ -1790,6 +1779,7 @@ impl Editor {
             };
             Popover::new("bm-indent-sub")
                 .menu()
+                .submenu()
                 .absolute()
                 .left(px(MENU_W + 4.))
                 .top_0()

@@ -171,7 +171,7 @@ pub struct ImageUi {
     lightbox: Option<Lightbox>,
     lb_focus: FocusHandle,
     chrome_task: Option<Task<()>>,
-    toast: Option<(ToastKind, SharedString, Instant)>,
+    toast: Option<crate::editor_ui::ToastState>,
     toast_task: Option<Task<()>>,
     remote: RefCell<HashMap<String, Remote>>,
     remote_dir: PathBuf,
@@ -189,7 +189,7 @@ type Decoded = Result<Arc<RenderImage>, ImageCacheError>;
 /// its frames, so its pixels are kept.
 struct Slot { path: Option<Arc<Path>>, image: Option<Decoded>, used: Instant, windows: HashMap<WindowId, Instant>, generation: Arc<()>, waiters: Vec<EntityId>, ready: Option<Instant>, whole: bool, wanted: Arc<AtomicU64> }
 
-/// Decoded document pictures (editor and Home cards). gpui's global asset
+/// Decoded document pictures (editor and folder page cards). gpui's global asset
 /// cache keeps every image it has decoded until the app quits; this one lets go
 /// of pictures unused for 30 seconds, or sooner when the offscreen cache
 /// exceeds 64 MiB, freeing their pixels and atlas textures. Pictures are
@@ -1806,7 +1806,7 @@ impl Editor {
 
     /// Animations, the fit and the end of the closing fade.
     pub(super) fn tick_image_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.img.toast.as_ref().is_some_and(|(_, _, t)| t.elapsed() >= Duration::from_secs(3)) {
+        if self.img.toast.as_ref().is_some_and(|t| t.over()) {
             self.img.toast = None;
         }
         if !cx.has_active_drag() {
@@ -1923,16 +1923,19 @@ impl Editor {
             .child(pic.id("lb-pic-box").when(can_drag, |d| d.cursor(if lb.press.is_some() { CursorStyle::ClosedHand } else { CursorStyle::OpenHand })));
 
         let white = gpui::white();
-        // Chrome over the dark backdrop: near-black glass, white glyphs.
+        // Chrome over the dark backdrop: near-black glass, white glyphs, in either look (literal
+        // colours: `ca` would turn the glass near-white in the dark under the same white glyphs).
         let close = div()
             .id("lb-close")
             .absolute()
-            .top(px(if touch { f32::from(window.insets().safe_area.top) + 8. } else { 20. }))
+            // Windows and Linux draw their caption buttons in the header's top right: clear the row;
+            // touch: under the status bar, a 44pt target
+            .top(px(if touch { f32::from(window.insets().safe_area.top) + 8. } else if cfg!(any(target_os = "windows", target_os = "linux")) { crate::app::HEADER_H + 12. } else { 20. }))
             .right(px(if touch { 16. } else { 20. }))
             .size(px(if touch { 44. } else { 40. }))
             .rounded_full()
-            .bg(theme::ca(craft::N950, 0.6))
-            .hover(|s| s.bg(theme::ca(craft::N800, 0.75)))
+            .bg(theme::rgbaf(0x14, 0x15, 0x17, 0.6))
+            .hover(|s| s.bg(theme::rgbaf(0x30, 0x33, 0x35, 0.75)))
             .border_1()
             .border_color(theme::rgbaf(255, 255, 255, 0.1))
             .flex()
@@ -1983,10 +1986,10 @@ impl Editor {
             .h(px(44.))
             .px(px(10.))
             .rounded(px(12.))
-            .bg(theme::ca(craft::N950, 0.78))
+            .bg(theme::rgbaf(0x14, 0x15, 0x17, 0.78))
             .border_1()
             .border_color(theme::rgbaf(255, 255, 255, 0.1))
-            .shadow(theme::shadow_panel())
+            .shadow(crate::design::shadow::popover())
             .flex()
             .items_center()
             .font_family(theme::ui_family())
@@ -2116,19 +2119,31 @@ impl Editor {
     }
 
     pub(super) fn toast_kind(&mut self, kind: ToastKind, msg: &str, cx: &mut Context<Self>) {
-        self.img.toast = Some((kind, SharedString::from(msg.to_string()), Instant::now()));
+        self.img.toast = Some(crate::editor_ui::ToastState::new(kind, msg));
         // One toast at a time: this one replaces the workspace's.
         cx.emit(super::view::EditorEvent::Toast);
-        self.img.toast_task = Some(cx.spawn(async |this, cx| {
-            cx.background_executor().timer(Duration::from_millis(2700)).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        }));
+        self.wake_for_toast_fade(cx);
         cx.notify();
     }
 
-    pub(super) fn toast_el(&self, window: &mut Window) -> Option<AnyElement> {
-        let (kind, msg, t0) = self.img.toast.as_ref()?;
-        crate::editor_ui::toast_el(*kind, msg, *t0, window)
+    /// A frame when the toast's fade starts (its own frames carry it from there); none while paused.
+    fn wake_for_toast_fade(&mut self, cx: &mut Context<Self>) {
+        let Some(wait) = self.img.toast.as_ref().and_then(|t| t.until_fade()) else { self.img.toast_task = None; return };
+        self.img.toast_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }));
+    }
+
+    pub(super) fn toast_el(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let this = cx.entity().downgrade();
+        crate::editor_ui::toast_el(self.img.toast.as_ref()?, window, move |on, _, cx| {
+            let _ = this.update(cx, |e, cx| {
+                if let Some(t) = &mut e.img.toast { t.hover(on); }
+                e.wake_for_toast_fade(cx);
+                cx.notify();
+            });
+        })
     }
 
     // ---- inserting
@@ -2364,7 +2379,7 @@ fn decode_rotated(path: &Path, crop: [f32; 4], rot: u8) -> Option<Arc<RenderImag
 
 /// A new image block for pasted or picked bytes, stored in the assets
 /// folder (format, size and pixel checks on upload).
-pub(super) fn image_block_from(bytes: &[u8], ext: &str) -> Result<Block, &'static str> { image_block_named(bytes, ext, None) }
+pub(super) fn image_block_from(bytes: &[u8], ext: &str) -> Result<Block, &'static str> { image_block_named(&Store::assets_dir(), bytes, ext, None) }
 
 /// macOS screenshots may only offer TIFF. Store those as lossless PNG;
 /// other clipboard formats keep their original bytes (including animation).
@@ -2389,8 +2404,9 @@ pub(crate) fn clipboard_image_data(img: &gpui::Image) -> Result<(std::borrow::Co
 }
 
 /// `image_block_from` for a file that has a name of its own, which its copy keeps.
-fn image_block_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<Block, &'static str> {
-    let path = store_image_named(bytes, ext, name)?;
+/// The picture copied into `assets`, as an image block.
+fn image_block_named(assets: &Path, bytes: &[u8], ext: &str, name: Option<&str>) -> Result<Block, &'static str> {
+    let path = store_image_in(assets, bytes, ext, name)?;
     let mut b = Block::new(
         BlockKind::Image { src_kind: "src".into(), src: path.to_string_lossy().to_string(), width: None, height: None, caption: None, crop: None },
         RichText::default(),
@@ -2405,7 +2421,10 @@ pub(crate) fn store_image(bytes: &[u8], ext: &str) -> Result<PathBuf, &'static s
 /// `store_image`; an image with a `name` (a picked or dropped file) is kept
 /// as `<8 hex>-<name>.<ext>`, so its name survives in the library and in the
 /// copy beside a Markdown file. A pasted one is just `<uuid>.<ext>`.
-pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<PathBuf, &'static str> {
+pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> Result<PathBuf, &'static str> { store_image_in(&Store::assets_dir(), bytes, ext, name) }
+
+/// `store_image_named` into `assets`: an import names the library it writes to, never the one in front.
+fn store_image_in(assets: &Path, bytes: &[u8], ext: &str, name: Option<&str>) -> Result<PathBuf, &'static str> {
     let ext = ext.to_ascii_lowercase();
     if !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -2422,12 +2441,16 @@ pub(crate) fn store_image_named(bytes: &[u8], ext: &str, name: Option<&str>) -> 
     let name: Option<String> = name.map(|n| n.chars().map(|c| if matches!(c, '/' | '\\' | ':') || c.is_control() { '_' } else { c }).take(80).collect::<String>())
         .map(|n| n.trim().trim_start_matches('.').to_string()).filter(|n| !n.is_empty());
     let file = match name { Some(n) => format!("{}-{n}.{ext}", &id[..8]), None => format!("{id}.{ext}") };
-    let path = Store::assets_dir().join(file);
+    let _ = fdl_core::vfs::create_dir_all(assets);
+    let path = assets.join(file);
     fdl_core::vfs::write(&path, bytes).map_err(|_| BAD_DIMS)?;
     Ok(path)
 }
 
-pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
+pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> { image_block_from_file_in(&Store::assets_dir(), p) }
+
+/// `image_block_from_file`, copied into `assets`.
+pub(crate) fn image_block_from_file_in(assets: &Path, p: &Path) -> Result<Block, &'static str> {
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
     if !p.fs_is_file() || !FORMATS.contains(&ext.as_str()) {
         return Err(BAD_FORMAT);
@@ -2436,7 +2459,7 @@ pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
         return Err(TOO_BIG);
     }
     let bytes = fdl_core::vfs::read(p).map_err(|_| BAD_DIMS)?;
-    let b = image_block_named(&bytes, &ext, p.file_stem().and_then(|s| s.to_str()))?;
+    let b = image_block_named(assets, &bytes, &ext, p.file_stem().and_then(|s| s.to_str()))?;
     // The copy in the assets keeps the picture's change time, as a copy in the Finder does.
     if let (BlockKind::Image { src, .. }, Some((_, changed))) = (&b.kind, fdl_core::vfs::file_times(p)) { let _ = fdl_core::vfs::set_modified(Path::new(src), changed); }
     Ok(b)
@@ -2447,13 +2470,20 @@ pub(crate) fn image_block_from_file(p: &Path) -> Result<Block, &'static str> {
 /// that exists. WeChat puts such a line in the pasteboard instead of
 /// image data (#252).
 pub(crate) fn local_image_path(line: &str) -> Option<PathBuf> {
-    let s = line.trim();
-    let decoded = s.strip_prefix("file://").map(crate::markdown::percent_decode);
-    let s = decoded.as_deref().unwrap_or(s);
+    let p = local_file(line.trim())?;
+    is_local_image_file(&p).then_some(p)
+}
+
+/// The file a picture's source names on this computer, if it is an absolute
+/// path: `/…`, Windows' `C:\…`, `C:/…` or `\\server\…`, or a `file://` URL
+/// (`file:///C:/…` on Windows). None for a URL, `data:` or a relative path.
+pub(crate) fn local_file(src: &str) -> Option<PathBuf> {
+    let decoded = src.strip_prefix("file://").map(crate::markdown::percent_decode);
+    let s = decoded.as_deref().unwrap_or(src);
     #[cfg(windows)]
     let s = if decoded.is_some() && s.starts_with('/') && s.as_bytes().get(2) == Some(&b':') { &s[1..] } else { s };
     let p = Path::new(s);
-    is_local_image_file(p).then(|| p.to_path_buf())
+    (p.fs_is_absolute() && (decoded.is_some() || !src.contains("://"))).then(|| p.to_path_buf())
 }
 
 pub(super) fn is_local_image_file(p: &Path) -> bool {
@@ -2475,13 +2505,16 @@ pub fn cached_remote(url: &str) -> Option<PathBuf> {
 
 /// Pasted HTML images: `data:` URIs and local files become owned assets;
 /// unreadable ones are dropped. Remote images stay remote.
-pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
+pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) { localize_images_in(&Store::assets_dir(), blocks) }
+
+/// `localize_pasted_images` into `assets` (an import's library's).
+pub(crate) fn localize_images_in(assets: &Path, blocks: &mut Vec<Block>) {
     use base64::Engine;
     blocks.retain_mut(|b| {
-        localize_pasted_images(&mut b.children);
+        localize_images_in(assets, &mut b.children);
         if let BlockKind::Table(t) = &mut b.kind {
             for cell in t.rows.iter_mut().flatten() {
-                localize_pasted_images(&mut cell.blocks);
+                localize_images_in(assets, &mut cell.blocks);
                 if cell.blocks.is_empty() && !cell.is_covered() {
                     cell.blocks.push(Block::text(""));
                 }
@@ -2492,15 +2525,22 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
             let Some((head, payload)) = data.split_once(',') else { return false };
             let ext = head.split(';').next().unwrap_or_default().replace("jpeg", "jpg");
             let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(payload.trim()) else { return false };
-            image_block_from(&bytes, &ext)
-        } else if src.starts_with('/') {
-            image_block_from_file(Path::new(src.as_str()))
+            image_block_named(assets, &bytes, &ext, None)
+        } else if let Some(file) = local_file(src) {
+            // Any absolute path, Windows' `C:\…` too: never left pointing at the folder it came from.
+            image_block_from_file_in(assets, &file)
         } else {
             return true;
         };
+        // The copy keeps the width and caption the page gave the picture (`<img width>`, `![[a.png|300]]`).
+        let (old_width, old_caption) = match &b.kind { BlockKind::Image { width, caption, .. } => (*width, caption.clone()), _ => (None, None) };
         match local {
             Ok(n) => {
                 b.kind = n.kind;
+                if let BlockKind::Image { width, height, caption, .. } = &mut b.kind {
+                    if old_width.is_some() { (*width, *height) = (old_width, None); }
+                    if old_caption.is_some() { *caption = old_caption; }
+                }
                 true
             }
             Err(_) => false,
@@ -2510,7 +2550,7 @@ pub(crate) fn localize_pasted_images(blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap, clipboard_image_data, decode, decode_png, local_image_path, pasted_remote, BAD_DIMS};
+    use super::{cap, clipboard_image_data, decode, decode_png, local_file, local_image_path, pasted_remote, BAD_DIMS};
     use crate::model::{Block, BlockKind, RichText};
     use gpui::ImageFormat;
 
@@ -2635,5 +2675,20 @@ mod tests {
         assert_eq!(ext, "gif");
         assert!(matches!(bytes, std::borrow::Cow::Borrowed(_)));
         assert_eq!(&*bytes, img.bytes);
+    }
+
+    /// An absolute path is a local file on every platform's own terms (Windows'
+    /// `C:\…` and `C:/…` too), so an import copies it in; URLs and relative paths are not.
+    #[test]
+    fn local_file_takes_every_absolute_path() {
+        let here = std::env::temp_dir().join("pic.png");
+        assert_eq!(local_file(&here.to_string_lossy()), Some(here.clone()));
+        for no in ["https://e.com/a.png", "data:image/png;base64,AAAA", "pics/a.png", "./a.png", "..\\a.png"] { assert_eq!(local_file(no), None, "{no}"); }
+        #[cfg(unix)]
+        assert_eq!(local_file("file:///tmp/a%20b.png"), Some(std::path::PathBuf::from("/tmp/a b.png")));
+        #[cfg(windows)]
+        for (src, want) in [(r"C:\Users\a\pic.png", r"C:\Users\a\pic.png"), ("C:/Users/a/pic.png", "C:/Users/a/pic.png"), (r"\\server\share\pic.png", r"\\server\share\pic.png"), ("file:///C:/Users/a%20b/pic.png", "C:/Users/a b/pic.png")] {
+            assert_eq!(local_file(src), Some(std::path::PathBuf::from(want)), "{src}");
+        }
     }
 }

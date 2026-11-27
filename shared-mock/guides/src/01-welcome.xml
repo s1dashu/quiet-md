@@ -3,9 +3,9 @@
 <p>These guides will help you find your way around in about ten minutes. They were written in Quiet.md, so every layout you see is something you can make yourself. <b>Feel free to edit them.</b> They are working examples, not a read-only manual.</p>
 <callout emoji="💡" background-color="light-blue" border-color="blue"><p>The best way to learn is to try things as you read. For a blank space to experiment, open {{doc:practice}}.</p></callout>
 <h1>A look around</h1>
-<img src="assets/guides/home.jpg" caption="Home: your documents at a glance" align="center"/>
+<img src="assets/guides/home.jpg" caption="A folder: your documents at a glance" align="center"/>
 <p>The window has two main areas.</p>
-<ol><li><b>The sidebar</b> contains Home, Pinned, My documents and Settings. Press <code>⌘ ]</code> to hide or show it.</li><li><b>The document</b> is the white writing surface. Its header contains the page path and title, with More, Search and New controls on the right.</li></ol>
+<ol><li><b>The sidebar</b> contains Pinned, your folders, and Settings. Press <code>⌘ ]</code> to hide or show it.</li><li><b>The document</b> is the white writing surface. Its header contains the page path and title, with More, Search and New controls on the right.</li></ol>
 <p>Documents with headings also have an <b>outline</b> near the top left of the page. Click a heading to jump to it; the current section is highlighted as you scroll.</p>
 <h1>Your first five minutes</h1>
 <p>Work through this list. Click a checkbox to mark an item complete, or place the cursor on it and press <code>⌘ Enter</code>.</p>
@@ -20,15 +20,15 @@
 <h1>Three ways to write</h1>
 <grid><column width-ratio="0.3333"><h3>Slash commands</h3><p>Type <code>/</code> on an empty line to insert a block. Keep typing to filter: try <code>/table</code> or <code>/code</code>.</p></column><column width-ratio="0.3333"><h3>Markdown</h3><p>Type <code># </code> for a heading or <code>- </code> for a list. Wrapping words in <code>**bold**</code> applies <b>bold</b> as you finish typing.</p></column><column width-ratio="0.3334"><h3>Keyboard shortcuts</h3><p>Use <code>⌘ B</code> for bold and <code>⌘ ⌥ 1</code> for a heading. Press <code>⌘ /</code> to see the available shortcuts.</p></column></grid>
 <h1>Explore the guides</h1>
-<p>Read them in order, or jump straight to what you need. In the sidebar, the writing guides are kept together in the Writing and formatting folder.</p>
+<p>Read them in order, or jump straight to what you need. In the sidebar they are grouped in folders: Documents, Markdown files, Boards and Data tables. The last three each hold a real file to try.</p>
 <table><colgroup><col width="300"/><col width="390"/></colgroup><thead><tr><th><p>Guide</p></th><th><p>What you will learn</p></th></tr></thead><tbody>
-<tr><td><p>{{doc:writing}}</p></td><td><p>Headings, text styles, colors, links, alignment, indentation and Markdown shortcuts</p></td></tr>
-<tr><td><p>{{doc:blocks}}</p></td><td><p>Lists, tasks, quotes, callouts, dividers, reminders, countdowns and buttons</p></td></tr>
-<tr><td><p>{{doc:tables}}</p></td><td><p>Tables, merged cells, header rows, cell colors and columns</p></td></tr>
-<tr><td><p>{{doc:code}}</p></td><td><p>Syntax highlighting, code captions, wrapping and LaTeX equations</p></td></tr>
+<tr><td><p>{{doc:writing}}</p></td><td><p>Headings, text styles, colors, links, lists, tasks, quotes, callouts, reminders and buttons</p></td></tr>
+<tr><td><p>{{doc:tables}}</p></td><td><p>Tables, columns, code blocks and LaTeX equations</p></td></tr>
 <tr><td><p>{{doc:media}}</p></td><td><p>Images, cropping, attachments, document icons and covers</p></td></tr>
+<tr><td><p>{{doc:markdown}}</p></td><td><p>Markdown files edited where they are, Markdown shortcuts and Markdown export</p></td></tr>
 <tr><td><p>{{doc:boards}}</p></td><td><p>Shapes, connected arrows, sticky notes and sketches on a board</p></td></tr>
-<tr><td><p>{{doc:organize}}</p></td><td><p>Folders, pins, favorites, backlinks, search, reading mode and trash</p></td></tr>
+<tr><td><p>{{doc:data-tables}}</p></td><td><p>Records with typed fields, filters, sorts and groups</p></td></tr>
+<tr><td><p>{{doc:organize}}</p></td><td><p>Folders, pins, backlinks, search, reading mode and trash</p></td></tr>
 <tr><td><p>{{doc:data}}</p></td><td><p>Importing, exporting, printing, backups and moving your documents</p></td></tr>
 <tr><td><p>{{doc:personalize}}</p></td><td><p>Themes, custom CSS, shortcuts, quick notes and interface language</p></td></tr>
 </tbody></table>
@@ -43,7 +43,7 @@
 <tr><td><p><code>⌘ ]</code> / <code>⌘ /</code></p></td><td><p>Toggle the sidebar / View shortcuts</p></td></tr>
 </tbody></table>
 <h1>Your notes belong to you</h1>
-<p>Your documents are stored in <code>~/Documents/Quiet.md</code>. Each document is an XML file in <code>docs</code>; images and attachments are stored in <code>assets</code>. Back up the whole folder with Time Machine or copy it to another Mac.</p>
+<p>Your documents are stored in <code>~/Documents/Quiet Notes</code>. Each document is a file named after its title, and images and attachments are kept in the hidden <code>.assets</code> folder. Back up the whole folder with Time Machine or copy it to another Mac.</p>
 <blockquote><p>Writing and reading local notes do not require a network connection. Remote images can access the network when loaded; you can control automatic downloading in Settings.</p></blockquote>
 <p>For backup and migration details, see {{doc:data}}.</p>
 <hr/><p align="center">Ready to start? Open {{doc:writing}}.</p>

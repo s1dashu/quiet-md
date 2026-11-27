@@ -4,9 +4,10 @@
 //! and redraws once the font is here. A failed download says so once per run
 //! (with 重试); later attempts, after the backoff, stay silent. Its own view,
 //! so progress repaints the note and not the board. Styled as the chrome's
-//! islands (`chrome::style`), out of the way of the zoom and help controls.
+//! bars (`design::Toolbar`), out of the way of the zoom and help controls.
 
 use super::chrome::{self, style};
+use crate::design::{self, Button, ButtonSize};
 use crate::font_downloads::{self as fd, XIAOLAI};
 use crate::settings::tr;
 use gpui::*;
@@ -63,23 +64,24 @@ impl Render for FontHint {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row = div().absolute().left_0().right_0().bottom(px(style::PADDING)).flex().justify_center();
         if self.shown == Shown::Nothing { return row; }
-        let text = |t: SharedString| div().text_size(px(style::BUTTON_TEXT)).line_height(style::lh(style::BUTTON_TEXT)).text_color(style::text()).child(t);
+        let g = design::geo();
+        let text = |t: SharedString| div().text_size(px(g.text)).text_color(design::color::foreground()).child(t);
         let note = match self.shown {
             Shown::Downloading => {
                 let p = fd::progress(XIAOLAI);
                 div().flex().items_center().gap(px(10.))
                     .child(text(tr("正在下载中文手写字体…", "Downloading the handwriting font…").into()))
-                    .child(div().w(px(56.)).h(px(4.)).rounded(px(2.)).bg(style::surface_low()).child(div().h_full().w(px(56. * p)).rounded(px(2.)).bg(style::primary())))
-                    .child(div().w(px(36.)).whitespace_nowrap().text_size(px(style::LABEL_TEXT)).text_color(style::keybinding()).child(format!("{:.0}%", p * 100.)))
+                    // a progress bar: the slider's track and range
+                    .child(div().w(px(56.)).h(px(6.)).rounded_full().overflow_hidden().bg(design::color::muted()).child(div().h_full().w(px(56. * p)).bg(design::color::primary())))
+                    .child(div().w(px(36.)).whitespace_nowrap().text_size(px(g.text_xs)).text_color(design::color::muted_foreground()).child(format!("{:.0}%", p * 100.)))
             }
             Shown::Done => div().flex().items_center().gap(px(8.))
-                .child(crate::ui::icon("check", 14., style::primary()))
+                .child(design::icon("check", 16., design::color::foreground()))
                 .child(text(tr("中文手写字体已就绪", "Handwriting font ready").into())),
-            _ => div().flex().items_center().gap(px(12.))
+            _ => div().flex().items_center().gap(px(4.))
                 .child(text(tr("手写字体下载失败，暂用系统字体", "Couldn't download the handwriting font; using the system font").into()))
-                .child(div().id("font-hint-retry").cursor_pointer().text_size(px(style::BUTTON_TEXT)).text_color(style::primary()).hover(|s| s.text_color(style::primary_darker()))
-                    .child(tr("重试", "Retry")).on_click(cx.listener(|me, _, _, cx| me.retry(cx)))),
+                .child(Button::link("font-hint-retry").sized(ButtonSize::Sm).label(tr("重试", "Retry")).on_click(cx.listener(|me, _, _, cx| me.retry(cx)))),
         };
-        row.child(chrome::island("font-hint", 0.).h(px(style::LG_BUTTON)).px(px(14.)).flex().items_center().child(note))
+        row.child(chrome::bar("font-hint").child(div().px(px(8.)).flex().items_center().child(note)))
     }
 }

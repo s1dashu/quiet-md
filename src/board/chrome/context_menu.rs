@@ -91,7 +91,7 @@ pub(crate) fn render(me: &BoardView, _window: &mut Window, cx: &mut Context<Boar
         v
     };
 
-    let mut menu = eat(Popover::new("board-context-menu").menu().min_w(px(152.)))
+    let mut menu = eat(Popover::new("board-context-menu").menu().w(px(crate::design::menu_w::SM)))
         .on_mouse_down_out(cx.listener(|me, _, _, cx| me.close_context_menu(cx)));
     let (mut pending_sep, mut any) = (false, false);
     for (i, it) in items.into_iter().enumerate() {

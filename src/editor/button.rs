@@ -64,19 +64,22 @@ pub fn palette(name: &str) -> Palette {
     }
     // A 100 tint with the 600 label, a shade deeper per state; the light
     // hues (orange, wathet) darken their label on hover and press.
+    // In the dark the 600 label keeps its lightness while the tint mirrors a step above the page
+    // (3.9:1 on its own chip): each label is raised until it reads 4.5:1 on the fill under it.
+    let on = |fg: Hsla, bg: Hsla| if crate::theme::dark() { crate::theme::lift_on(fg, bg, 4.5) } else { fg };
     let text = c(v[5]);
     let deeper = if matches!(h, "orange" | "wathet") { c(v[6]) } else { text };
-    Palette { text, bg: c(v[0]), hover_text: deeper, hover_bg: c(v[1]), active_text: deeper, active_bg: c(v[2]), disabled_bg: c(v[0]) }
+    Palette { text: on(text, c(v[0])), bg: c(v[0]), hover_text: on(deeper, c(v[1])), hover_bg: c(v[1]), active_text: on(deeper, c(v[2])), active_bg: c(v[2]), disabled_bg: c(v[0]) }
 }
 
-/// The button at rest: a white-button drop (1px, soft).
+/// The button at rest: level 1 (`shadow::rest`).
 pub fn shadow_s1() -> Vec<BoxShadow> {
-    crate::editor_theme::shadow_button()
+    crate::design::shadow::rest()
 }
 
-/// The button lifted (hovered, pressed, being edited): the menu drop.
+/// The button lifted (hovered, pressed, being edited): level 2 (`shadow::toast`).
 pub fn shadow_s4() -> Vec<BoxShadow> {
-    crate::editor_theme::shadow_menu()
+    crate::design::shadow::toast()
 }
 
 /// Font size, line height and weight of the button inside a paragraph
@@ -538,11 +541,13 @@ impl Editor {
                 }),
             );
 
+        let btn_scroll = crate::design::scroll::handle("btn-panel-content");
         let content = div()
             .id("btn-panel-content")
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            .track_scroll(&btn_scroll)
             .pt(px(12.))
             .px(px(12.))
             .child(item(false).child(label(crate::settings::text("按钮文字"))).child(input("btn-text", &self.btn.text, p.text_err.is_some())).children(p.text_err.map(error)))
@@ -550,7 +555,8 @@ impl Editor {
             .child(item(!link).child(label(crate::settings::text("执行操作"))).child(select))
             .when(link, |d| {
                 d.child(item(true).child(label(crate::settings::text("超链接地址"))).child(input("btn-url", &self.btn.url, p.link_err)).when(p.link_err, |d| d.child(error(crate::settings::text("超链接不合法，请重新输入")))))
-            });
+            })
+            .child(crate::design::scroll::bar("btn-panel-content", &btn_scroll, 0.));
         let footer = div()
             .flex_none()
             .pt(px(16.))
@@ -628,7 +634,7 @@ impl Editor {
         // the size picker in the slash menu.
         let mut el = Popover::new("btn-type-menu")
             .menu()
-            .w(px(200.))
+            .w(px(crate::design::menu_w::SM))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(MenuLabel::new(crate::settings::text("选择按钮类型")));
         for (i, act) in ACTIONS.into_iter().enumerate() {

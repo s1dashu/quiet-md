@@ -6,7 +6,7 @@
 
 use super::{Error, Http, Request, Response, Result};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 pub struct CurlHttp {
@@ -17,15 +17,17 @@ pub struct CurlHttp {
     pub max_time: u32,
     /// `http://` allowed too (tests against a local server).
     plain: bool,
+    /// Where the body and header files go; none: the system's temporary folder.
+    temp: Option<PathBuf>,
 }
 
 impl Default for CurlHttp {
-    fn default() -> Self { CurlHttp { proxy: None, max_time: 600, plain: false } }
+    fn default() -> Self { CurlHttp { proxy: None, max_time: 600, plain: false, temp: None } }
 }
 
 impl Http for CurlHttp {
     fn send(&self, req: Request) -> Result<Response> {
-        let dir = crate::vfs::temp_dir();
+        let dir = self.temp.clone().unwrap_or_else(crate::vfs::temp_dir);
         let id = uuid::Uuid::new_v4();
         let (body, head) = (dir.join(format!("quiet-curl-{id}.body")), dir.join(format!("quiet-curl-{id}.head")));
         let out = (|| {
@@ -51,7 +53,7 @@ impl Http for CurlHttp {
 
 impl CurlHttp {
     #[cfg(test)]
-    pub(super) fn plain() -> Self { CurlHttp { plain: true, ..Default::default() } }
+    pub(super) fn plain_in(temp: &Path) -> Self { CurlHttp { plain: true, temp: Some(temp.to_path_buf()), ..Default::default() } }
 
     /// curl with nothing on its command line but where to read the rest.
     fn command(&self) -> Command {

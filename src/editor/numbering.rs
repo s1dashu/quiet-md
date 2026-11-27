@@ -33,7 +33,7 @@ impl Editor {
                         cx.stop_propagation(); e.submit_ordered_number(w, cx);
                     }))));
         } else {
-            panel = panel.menu().w(px(184.));
+            panel = panel.menu().w(px(crate::design::menu_w::SM));
             for (i, label) in [crate::settings::text("继续之前的编号"), crate::settings::text("开始新列表"), crate::settings::text("修改编号值")].into_iter().enumerate() {
                 let enabled = match i { 0 => previous.is_some_and(|n| n != number), 1 => number != 1, _ => true };
                 panel = panel.child(MenuItem::new(("ordered-number-action", i)).label(label).disabled(!enabled)

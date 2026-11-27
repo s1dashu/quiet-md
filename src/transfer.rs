@@ -1,5 +1,5 @@
 //! 导入 / 导出: 下载为 → PDF / Markdown (with the 导出 Markdown 设置
-//! dialog), 打印, and 导入为文档 (主页's 上传, the app menu): local Markdown
+//! dialog), 打印, and 导入为文档 (the app menu): local Markdown
 //! or DocxXML files picked straight away. The Word / PDF settings and
 //! 打印选项 only choose what happens to comments, so they are left out.
 
@@ -9,8 +9,8 @@ use crate::settings::display_title;
 use crate::model::{Block, BlockKind, Document, RichText};
 use crate::printing::{self, Job};
 use crate::design::{Button, Dialog, scrim};
-use crate::ui::{TipExt, ToastKind};
-use gpui::{prelude::FluentBuilder, *};
+use crate::ui::ToastKind;
+use gpui::*;
 use std::path::{Path, PathBuf};
 
 /// The open 导出 Markdown 设置 dialog: the page, and 所有内容 picked.
@@ -23,7 +23,7 @@ const MARKDOWN_EXTS: [&str; 4] = ["md", "markdown", "mark", "txt"];
 
 /// What the header's 导入 menu picks.
 #[derive(Clone, Copy)]
-pub(crate) enum ImportKind { Markdown, Folder, DocxXml, Csv }
+pub(crate) enum ImportKind { Markdown, Folder, SiYuan, DocxXml, Csv }
 
 /// 导入文件夹 refuses folders with more documents than this.
 pub(crate) const IMPORT_FOLDER_LIMIT: usize = 2000;
@@ -33,10 +33,25 @@ const IMPORT_FILE_LIMIT: u64 = 32 * 1024 * 1024;
 /// What to do with a folder 导入文件夹 brought in (a drop puts it in its slot).
 pub(crate) type AfterImport = Box<dyn FnOnce(&mut Workspace, &str)>;
 
+/// The 从其他应用导入… panel while open: where its imports go (`import_items`' parent), and the
+/// folders of other apps found on this computer (None while still looking).
+pub(crate) struct ImportApps { parent: Option<String>, found: Option<Vec<crate::import_sources::Found>>, choose: Option<Choice> }
+
+/// An Obsidian vault is still Obsidian's: the panel asks whether to use it where it is or copy it
+/// (`Pick`: the vault is yet to be picked; `At`: this vault, found or picked through 导入文件夹…).
+#[derive(Clone, PartialEq)]
+pub(crate) enum Choice { Pick, At(PathBuf, String) }
+
 /// What a background 导入文件夹 did.
 /// `cloud`: what was skipped as only in iCloud (`Scanned::cloud`).
-enum Imported { Empty { cloud: usize }, TooMany(usize), Done { top: Option<String>, failed: usize, cloud: usize, saved: anyhow::Result<()>, changes: Vec<crate::store::FileDelta> } }
-struct ImportedFiles { last: Option<String>, failed: bool, changes: Vec<crate::store::FileDelta> }
+enum Imported { Empty { cloud: usize }, TooMany(usize), Done { top: Option<String>, failed: usize, cloud: usize, saved: anyhow::Result<()>, changes: Vec<crate::store::FileDelta>, listed: Listed } }
+
+/// An import's writer once it is done, with its library listed there too (`Workspace::take_import`).
+pub(crate) struct Listed { key: String, writer: crate::store::Store, entries: Vec<crate::store::Entry> }
+impl Listed {
+    fn of(key: String, mut writer: crate::store::Store) -> Self { let entries = writer.list(); Listed { key, writer, entries } }
+}
+struct ImportedFiles { last: Option<String>, failed: bool, done: usize, changes: Vec<crate::store::FileDelta> }
 
 /// A folder to import: its documents and the sub-folders that hold some;
 /// `cloud`: the documents and folders under it left out as only in iCloud.
@@ -124,25 +139,47 @@ impl Drop for NoCloudDownloads {
 /// A Markdown file as a new Markdown document inside `parent`; `root`: the
 /// folder being imported, where `![[picture.png]]` embeds are also looked up.
 pub(crate) fn import_markdown(store: &mut crate::store::Store, path: &Path, root: Option<&Path>, parent: Option<&str>) -> anyhow::Result<String> {
-    let (doc, front) = read_markdown(path, root)?;
+    let (doc, front) = read_markdown(path, root, &crate::store::Store::assets_in(store.top_dir()))?;
     store.create_markdown_in(&doc, &front, parent)
 }
 
-/// `import_markdown`'s document and front matter, before the library is touched.
-fn read_markdown(path: &Path, root: Option<&Path>) -> anyhow::Result<(Document, String)> {
+/// `import_markdown`'s document and front matter, its pictures copied into
+/// `assets` (the importing library's: not whichever is in front meanwhile).
+fn read_markdown(path: &Path, root: Option<&Path>, assets: &Path) -> anyhow::Result<(Document, String)> {
     let bytes = crate::store::read_bounded(path, IMPORT_FILE_LIMIT)?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
+    // Markdown 思源 exported: its attribute lists, references, tags and embeds become plain Markdown.
+    let siyuan = fdl_core::siyuan::markdown_text(text);
+    let text = siyuan.as_deref().unwrap_or(text);
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default().trim().to_string();
     let mut doc = crate::markdown::parse_file(text, &stem, path.parent());
-    if let Some(dir) = path.parent() { crate::markdown::wiki_images(&mut doc.blocks, dir, root); }
-    crate::editor::image::localize_pasted_images(&mut doc.blocks);
+    if let Some(dir) = path.parent() { crate::markdown::wiki_images(&mut doc.blocks, dir, root); assets_above(&mut doc.blocks, dir, root); }
+    crate::editor::image::localize_images_in(assets, &mut doc.blocks);
     if doc.blocks.is_empty() { doc.blocks.push(Block::text("")); }
     Ok((doc, crate::markdown::front_matter(text).0.to_string()))
 }
 
+/// Pictures at `assets/…` that are not beside the file: 思源 exports a
+/// notebook's pages in folders and its pictures once, in `assets/` at the
+/// top. Looked up in the folders above, up to `root` (the folder being
+/// imported; one level for a lone file).
+fn assets_above(blocks: &mut [Block], dir: &Path, root: Option<&Path>) {
+    for b in blocks.iter_mut() {
+        assets_above(&mut b.children, dir, root);
+        if let BlockKind::Table(t) = &mut b.kind { for c in t.rows.iter_mut().flatten() { assets_above(&mut c.blocks, dir, root); } }
+        let BlockKind::Image { src, .. } = &mut b.kind else { continue };
+        let Some(rest) = Path::new(src.as_str()).strip_prefix(dir.join("assets")).ok().map(Path::to_path_buf) else { continue };
+        if Path::new(src.as_str()).fs_exists() { continue }
+        let top = root.unwrap_or_else(|| dir.parent().unwrap_or(dir));
+        if let Some(found) = dir.ancestors().skip(1).take_while(|d| d.starts_with(top)).map(|d| d.join("assets").join(&rest)).find(|p| p.fs_is_file()) {
+            *src = found.to_string_lossy().to_string();
+        }
+    }
+}
+
 /// One scanned folder as a library folder under `parent`; its id. Needs no
-/// window, so 欢迎页 can import on a background thread before the main window.
+/// window, so it can run on a background thread.
 pub(crate) fn import_tree(store: &mut crate::store::Store, t: &Scanned, parent: Option<&str>, failed: &mut usize) -> Option<String> {
     tree(store, t, &t.dir, parent, failed)
 }
@@ -160,7 +197,7 @@ fn tree(store: &mut crate::store::Store, t: &Scanned, root: &Path, parent: Optio
     for sub in &t.dirs { tree(store, sub, root, Some(&id), failed); }
     for p in &t.docs {
         let made = if crate::local_files::is_markdown_path(p) {
-            let read = { let _local = NoCloudDownloads::new(); read_markdown(p, Some(root)) };
+            let read = { let _local = NoCloudDownloads::new(); read_markdown(p, Some(root), &crate::store::Store::assets_in(store.top_dir())) };
             read.and_then(|(doc, front)| store.create_markdown_in(&doc, &front, Some(&id)))
         } else { store.import_into(p, Some(&id)) };
         match made { Ok(doc) => keep_times(store, &doc, p), Err(_) => *failed += 1 }
@@ -173,9 +210,9 @@ pub(crate) fn import_file(store: &mut crate::store::Store, p: &Path, parent: Opt
     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or_default().to_ascii_lowercase();
     let id = match ext.as_str() {
         _ if crate::local_files::is_markdown_path(p) => import_markdown(store, p, None, parent),
-        e if MARKDOWN_EXTS.contains(&e) => markdown_document(p).map_err(anyhow::Error::from).and_then(|doc| store.create_from_in(&doc, parent)),
+        e if MARKDOWN_EXTS.contains(&e) => markdown_document(p, &crate::store::Store::assets_in(store.top_dir())).map_err(anyhow::Error::from).and_then(|doc| store.create_from_in(&doc, parent)),
         "xml" => store.import_into(p, parent),
-        "csv" | "tsv" if crate::DATATABLE => import_csv(store, p, parent),
+        "csv" | "tsv" => import_csv(store, p, parent),
         _ => Err(anyhow::anyhow!("文件格式不支持")),
     }?;
     keep_times(store, &id, p);
@@ -188,6 +225,11 @@ pub(crate) fn import_file(store: &mut crate::store::Store, p: &Path, parent: Opt
 /// neither it keeps the import's time.
 pub(crate) fn keep_times(store: &mut crate::store::Store, id: &str, src: &Path) {
     let front = if store.is_markdown(id) { crate::markdown::front_matter_times(&store.front_matter_of(id)) } else { (None, None) };
+    // A page 思源 exported keeps its times in its own attribute list, which the import took out.
+    let front = match front {
+        (None, None) if crate::local_files::is_markdown_path(src) => crate::store::read_bounded(src, IMPORT_FILE_LIMIT).map(|b| fdl_core::siyuan::markdown_times(&String::from_utf8_lossy(&b))).unwrap_or_default(),
+        f => f,
+    };
     let Some((made, changed)) = times(fdl_core::vfs::file_times(src), front) else { return };
     if let Some(p) = store.file_path(id) { let _ = fdl_core::vfs::set_modified(&p, changed); }
     let _ = store.update_meta(id, |m| { m.created = made; m.modified = changed; });
@@ -245,7 +287,7 @@ fn save_path(name: &str, cx: &mut App) -> impl std::future::Future<Output = Opti
 /// scripted answer.
 fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<PathBuf>>> + use<> {
     let picked = crate::devtools::take_pick();
-    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml", "csv", "tsv"]).filter(|e| crate::DATATABLE || !matches!(**e, "csv" | "tsv")).map(|e| SharedString::from(*e)).collect());
+    let extensions = Some(MARKDOWN_EXTS.iter().chain(&["xml", "csv", "tsv"]).map(|e| SharedString::from(*e)).collect());
     let prompt = picked.is_none().then(|| cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(crate::settings::text("导入").into()), extensions }));
     async move {
         match prompt {
@@ -256,7 +298,7 @@ fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<Path
 }
 
 /// A CSV or TSV file, imported as a 数据表 (only while they are offered).
-pub(crate) fn is_csv_path(p: &Path) -> bool { crate::DATATABLE && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")) }
+pub(crate) fn is_csv_path(p: &Path) -> bool { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")) }
 
 /// A CSV or TSV file as a new 数据表 file named after it: the first row
 /// names the columns, each column's type is guessed from its cells.
@@ -333,8 +375,8 @@ fn resolve_images(blocks: &mut [Block], base: &Path) {
 }
 
 /// A Markdown / TXT file as a page: titled after the file, its leading
-/// `# 标题` dropped when it repeats the name.
-pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
+/// `# 标题` dropped when it repeats the name; its pictures copied into `assets`.
+pub fn markdown_document(path: &Path, assets: &Path) -> std::io::Result<Document> {
     let bytes = fdl_core::vfs::read(path)?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
@@ -348,7 +390,7 @@ pub fn markdown_document(path: &Path) -> std::io::Result<Document> {
         resolve_images(&mut blocks, dir);
         crate::markdown::wiki_images(&mut blocks, dir, None);
     }
-    crate::editor::image::localize_pasted_images(&mut blocks);
+    crate::editor::image::localize_images_in(assets, &mut blocks);
     if blocks.is_empty() {
         blocks.push(Block::text(""));
     }
@@ -493,6 +535,7 @@ impl Workspace {
     /// document; the last one opens.
     pub fn open_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
+        if self.still_loading(cx) { return }
         cx.notify();
         let paths = open_paths(cx);
         cx.spawn_in(window, async move |this, cx| {
@@ -505,61 +548,71 @@ impl Workspace {
     /// Import files into `parent` (a folder; None: the top of 我的文档); with
     /// `open`, the last one opens (a drop on a list stays on the list).
     pub(crate) fn import_paths(&mut self, paths: &[PathBuf], parent: Option<String>, open: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
+        if self.store.file_task_busy() || self.file_history.busy { return; }
+        // Behind a rename or move on its way: the folder it goes into may be the one moving.
+        let (later, into) = (paths.to_vec(), parent.clone());
+        if self.after_tree_writes(move |w, window, cx| w.import_paths(&later, into, open, window, cx)) { return; }
         let (again, retry) = (paths.to_vec(), parent.clone());
         if !self.save_before(cx, move |w, window, cx| w.import_paths(&again, retry.clone(), open, window, cx)) {
             return;
         }
         let Some((key, mut writer)) = self.store.tree_writer(parent.as_deref()) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_folder().to_string(), cx) };
         let Some(task_guard) = self.store.begin_file_task() else { return };
+        let place = self.place_name(parent.as_deref());
         let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let paths = paths.to_vec();
         let task = cx.background_executor().spawn(async move {
             let journal = writer.track_file_changes();
             let mut last = None;
             let mut failed = false;
+            let mut done = 0;
             let batch = writer.begin_batch().is_ok();
             for p in &paths {
-                match import_file(&mut writer, p, parent.as_deref()) { Ok(id) => last = Some(id), Err(_) => failed = true }
+                match import_file(&mut writer, p, parent.as_deref()) { Ok(id) => { last = Some(id); done += 1 } Err(_) => failed = true }
             }
             if batch && writer.end_batch().is_err() { failed = true; }
-            let entries = writer.list();
-            (ImportedFiles { last, failed, changes: journal.take() }, entries)
+            (ImportedFiles { last, failed, done, changes: journal.take() }, Listed::of(key, writer))
         });
         self.show_toast_kind(ToastKind::Info, crate::settings::tr("正在导入…", "Importing…"), cx);
         cx.spawn_in(window, async move |this, cx| {
-            let _task_guard = task_guard;
-            let (imported, entries) = task.await;
+            let (imported, listed) = task.await;
+            drop(task_guard);
             let _ = this.update_in(cx, |w, window, cx| {
-                let entries = w.store.merge_entries(&key, entries);
-                w.sync_peers(cx, &entries, None);
-                w.entries = entries;
-                w.sort();
+                w.take_import(listed, cx);
                 w.remember_file_changes(imported.changes, crate::settings::tr("导入", "Import"));
                 if let Some(id) = imported.last.filter(|_| open) { w.open(&id, window, cx); }
                 if imported.failed { w.show_toast_kind(ToastKind::Error, crate::settings::text("导入失败，请检查文件格式"), cx); }
-                else if w.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { w.toast = None; }
+                // 导入 copies: say into where, and that the originals were not touched.
+                else { w.show_toast(&crate::localized_count!(imported.done, "已复制 {} 个文件到「{}」，原文件未改动", "Copied {} file into “{}”; the originals are untouched", "Copied {} files into “{}”; the originals are untouched", imported.done, place), cx); }
                 cx.notify();
             });
         }).detach();
     }
 
-    /// The header's 导入 menu (主页, a folder's page): what it imports goes
+    /// 导入 (a folder's "+", the app menu): what it imports goes
     /// into the folder shown, or the top of 我的文档.
     pub(crate) fn open_import_kind(&mut self, kind: ImportKind, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_import_kind_asking(kind, parent, true, window, cx)
+    }
+
+    /// `open_import_kind`; `ask`: a folder picked that is an Obsidian vault asks first (not when that was just answered).
+    fn open_import_kind_asking(&mut self, kind: ImportKind, parent: Option<String>, ask: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.close_menus();
-        self.import_menu = None;
         cx.notify();
         let picked = crate::devtools::take_pick();
         let (folders, extensions): (bool, &[&str]) = match kind {
             ImportKind::Markdown => (false, &["md", "markdown", "mdown"]),
             ImportKind::Folder => (true, &[]),
+            // A workspace or notebook folder, or a `.sy.zip`.
+            ImportKind::SiYuan => (true, &["zip"]),
             ImportKind::DocxXml => (false, &["xml"]),
             ImportKind::Csv => (false, &["csv", "tsv"]),
         };
         let options = PathPromptOptions {
-            files: !folders, directories: folders, multiple: !folders, prompt: Some(crate::settings::text("导入").into()),
-            extensions: (!folders).then(|| extensions.iter().map(|e| SharedString::from(*e)).collect()),
+            files: !folders || !extensions.is_empty(), directories: folders, multiple: !folders,
+            // The confirm button says where the copy goes.
+            prompt: Some(crate::localized_format!("导入到「{}」", "Import into “{}”", self.place_name(parent.as_deref())).into()),
+            extensions: (!extensions.is_empty()).then(|| extensions.iter().map(|e| SharedString::from(*e)).collect()),
         };
         let prompt = picked.is_none().then(|| cx.prompt_for_paths(options));
         cx.spawn_in(window, async move |this, cx| {
@@ -569,21 +622,140 @@ impl Workspace {
             };
             let Some(paths) = paths.filter(|p| !p.is_empty()) else { return };
             let _ = this.update_in(cx, |w, window, cx| match kind {
+                // An Obsidian vault: ask first, open where it is or copy (the 从其他应用导入 panel).
+                ImportKind::Folder if ask && paths[0].join(".obsidian").is_dir() => {
+                    let name = paths[0].file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                    w.open_import_apps(parent.clone(), window, cx);
+                    if let Some(a) = w.import_apps.as_mut() { a.choose = Some(Choice::At(paths[0].clone(), name)); }
+                }
                 ImportKind::Folder => w.import_folder(&paths[0], parent.clone(), true, window, cx),
+                ImportKind::SiYuan => w.import_siyuan(&paths[0], parent.clone(), window, cx),
                 _ => w.import_paths(&paths, parent.clone(), true, window, cx),
             });
         })
         .detach();
     }
 
-    /// The 导入 menu under the header icon.
-    pub(crate) fn render_import_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (parent, pos) = self.import_menu.clone()?;
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(pos).snap_to_window_with_margin(px(8.)).child(
-            crate::design::Popover::new("import-items").menu().min_w(px(210.))
-                .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.import_menu = None; cx.notify(); }))
-                .children(self.import_items(parent, cx)),
-        )).with_priority(3).into_any_element())
+    /// 从其他应用导入…: the panel listing the apps notes come in from, and their folders found
+    /// on this computer, which are looked for meanwhile. What it imports goes into `parent`.
+    pub(crate) fn open_import_apps(&mut self, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_menus();
+        self.import_apps = Some(ImportApps { parent, found: None, choose: None });
+        // Never a folder already open here, nor one around or inside it.
+        let skip: Vec<PathBuf> = self.store.top_folders().into_iter().map(|(_, _, p, _)| p).collect();
+        cx.spawn_in(window, async move |this, cx| {
+            let found = cx.background_executor().spawn(async move { crate::import_sources::discover(&skip) }).await;
+            let _ = this.update(cx, |w, cx| if let Some(a) = w.import_apps.as_mut() { a.found = Some(found); cx.notify(); });
+        }).detach();
+        cx.notify();
+    }
+
+    fn close_import_apps(&mut self, cx: &mut Context<Self>) { self.import_apps = None; cx.notify(); }
+
+    /// An app picked in the panel: its own file picker, then its import.
+    fn import_from_source(&mut self, source: crate::import_sources::Source, window: &mut Window, cx: &mut Context<Self>) {
+        // Obsidian: first, where it is or a copy.
+        if source == crate::import_sources::Source::Obsidian { return self.toggle_choice(Choice::Pick, cx) }
+        let Some(apps) = self.import_apps.take() else { return };
+        self.open_import_kind(source.kind(), apps.parent, window, cx);
+    }
+
+    /// A found folder picked in the panel: straight in, under the name it showed.
+    fn import_found(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(f) = self.import_apps.as_ref().and_then(|a| a.found.as_ref()).and_then(|f| f.get(i)).filter(|f| f.source() == crate::import_sources::Source::Obsidian) {
+            return self.toggle_choice(Choice::At(f.path.clone(), f.name.clone()), cx);
+        }
+        let Some(apps) = self.import_apps.take() else { return };
+        let Some(f) = apps.found.and_then(|f| f.into_iter().nth(i)) else { return cx.notify() };
+        match f.source().kind() {
+            ImportKind::SiYuan => self.import_siyuan(&f.path, apps.parent, window, cx),
+            _ => self.import_folder_as(&f.path, Some(f.name), apps.parent, true, None, window, cx),
+        }
+        cx.notify();
+    }
+
+    fn toggle_choice(&mut self, c: Choice, cx: &mut Context<Self>) {
+        if let Some(a) = self.import_apps.as_mut() { a.choose = if a.choose.as_ref() == Some(&c) { None } else { Some(c) }; }
+        cx.notify();
+    }
+
+    /// The vault asked about: used where it is (打开, recommended: Obsidian goes on using it), or copied in (导入).
+    fn choose_vault(&mut self, in_place: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(apps) = self.import_apps.take() else { return };
+        match (apps.choose, in_place) {
+            (Some(Choice::Pick), true) => self.open_folder_dialog(window, cx),
+            (Some(Choice::Pick), false) => self.open_import_kind_asking(ImportKind::Folder, apps.parent, false, window, cx),
+            (Some(Choice::At(p, _)), true) => self.add_folders(&[p], window, cx),
+            (Some(Choice::At(p, name)), false) => self.import_folder_as(&p, Some(name), apps.parent, true, None, window, cx),
+            (None, _) => {}
+        }
+        cx.notify();
+    }
+
+    /// What 原位打开 and 导入一份副本 do, as two rows under the vault they are about.
+    fn vault_rows(&self, place: &str, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use crate::design::MenuItem;
+        vec![
+            MenuItem::new("vault-in-place").icon("folder").label(crate::settings::tr("原位打开（推荐）", "Open where it is (recommended)"))
+                .description(crate::settings::tr("和 Obsidian 共用同一份文件", "Shared with Obsidian"))
+                .ml(px(24.)).on_click(cx.listener(|w, _, window, cx| w.choose_vault(true, window, cx))).into_any_element(),
+            MenuItem::new("vault-copy").icon("copy").label(crate::settings::tr("导入一份副本", "Import a copy"))
+                .description(crate::localized_format!("复制到「{}」", "Copies into “{}”", place))
+                .ml(px(24.)).on_click(cx.listener(|w, _, window, cx| w.choose_vault(false, window, cx))).into_any_element(),
+        ]
+    }
+
+    /// Where an import into `parent` lands, by name (None: the top-level folder in front).
+    pub(crate) fn place_name(&self, parent: Option<&str>) -> String {
+        match parent {
+            Some(p) => self.entries.iter().find(|e| e.id == p).map(|e| if crate::shared_store::top_of_row(&e.id).is_some() { self.folder_name(&e.top) } else { crate::settings::display_title(&e.title) }).unwrap_or_default(),
+            None => self.front_top_name(),
+        }
+    }
+
+    /// The 从其他应用导入… panel (`Dialog`): each app with what to pick, then what was found here.
+    pub(crate) fn render_import_apps(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::design::{MenuItem, MenuLabel};
+        use crate::import_sources::Source;
+        let apps = self.import_apps.as_ref()?;
+        let chevron = || crate::design::icon("chevron-right", 16., crate::design::color::muted_foreground());
+        let place = self.place_name(apps.parent.as_deref());
+        let mut sources: Vec<AnyElement> = vec![];
+        for s in Source::ALL {
+            sources.push(MenuItem::new(SharedString::from(format!("import-app-{}", s.key()))).icon(s.icon()).label(s.name()).description(s.hint())
+                .child(chevron()).on_click(cx.listener(move |w, _, window, cx| w.import_from_source(s, window, cx))).into_any_element());
+            if s == Source::Obsidian && apps.choose == Some(Choice::Pick) { sources.extend(self.vault_rows(&place, cx)); }
+        }
+        // A vault picked through 导入文件夹… and not among those found: asked about above the list.
+        let asked = match &apps.choose { Some(Choice::At(p, name)) if !apps.found.as_ref().is_some_and(|f| f.iter().any(|f| &f.path == p)) => Some(name.clone()), _ => None };
+        let asked = asked.map(|name| crate::table::style::inset_list("import-vault-ask")
+            .child(MenuLabel::new(crate::localized_format!("「{}」是一个 Obsidian 库", "“{}” is an Obsidian vault", name)))
+            .children(self.vault_rows(&place, cx)));
+        let found = apps.found.as_ref().filter(|f| !f.is_empty()).map(|found| {
+            // the shared scrollbar in its own lane, as the table's inset lists keep it
+            crate::design::scroll::make_room(crate::table::style::inset_list("import-found-list").max_h(px(220.)).overflow_y_scroll().track_scroll(&crate::design::scroll::handle("import-found-list")), "import-found-list", crate::design::menu::PAD)
+                .child(MenuLabel::new(crate::settings::tr("在这台电脑上找到", "Found on this computer")))
+                .children(found.iter().enumerate().flat_map(|(i, f)| {
+                    let row = MenuItem::new(("import-found", i)).icon(f.source().icon()).label(f.title()).description(f.desc())
+                        .child(chevron()).on_click(cx.listener(move |w, _, window, cx| w.import_found(i, window, cx))).into_any_element();
+                    let open = matches!(&apps.choose, Some(Choice::At(p, _)) if *p == f.path);
+                    std::iter::once(row).chain(if open { self.vault_rows(&place, cx) } else { vec![] })
+                }).collect::<Vec<_>>())
+                .child(crate::design::scroll::bar("import-found-list", &crate::design::scroll::handle("import-found-list"), crate::design::geo().menu_r))
+        });
+        let ws = cx.entity().downgrade();
+        let dialog = Dialog::new("import-apps")
+            .keys(&self.dialog_focus, move |_, cx| { let _ = ws.update(cx, |w, cx| w.close_import_apps(cx)); }, None::<fn(&mut Window, &mut App)>)
+            .relative()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .title(crate::settings::tr("从其他应用导入", "Import from Another App"))
+            .description(crate::localized_format!("笔记来自哪个应用？导入的是副本，放进「{}」，原来的文件不会被改动。", "Which app are your notes in? Imports are copies, put in “{}”; your files stay as they are.", place))
+            .closable(cx.listener(|w, _, _, cx| w.close_import_apps(cx)))
+            .children(asked)
+            .child(crate::table::style::inset_list("import-app-list").children(sources))
+            .children(found);
+        Some(deferred(scrim().id("import-apps-mask").on_mouse_down(MouseButton::Left, cx.listener(|w, _, _, cx| w.close_import_apps(cx))).child(dialog))
+            .with_priority(3).into_any_element())
     }
 
     /// The 导入 menu's rows, bringing things into `parent` (None: the top-level folder in front): that menu, and
@@ -595,63 +767,24 @@ impl Workspace {
                 .on_click(cx.listener(move |w, _, window, cx| { w.create_menu = None; w.open_import_kind(kind, parent.clone(), window, cx) }))
         };
         let mut out = vec![
+            // Everything here copies in; only the header's 添加文件夹 uses a folder where it is.
             item("import-md", "doc-md", crate::settings::tr("导入 Markdown 文件…", "Import Markdown Files…"), ImportKind::Markdown),
             item("import-folder", "folder", crate::settings::tr("导入文件夹…", "Import Folder…"), ImportKind::Folder),
+            {
+                let parent = parent.clone();
+                crate::design::MenuItem::new("import-apps").icon("import").label(crate::settings::tr("从其他应用导入…", "Import from Another App…"))
+                    .on_click(cx.listener(move |w, _, window, cx| { w.create_menu = None; w.open_import_apps(parent.clone(), window, cx) }))
+            },
             item("import-xml", "doc", crate::settings::tr("导入 DocxXML…", "Import DocxXML…"), ImportKind::DocxXml),
         ];
-        if crate::DATATABLE { out.push(item("import-csv", "datatable", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv)); }
+        out.push(item("import-csv", "table-import", crate::settings::tr("从 CSV 新建数据表…", "New Data Table from CSV…"), ImportKind::Csv));
         out
-    }
-
-    /// The header's … menu: open this folder (None: the library) in the
-    /// system's file manager.
-    pub(crate) fn render_place_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (folder, pos) = self.place_menu.clone()?;
-        let label = if cfg!(target_os = "ios") { crate::settings::tr("在“文件”中打开", "Open in Files") }
-            else if cfg!(target_os = "macos") { crate::settings::tr("在访达中打开", "Open in Finder") }
-            else if cfg!(target_os = "windows") { crate::settings::tr("在文件资源管理器中打开", "Open in File Explorer") }
-            else { crate::settings::tr("在文件管理器中打开", "Open in File Manager") };
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(pos).snap_to_window_with_margin(px(8.)).child(
-            crate::design::Popover::new("place-items").menu().w(px(210.))
-                .on_mouse_down_out(cx.listener(|w, _, _, cx| { w.place_menu = None; cx.notify(); }))
-                .child(crate::design::MenuItem::new("place-open").icon("folder").label(label)
-                    .on_click(cx.listener(move |w, _, _, cx| {
-                        w.place_menu = None;
-                        if let Some(dir) = w.store.folder_dir(folder.as_deref()) { cx.open_with_system(&dir); }
-                        cx.notify();
-                    }))),
-        )).with_priority(3).into_any_element())
-    }
-
-    /// The header's … icon, left of 导入; its menu hangs below it, right-aligned.
-    pub(crate) fn place_button(&self, id: &'static str, folder: Option<String>, cx: &mut Context<Self>) -> crate::design::Button {
-        let open = self.place_menu.is_some();
-        crate::ui::header_icon(id, "ellipsis")
-            .selected(open)
-            .when(!open, |d| d.tip(crate::settings::tr("更多", "More"), None))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| {
-                w.place_menu = if w.place_menu.is_some() { None } else { Some((folder.clone(), ev.position() + point(px(18.), px(20.)))) };
-                cx.notify();
-            }))
-    }
-
-    /// The header's 导入 icon; its menu hangs below it, right-aligned.
-    pub(crate) fn import_button(&self, id: &'static str, parent: Option<String>, cx: &mut Context<Self>) -> crate::design::Button {
-        let open = self.import_menu.is_some();
-        crate::ui::header_icon(id, "import")
-            .selected(open)
-            .tip(crate::settings::tr("导入", "Import"), None)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(move |w, ev: &ClickEvent, _, cx| {
-                w.import_menu = if w.import_menu.is_some() { None } else { Some((parent.clone(), ev.position() + point(px(18.), px(20.)))) };
-                cx.notify();
-            }))
     }
 
     /// 导入文件夹: pick a folder; it lands at the top of 我的文档 as a folder,
     /// its sub-folders as folders, its Markdown and DocxXML files as documents.
     pub fn open_import_folder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.still_loading(cx) { return }
         self.open_import_kind(ImportKind::Folder, None, window, cx);
     }
 
@@ -662,10 +795,22 @@ impl Workspace {
 
     /// `import_folder`, then `then` with the new folder once it is in.
     pub(crate) fn import_folder_then(&mut self, dir: &Path, parent: Option<String>, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
-        if self.store.file_task_busy() || self.file_history.busy || self.tree_writes_pending() { return; }
+        self.import_folder_as(dir, None, parent, open, then, window, cx);
+    }
+
+    /// `import_folder_then` under `name` (None: the folder's own), as an app's
+    /// iCloud folder, called Documents, comes in under the app's name.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn import_folder_as(&mut self, dir: &Path, name: Option<String>, parent: Option<String>, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy { return; }
+        if self.tree_writes_pending() {
+            let (later, named, into) = (dir.to_path_buf(), name.clone(), parent.clone());
+            self.after_tree_writes(move |w, window, cx| w.import_folder_as(&later, named, into, open, then, window, cx));
+            return;
+        }
         let held = std::rc::Rc::new(std::cell::Cell::new(then));
-        let (again, retry, later) = (dir.to_path_buf(), parent.clone(), held.clone());
-        if !self.save_before(cx, move |w, window, cx| w.import_folder_then(&again, retry.clone(), open, later.take(), window, cx)) {
+        let (again, named, retry, later) = (dir.to_path_buf(), name.clone(), parent.clone(), held.clone());
+        if !self.save_before(cx, move |w, window, cx| w.import_folder_as(&again, named.clone(), retry.clone(), open, later.take(), window, cx)) {
             return;
         }
         let then = held.take();
@@ -677,11 +822,12 @@ impl Workspace {
         let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
         let dir = dir.to_path_buf();
         let task = cx.background_executor().spawn(async move {
-            let imported = match scan_folder(&dir, 0) {
+            match scan_folder(&dir, 0) {
                 None => Imported::Empty { cloud: 0 },
                 Some(tree) if tree.files == 0 => Imported::Empty { cloud: tree.cloud },
                 Some(tree) if tree.files > IMPORT_FOLDER_LIMIT => Imported::TooMany(tree.files),
-                Some(tree) => {
+                Some(mut tree) => {
+            if let Some(n) = name { tree.name = n; }
             let journal = writer.track_file_changes();
             let mut failed = 0;
             // One write for the whole folder: each file is written where it
@@ -690,23 +836,75 @@ impl Workspace {
             let batch = writer.begin_batch().is_ok();
             let top = import_tree(&mut writer, &tree, parent.as_deref(), &mut failed);
             let saved = if batch { writer.end_batch() } else { Ok(()) };
-            Imported::Done { top, failed, cloud: tree.cloud, saved, changes: journal.take() }
+            let changes = journal.take();
+            Imported::Done { top, failed, cloud: tree.cloud, saved, changes, listed: Listed::of(key, writer) }
                 }
-            };
-            match imported {
-                Imported::Empty { .. } | Imported::TooMany(_) => (imported, Vec::new()),
-                Imported::Done { .. } => (imported, writer.list()),
             }
         });
         self.show_toast_kind(ToastKind::Info, crate::settings::tr("正在导入…", "Importing…"), cx);
         cx.spawn_in(window, async move |this, cx| {
-            let _task_guard = task_guard;
-            let (imported, entries) = task.await;
-            let _ = this.update_in(cx, |w, window, cx| { let entries = if entries.is_empty() { entries } else { w.store.merge_entries(&key, entries) }; w.finish_import_folder(imported, entries, open, then, window, cx) });
+            let imported = task.await;
+            drop(task_guard);
+            let _ = this.update_in(cx, |w, window, cx| w.finish_import_folder(imported, open, then, window, cx));
         }).detach();
     }
 
-    fn finish_import_folder(&mut self, imported: Imported, entries: Vec<crate::store::Entry>, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
+    /// 导入思源笔记: a workspace, notebook or `.sy.zip` into `parent`, off the
+    /// window's thread on its own store as `import_folder_then` does.
+    pub(crate) fn import_siyuan(&mut self, path: &Path, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy { return; }
+        let (later, into) = (path.to_path_buf(), parent.clone());
+        if self.after_tree_writes(move |w, window, cx| w.import_siyuan(&later, into, window, cx)) { return; }
+        if !fdl_core::siyuan::recognizes(path) {
+            return self.show_toast_kind(ToastKind::Error, crate::settings::tr("这不是思源笔记的工作空间、笔记本文件夹或 .sy.zip 文件", "This is not a SiYuan workspace, notebook folder or .sy.zip file"), cx);
+        }
+        let (again, retry) = (path.to_path_buf(), parent.clone());
+        if !self.save_before(cx, move |w, window, cx| w.import_siyuan(&again, retry.clone(), window, cx)) { return; }
+        let Some((key, mut writer)) = self.store.tree_writer(parent.as_deref()) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_folder().to_string(), cx) };
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let parent = self.store.real_parent(parent.as_deref()).map(str::to_string);
+        let path = path.to_path_buf();
+        let task = cx.background_executor().spawn(async move {
+            let journal = writer.track_file_changes();
+            let batch = writer.begin_batch().is_ok();
+            let done = crate::siyuan::import(&mut writer, &path, parent.as_deref());
+            let saved = if batch { writer.end_batch() } else { Ok(()) };
+            let changes = journal.take();
+            (done.and_then(|d| saved.map(|_| d)), changes, Listed::of(key, writer))
+        });
+        self.show_toast_kind(ToastKind::Info, crate::settings::tr("正在导入…", "Importing…"), cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let (done, changes, listed) = task.await;
+            drop(task_guard);
+            let _ = this.update_in(cx, |w, window, cx| {
+                w.take_import(listed, cx);
+                w.remember_file_changes(changes, crate::settings::tr("导入思源笔记", "Import from SiYuan"));
+                match done {
+                    Ok((top, report)) => {
+                        if let Some(id) = &top { w.reveal_in_tree(id); w.open(id, window, cx); }
+                let (error, text) = crate::siyuan::summary(&report);
+                        w.show_toast_kind(if error { ToastKind::Error } else { ToastKind::Info }, &text, cx);
+                    }
+                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string())), cx),
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    /// After an import written off the window's thread, its file task let go (`open` waits while
+    /// one runs): the window's library takes over what the writer read and wrote (`Store::adopt`),
+    /// so opening a new page finds it, and the list the writer made there. Reading the library
+    /// again here instead held the window 90 ms for 2000 notes.
+    fn take_import(&mut self, listed: Listed, cx: &mut Context<Self>) {
+        let Listed { key, writer, entries } = listed;
+        let entries = self.store.adopt_listed(&key, writer, entries);
+        self.sync_peers(cx, &entries, None);
+        self.entries.set(entries);
+        self.sort();
+    }
+
+    fn finish_import_folder(&mut self, imported: Imported, open: bool, then: Option<AfterImport>, window: &mut Window, cx: &mut Context<Self>) {
         let (top, failed, cloud, saved, changes) = match imported {
             Imported::Empty { cloud } => {
                 let msg = if cloud > 0 { cloud_skipped(cloud) } else { crate::settings::tr("这个文件夹里没有 Markdown 或 XML 文件", "This folder has no Markdown or XML files").to_string() };
@@ -717,13 +915,10 @@ impl Workspace {
                 self.show_toast_kind(ToastKind::Error, &crate::localized_format!("文件夹里有 {} 个文件，一次最多导入 {} 个", "The folder has {} files; up to {} can be imported at once", files, IMPORT_FOLDER_LIMIT), cx);
                 return;
             }
-            Imported::Done { top, failed, cloud, saved, changes } => (top, failed, cloud, saved, changes),
+            Imported::Done { top, failed, cloud, saved, changes, listed } => { self.take_import(listed, cx); (top, failed, cloud, saved, changes) }
         };
-        self.sync_peers(cx, &entries, None);
-        self.entries = entries;
-        self.sort();
         self.remember_file_changes(changes, crate::settings::tr("导入文件夹", "Import folder"));
-        if let Some(id) = top {
+        if let Some(id) = top.clone() {
             if let Some(then) = then { then(self, &id); }
             self.reveal_in_tree(&id);
             if open { self.open(&id, window, cx); }
@@ -732,7 +927,11 @@ impl Workspace {
             self.show_toast_kind(ToastKind::Error, &crate::localized_format!("导入未能完成：{}", "Import could not finish: {}", crate::settings::diagnostic(&e.to_string())), cx);
         } else if let Some(msg) = import_problems(failed, cloud) {
             self.show_toast_kind(ToastKind::Error, &msg, cx);
-        } else if self.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
+        } else if let Some(e) = top.as_ref().and_then(|id| self.entries.iter().find(|e| &e.id == id)) {
+            // 导入 copies: say what went where, and that the original stayed as it was.
+            let (name, place) = (crate::settings::display_title(&e.title), self.place_name(e.meta.parent.as_deref()));
+            self.show_toast(&crate::localized_format!("已复制「{}」到「{}」，原文件夹未改动", "Copied “{}” into “{}”; the original folder is untouched", name, place), cx);
+        } else if self.toast.as_ref().is_some_and(|t| matches!(t.kind, ToastKind::Info) && t.msg.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
         cx.notify();
     }
 
@@ -826,7 +1025,7 @@ impl Workspace {
         assert!(!html.contains("UFJJVkFURS1NVVNULU5PVC1FWFBPUlQ="));
         assert!(!html.contains(&*outside.to_string_lossy()));
         let id = self.store.create_from(&doc).unwrap();
-        self.entries = self.store.list();
+        self.entries.set(self.store.list());
         self.open(&id, window, cx);
         self.export_md = Some(ExportMd { id, all: true });
         self.export_markdown(window, cx);
@@ -861,6 +1060,41 @@ mod tests {
             assert!(path.ends_with(std::path::Path::new(&format!("dir-{}", n % 253)).join(format!("{title}.md"))));
             assert_eq!(std::fs::read_to_string(path).unwrap().trim(), format!("body {n}"));
         }
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    /// An Obsidian vault imported: its `![[picture.png]]` embeds — in the
+    /// attachment folder, by a path, by a name only, with a width — are pictures
+    /// copied into the library, written as Markdown writes one; `![[Note]]` stays.
+    #[test]
+    fn imported_vault_embeds_become_library_pictures() {
+        let tmp = fdl_core::vfs::temp_dir().join(format!("quiet-vault-embeds-{}", uuid::Uuid::new_v4()));
+        let v = tmp.join("vault");
+        for d in [".obsidian", "attachments", "pics", "notes/deep"] { std::fs::create_dir_all(v.join(d)).unwrap(); }
+        std::fs::write(v.join(".obsidian/app.json"), r#"{"attachmentFolderPath":"attachments"}"#).unwrap();
+        for f in ["attachments/red.png", "pics/green.png", "notes/deep/blue.png"] { image::RgbImage::new(2, 2).save(v.join(f)).unwrap(); }
+        std::fs::write(v.join("notes/Embeds.md"), "![[red.png]]\n\n![[red.png|300]]\n\n![[pics/green.png]]\n\n![[blue.png]]\n\n![[Other]]\n").unwrap();
+        // Its pictures go to the library it imports into, whichever is in front (none here).
+        let mut store = crate::store::Store::open_at(tmp.join("library")).unwrap();
+        let tree = super::scan_folder(&v, 0).unwrap();
+        let mut failed = 0;
+        store.batch(|s| super::import_tree(s, &tree, None, &mut failed)).unwrap().unwrap();
+        assert_eq!(failed, 0);
+        let e = store.list().into_iter().find(|e| e.title == "Embeds").unwrap();
+        let text = std::fs::read_to_string(store.file_path(&e.id).unwrap()).unwrap();
+        let assets = crate::store::Store::assets_in(&tmp.join("library"));
+        let doc = store.load(&e.id).unwrap();
+        let pics: Vec<(std::path::PathBuf, Option<f32>)> = doc.blocks.iter().filter_map(|b| match &b.kind {
+            BlockKind::Image { src, width, .. } => Some((std::path::PathBuf::from(src), *width)),
+            _ => None,
+        }).collect();
+        assert_eq!(pics.iter().map(|p| p.1).collect::<Vec<_>>(), [None, Some(300.), None, None], "{text}");
+        assert!(pics.iter().all(|(p, _)| p.starts_with(&assets) && p.is_file()), "{text}");
+        assert!(text.contains("width=\"300\"") && text.trim_end().ends_with("![[Other]]") && !text.contains("![[red"), "{text}");
+        // Relative to the file, so the library can move: `.assets/…` beside it, or `../.assets/…` from a folder.
+        let rel = store.file_path(&e.id).unwrap().parent().unwrap().strip_prefix(tmp.join("library")).unwrap().components().count();
+        let up = "../".repeat(rel);
+        assert!(!text.contains(&*tmp.to_string_lossy()) && text.matches(&format!("({up}.assets/")).count() == 3 && text.contains(&format!("src=\"{up}.assets/")), "{text}");
         std::fs::remove_dir_all(tmp).unwrap();
     }
 
@@ -907,7 +1141,7 @@ mod tests {
         fdl_core::vfs::create_dir_all(&dir).unwrap();
         let path = dir.join("周报.md");
         fdl_core::vfs::write(&path, "\u{feff}# 周报\n\n第一段\n\n- a\n- b\n\n![图](https://e.com/a.png)\n\n## 小结\n").unwrap();
-        let doc = markdown_document(&path).unwrap();
+        let doc = markdown_document(&path, &dir.join("assets")).unwrap();
         assert_eq!(doc.title.text, "周报");
         let kinds: Vec<_> = doc.blocks.iter().map(|b| std::mem::discriminant(&b.kind)).collect();
         assert_eq!(kinds.len(), 5);
@@ -942,7 +1176,7 @@ mod tests {
     fn imported_files_keep_their_times() {
         let (tmp, from, mut store) = places("files");
         let mut files = vec![("周报.md", "# 周报\n\nbody\n"), ("notes.markdown", "body"), ("plain.txt", "body"), ("page.xml", "<doc><title>page</title><body><p>body</p></body></doc>")];
-        if crate::DATATABLE { files.push(("rows.csv", "name,n\na,1\n")); }
+        files.push(("rows.csv", "name,n\na,1\n"));
         for (k, (name, text)) in files.iter().enumerate() {
             let src = from.join(name);
             let t = THEN + k as u64 * 1000;
@@ -976,7 +1210,7 @@ mod tests {
 
     #[test]
     fn a_folder_import_keeps_each_files_times() {
-        // 导入文件夹, a dropped folder, and 欢迎页's Obsidian / Typora import (import_tree).
+        // 导入文件夹, a dropped folder, and 从其他应用导入's Obsidian / Typora import (import_tree).
         let (tmp, from, mut store) = places("folder");
         aged(&from.join("vault/a.md"), "a", THEN);
         aged(&from.join("vault/sub/b.md"), "b", THEN + 60);
@@ -1086,21 +1320,57 @@ mod tests {
     #[test]
     fn pictures_copied_in_keep_their_change_time() {
         let (tmp, from, _store) = places("pictures");
-        // Never the real library's assets: this library is the one in front.
-        crate::store::Store::set_active_dir(&tmp.join("library"));
+        // Into this library's assets, never the real library's (nor the global one in front).
+        let assets = crate::store::Store::assets_in(&tmp.join("library"));
         let pic = from.join("photo.png");
         image::RgbImage::new(2, 2).save(&pic).unwrap();
         fdl_core::vfs::set_modified(&pic, THEN).unwrap();
-        let b = crate::editor::image::image_block_from_file(&pic).unwrap();
+        let b = crate::editor::image::image_block_from_file_in(&assets, &pic).unwrap();
         let BlockKind::Image { src, .. } = &b.kind else { panic!() };
         let copy = std::path::Path::new(src);
-        assert!(copy.starts_with(fdl_core::vfs::temp_dir()) && copy != pic, "{src}");
+        assert!(copy.starts_with(&assets) && copy != pic, "{src}");
         assert_eq!((mtime(copy), mtime(&pic)), (THEN, THEN));
         // A Markdown file's picture, imported with it.
         aged(&from.join("page.md"), "![](photo.png)\n", THEN + 60);
-        let (doc, _) = super::read_markdown(&from.join("page.md"), None).unwrap();
+        let (doc, _) = super::read_markdown(&from.join("page.md"), None, &assets).unwrap();
         let BlockKind::Image { src, .. } = &doc.blocks[0].kind else { panic!("{:?}", doc.blocks[0].kind) };
         assert_eq!(mtime(std::path::Path::new(src)), THEN);
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn siyuan_markdown_comes_in_as_plain_markdown_with_its_times() {
+        let (tmp, from, mut store) = places("siyuan-md");
+        // 思源's 导出 Markdown of a notebook: pages in folders, pictures once in `assets/` at the top.
+        let nb = from.join("笔记本");
+        std::fs::create_dir_all(nb.join("assets")).unwrap();
+        image::RgbImage::new(2, 2).save(nb.join("assets").join("图-20240101120000-abcdefg.png")).unwrap();
+        aged(&nb.join("文档").join("页.md"), "# 标题\n{: id=\"20240101120000-aaaaaaa\"}\n\n见 ((20240101120000-bbbbbbb \"另一篇\"))，#读书#。\n\n![图](assets/图-20240101120000-abcdefg.png)\n\n{{SELECT * FROM blocks WHERE content LIKE '%x%'}}\n\n{: id=\"20240101120000-ccccccc\" title=\"页\" type=\"doc\" updated=\"20240305081500\"}\n", THEN);
+        let t = super::scan_folder(&nb, 0).unwrap();
+        let mut failed = 0;
+        super::import_tree(&mut store, &t, None, &mut failed);
+        assert_eq!(failed, 0);
+        let page = store.list().into_iter().find(|e| e.title == "页").unwrap();
+        assert_eq!((page.meta.created, page.meta.modified), (fdl_core::siyuan::time("20240101120000").unwrap(), fdl_core::siyuan::time("20240305081500").unwrap()));
+        let doc = store.load(&page.id).unwrap();
+        let texts: Vec<&str> = doc.blocks.iter().map(|b| b.text.text.as_str()).collect();
+        assert_eq!(&texts[..2], ["标题", "见 另一篇，#读书。"]);
+        let BlockKind::Image { src, .. } = &doc.blocks[2].kind else { panic!("{:?}", doc.blocks[2].kind) };
+        assert!(std::path::Path::new(src).is_file() && !src.contains("笔记本"), "{src}");
+        assert!(matches!(&doc.blocks[3].kind, BlockKind::Code { lang, .. } if lang == "SQL"), "{:?}", doc.blocks[3].kind);
+        std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn other_markdown_reads_as_before() {
+        let (tmp, from, _store) = places("plain-md");
+        for (k, text) in ["# Heading\n\n## Two #\n\nC# and F#; issue #12 and #34.\n", "A [link](http://x/#a#b), {curly}, {: not an attribute list}, ((parens)).\n\n- [ ] task\n\n```\n{: id=\"20240101120000-aaaaaaa\"}\n#code#\n```\n", "Text#with#hashes and ![pic](assets/none.png)\n"].iter().enumerate() {
+            let path = from.join(format!("{k}.md"));
+            aged(&path, text, THEN);
+            let (doc, _) = super::read_markdown(&path, None, &crate::store::Store::assets_in(&tmp.join("library"))).unwrap();
+            let plain = crate::markdown::parse_file(text, &k.to_string(), Some(&from));
+            assert_eq!(crate::docxml::serialize(&doc), crate::docxml::serialize(&plain), "{text}");
+        }
         std::fs::remove_dir_all(tmp).unwrap();
     }
 }

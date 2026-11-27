@@ -28,6 +28,9 @@ static CLIPBOARD_HASH_FORMAT: LazyLock<u32> =
     LazyLock::new(|| register_clipboard_format(windows::core::w!("GPUI internal text hash")));
 static CLIPBOARD_METADATA_FORMAT: LazyLock<u32> =
     LazyLock::new(|| register_clipboard_format(windows::core::w!("GPUI internal metadata")));
+/// quiet.md: CF_HTML, what Word and browsers read and write formatted text as.
+static CLIPBOARD_HTML_FORMAT: LazyLock<u32> =
+    LazyLock::new(|| register_clipboard_format(windows::core::w!("HTML Format")));
 static CLIPBOARD_SVG_FORMAT: LazyLock<u32> =
     LazyLock::new(|| register_clipboard_format(windows::core::w!("image/svg+xml")));
 static CLIPBOARD_GIF_FORMAT: LazyLock<u32> =
@@ -284,6 +287,11 @@ fn write_string(item: &ClipboardString) -> Result<()> {
         let wide: Vec<u16> = metadata.encode_utf16().chain(Some(0)).collect_vec();
         set_clipboard_bytes(&wide, *CLIPBOARD_METADATA_FORMAT)?;
     }
+    // quiet.md: the HTML flavor, UTF-8 and NUL-terminated (its header's offsets count bytes).
+    if let Some(html) = item.html.as_ref() {
+        let bytes: Vec<u8> = html.bytes().filter(|&b| b != 0).chain(Some(0)).collect();
+        set_clipboard_bytes(&bytes, *CLIPBOARD_HTML_FORMAT)?;
+    }
     Ok(())
 }
 
@@ -325,7 +333,21 @@ fn convert_to_png(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {
 fn read_string() -> Option<ClipboardEntry> {
     let text = get_clipboard_string(CF_UNICODETEXT.0 as u32)?;
     let metadata = read_clipboard_metadata(&text);
-    Some(ClipboardEntry::String(ClipboardString { text, metadata }))
+    let html = read_clipboard_html();
+    Some(ClipboardEntry::String(ClipboardString { text, metadata, html }))
+}
+
+/// quiet.md: the `HTML Format` payload as text, header included, up to its
+/// NUL. Invalid UTF-8 is replaced; the app reads the page after the header,
+/// not the byte offsets, so that shifts nothing it relies on.
+fn read_clipboard_html() -> Option<String> {
+    if unsafe { IsClipboardFormatAvailable(*CLIPBOARD_HTML_FORMAT) }.is_err() {
+        return None;
+    }
+    let locked = get_clipboard_data(*CLIPBOARD_HTML_FORMAT)?;
+    let bytes = locked.as_bytes();
+    let bytes = &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())];
+    (!bytes.is_empty()).then(|| String::from_utf8_lossy(bytes).into_owned())
 }
 
 fn read_clipboard_metadata(text: &str) -> Option<String> {

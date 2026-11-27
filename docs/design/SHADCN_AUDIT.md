@@ -32,6 +32,7 @@
 | ghost 悬停 | `hover:bg-muted`，深色 `hover:bg-muted/50` | 同 | 改（原来是 `accent_hover`） |
 | ghost 在用 | `aria-expanded:bg-muted`；按下的 Toggle `aria-pressed:bg-muted` | `selected` → `muted` | 改（原来是 `accent`） |
 | ghost 在深色弹层上 | muted / muted/50（弹层 #171717 上看得见） | 悬停 白 6%（`accent_hover`），在用 `accent` #404040 | 保留 C：我们的深色弹层 #262626 就是 `muted`，muted 画上去看不见；在弹层、对话框、卡片里（`base::raised()`）提一档 |
+| ghost 在侧栏行上 | SidebarMenuAction、SidebarGroupAction `hover:bg-sidebar-accent`，和行的悬停（SidebarMenuButton `hover:bg-sidebar-accent`）同色 | 侧栏行里的「…」「+」、我的文档标题的批量和「+」：悬停和在用都是 `background`（`Button::on_wash`） | 保留 C（2026-11-25）：毛玻璃侧栏上行的悬停是黑 4.5%（浅色约 234），`muted`（245）或 accent 叠上去比行亮一点、又比周围的侧栏底（约 247）暗，看不出层次、显得发灰；`background`（浅色纯白）在行上和侧栏底上都分得开 |
 | destructive | bg destructive/10，悬停 /20；深色 /20、/30；字 destructive | 同 | 一致 |
 | link | `text-primary underline-offset-4 hover:underline` | `ButtonVariant::Link` | 新增 |
 | 尺寸 default | `.cn-button-size-default` h-9 gap-1.5 px-2.5，带图标那侧 pl-2 / pr-2 | 36、6、10，图标侧 8 | 改（图标侧原来也是 10） |
@@ -222,13 +223,44 @@
 | 块手柄 | `ButtonGroup` + `Button variant="outline" size="icon-xs"`（24 方形，圆角 min(md, 8)，图标 size-3） | 一个 outline 按钮（维护者 2026-11-24：不画两段之间的接缝）：1px 边、`background` 底、shadow-xs、圆角 8、图标 12；悬停 outline 的悬停色；菜单开着 `muted` | 改（原来 1px `line_border`、圆角 6、悬停和开着都是 `handle_active`、图标 14） |
 | 块手柄尺寸 | 24 × 48（两个 icon-xs） | 26 高，42 宽（24 + 18），空行 + 28 宽 | 保留 C：编辑器按这些固定尺寸摆手柄（和首行垂直居中、表格手柄在列选择条那一行） |
 | 块手柄悬停 | 每个按钮各自悬停 | 两半一起亮 | 我们的：整块是一个控件（按下就是拖动或开菜单），不分左右 |
-| 字数小块 | 无 | outline xs 按钮的外观（1px `border`、shadow-xs、8、text-xs muted、`background` 底） | 我们的；改（原来 `button_border`、`shadow_button`） |
 
-## 滚动条（斜杠菜单，`src/editor/overlays.rs`）
+## 滚动条（`src/design/scroll.rs`：应用里每一处滚动条同一个样子）
 
 | 属性 | shadcn | 我们 | 处理 |
 |---|---|---|---|
-| 占位 | ScrollArea 的滚动条浮在内容上，不占宽度；Command 列表铺满 | 列表宽 = 菜单宽 247 | 改（原来给滚动条常驻留 15） |
-| 出现 | 内容超高才有 | 同 | 一致 |
-| 样式 | scrollbar w-2.5 p-px，thumb bg-border rounded-full | 宽 8，距右、上、下 1，`border`，胶囊 | 改（原来距右 3、上下 2，`scrollbar_thumb`） |
-| 子面板 | — | 贴菜单右边（`pos.x + SLASH_W`） | 改 |
+| 占位 | ScrollArea 的滚动条浮在内容上，不占宽度，会压住行的右端 | 框内容超高时，右边让出一条通道（`ScrollBar::room`：滑块 1 + 7，再离内容 4），显示、藏起都留着，内容不左右跳；定宽的菜单整体加宽这一条，行的宽度不变；本来就离右边够远的（侧栏 14、设置页 32）不加 | 有意不同：用户 2026-11-25「滚动条会和菜单里面的元素重叠……hover 区域被挡住了一部分，这个不对」 |
+| 出现 | 内容超高才有；`type="hover"`：指针在框上、滚动中显示，离开 600ms（`scrollHideDelay`）后藏 | 同，拖动中也显示 | 一致 |
+| 显隐 | 直接切换 | 150ms 淡入淡出 | 有意不同（总控 2026-11-25 要的淡入淡出） |
+| 宽度 | 条 w-2.5（10），p-px，透明 border-l：滑块 7 | 滑块 7，条 10 接指针 | 一致；shadcn 没有悬停加粗，也不加 |
+| 留白 | p-px：四周 1，上下贴到框的两端，圆角容器靠裁切 | 侧边 1；上下各让出整个圆角再加 1（`ends_for(r) = r + 1`，方框 1），按所在面的实际圆角算（菜单 10、弹窗 16；顶端和底端可以不同，`ScrollBar::corners`），滑块到头也只走在直边上；贴着窗口角的框（文档页、设置页、主页列表、版本历史、记录面板）底端按窗口圆角让（`WINDOW_R`：macOS 18，Windows 8） | 有意不同：用户 2026-11-25「滚动条只能从直线的部分开始」。之前的 `ends_for` 只让圆头不出界（圆角 12 时 4.5），仍然伸进弧线 |
+| 颜色 | thumb `bg-border`，rounded-full | 同（`thumb_color`） | 一致；页面、宽表格原来的 22% 黑和悬停加深去掉 |
+| 悬停 / 拖动 | 没有变化（thumb 一直是 `bg-border`） | 悬停变深一档，按住拖动最深（浅色 `border` → `ring`，深色前景色 10% → 22% → 35%），150ms 过渡；拖动中指针移出滑块也保持最深，松手才回 | 有意不同：照浏览器滚动条（用户 2026-11-25：「拖住滚动的时候，它颜色会变深一点」） |
+| 限高 | — | 按钮菜单上下都放不下时 `room` 限高、`Popover::fit` 滚动 | 新增 |
+| 子面板 | — | 贴菜单右边（`pos.x + SLASH_W`，滚动时加上通道） | 改 |
+| 覆盖范围 | — | 所有会滚动的框都用这一个滚动条（2026-11-27 盘点）：`ScrollBar` / `bar` / `bar_corners` 给跟着 `ScrollHandle` 的框（菜单、弹出层、侧栏、设置、搜索、版本历史、回收站、快捷键抽屉、首次启动页、「移动到」、导入列表、大纲、字体列表、倒计时和提醒的时间列表、画板的属性面板和帮助）；`Thumb` 给自己算位置和拖动的（数据表网格，它按自己的偏移滚，没有 `ScrollHandle`）；文档页和宽表格、代码块的横向条在 `editor/scrollbar.rs`，拖动跟手另写，颜色、淡入淡出和三档深浅取同一套（`thumb_tone`、`Fade`、`Tone`）。没有更细的变体：盘点里没有非细不可的地方 | 统一（用户 2026-11-26：「都统一成文档里面的那个样式」） |
+| 内容高度 | — | 滚动条的 canvas 放在框中间、零大小：GPUI 把子元素的范围当内容高度，放在框顶会多算一个上内边距，放得下的菜单也能滚 4pt（侧栏右键菜单里铺满的量宽 canvas 同理多 8pt，已改成中间一条线） | 修 |
+
+参考实现怎么做（2026-11-25 查证，按用户的规则取舍）：
+
+- **shadcn / Radix ScrollArea**：滚动条 `position: absolute`，`top: 0; right: 0; bottom: <corner>`，浮在 viewport 上，不占宽度，两端也不让圆角（[Radix scroll-area.tsx](https://github.com/radix-ui/primitives/blob/main/packages/react/scroll-area/src/scroll-area.tsx)）。`type` 有 `hover`（默认）、`scroll`、`auto`、`always`，`scrollHideDelay` 默认 600。shadcn 的条是 `w-2.5 p-px border-l border-l-transparent`，滑块 `rounded-full bg-border`（[scroll-area.tsx](https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/scroll-area.tsx)）。shadcn 的菜单反而不用 ScrollArea：DropdownMenuContent 是 `max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto … p-1`（[dropdown-menu.tsx](https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/new-york-v4/ui/dropdown-menu.tsx)），Select 用上下滚动按钮，Command 列表也是原生 `overflow-y-auto`。
+- **macOS NSScroller**：两种样式，overlay（10.7 起）浮在内容上，legacy 占宽度（[NSScroller.Style](https://developer.apple.com/documentation/appkit/nsscroller/style)），跟着系统「显示滚动条」设置走（[preferredScrollerStyle](https://developer.apple.com/documentation/appkit/nsscroller/preferredscrollerstyle)）。`contentInsets` 只让出边框和「非 overlay 的滚动条」（[contentInsets](https://developer.apple.com/documentation/appkit/nsscrollview/contentinsets)）。`scrollerInsets` 把滚动条从框边往里收（[scrollerInsets](https://developer.apple.com/documentation/appkit/nsscrollview/scrollerinsets)），这是 AppKit 让两端离开圆角的办法。没找到 AppKit 专门处理圆角容器两端的文档。
+- **浏览器**：`scrollbar-gutter: stable` 只对 classic 滚动条留槽，不管是否溢出都留；overlay 滚动条浮在内容上，这个属性无效（[MDN scrollbar-gutter](https://developer.mozilla.org/en-US/docs/Web/CSS/scrollbar-gutter)）。圆角容器里 `overflow` 不是 visible 时按弯曲的 padding 边裁切，滚动条两头被圆角切掉，规范建议给内容加 padding（[CSS Backgrounds 3 §corner-clipping](https://drafts.csswg.org/css-backgrounds-3/#corner-clipping)）。
+- **GPUI Kit（gpui-component）**：条宽 16，滑块 6、悬停或拖动 8，四周 inset 4（两端也各让 4），最短 48；`ScrollbarMode` 有 `Scrolling`（默认）、`Hover`、`Always`；浮在 viewport 上不占位。菜单 `p_1` 加 `vertical_scrollbar`，可滚时不给右边加内边距，所以默认也压住悬停底色（[scrollbar.rs](https://github.com/longbridge/gpui-component/blob/9d70dc57d7152442855e0d4064e518d9dc238554/crates/base/src/scrollbar.rs)，[popup_menu.rs](https://github.com/longbridge/gpui-component/blob/9d70dc57d7152442855e0d4064e518d9dc238554/crates/component/src/menu/popup_menu.rs)）。
+
+结论：四家都没有让滚动条避开行的悬停底色，shadcn 和 GPUI Kit 都直接叠在行上。用户的规则（不盖可交互内容、只走直边）和这些参考有冲突，我们照用户的规则：占位学 legacy 滚动条和 `scrollbar-gutter`，只在溢出时留，留了就不随显隐变；两端学 `scrollerInsets` / GPUI Kit 的 inset，让出整个圆角。样子（7 宽、`bg-border`、hover 类型、600ms）仍照 shadcn。
+
+## 面包屑（文档页顶栏 `src/app.rs`，文件夹页 `src/folders.rs`）
+
+| 属性 | shadcn | 我们 | 处理 |
+|---|---|---|---|
+| 链接 | BreadcrumbLink：`muted-foreground`，hover `foreground` | 同（原来悬停变蓝 `primary_500`） | 改 |
+| 当前页 | BreadcrumbPage：`foreground`、常规字重 | `muted-foreground`、常规字重，和前面几段一样，不响应点击 | 有意不同：用户 2026-11-25 要求整条路径同色同字重（「这里不用加黑吧，感觉有点不太统一」）；原来是加粗黑色 |
+| 分隔符 | `>` 图标，随列表 `muted-foreground` | 同（原来是图标色，比文字深） | 改 |
+
+## 菜单里的开关行（`MenuItem::switch`）
+
+| 属性 | shadcn / Radix | 我们 | 处理 |
+|---|---|---|---|
+| 切换后 | DropdownMenuCheckboxItem 默认选中后关菜单，`onSelect` 里 `preventDefault` 才留住 | 固定留住：点行或开关只切换，Esc、点外面才关 | 按留住做（用户 2026-11-25：「开关开启或者关闭完之后，能不能不要自动关闭菜单」，和页宽选择一致） |
+| 开关动画 | Switch 的 thumb `transition-transform`，track `transition-all` | `Switch::keyed`：150ms ease-out 滑动，轨道和滑块颜色同步过渡 | 一致 |
+| Esc | 关菜单 | 关菜单；编辑器把 Esc 绑成自己的动作，在窗口根部用 `capture_action` 先截住 | 一致（原来编辑器有焦点时 Esc 被拿去选块，菜单关不掉） |

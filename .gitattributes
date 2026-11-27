@@ -11,3 +11,5 @@ packaging/fonts.json text eol=lf
 packaging/update-key.pub text eol=lf
 tools/fonts/data/*.txt text eol=lf
 README.md text eol=lf
+# Compared byte for byte by the 思源笔记 import's tests: never converted on checkout.
+crates/core/tests/fixtures/siyuan/** -text

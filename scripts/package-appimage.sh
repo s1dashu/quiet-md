@@ -27,13 +27,18 @@ convert assets/branding/app-icon.png -resize 512x512 "$stage/com.s1dashu.quietmd
 export APPIMAGE_EXTRACT_AND_RUN=1
 export OUTPUT="$out/quiet-md-$version-x86_64.AppImage"
 export VERSION="$version"
-"$tool" --appdir "$appdir" --executable "${CARGO_TARGET_DIR:-target}/dist/quiet_md" \
+"$tool" --appdir "$appdir" --executable "${CARGO_TARGET_DIR:-target}/dist/quiet_md" --executable "${CARGO_TARGET_DIR:-target}/dist/quiet" \
   --desktop-file packaging/linux/com.s1dashu.quietmd.desktop \
   --icon-file "$stage/com.s1dashu.quietmd.png" --custom-apprun packaging/linux/AppRun --output appimage
 chmod +x "$OUTPUT"
 # Inspect the packaged payload, not only the original executable.
 (cd "$stage" && "$OUTPUT" --appimage-extract >/dev/null)
 test -x "$stage/squashfs-root/AppRun"
+# The CLI inside, reached through a link named quiet and through --cli.
+test -x "$stage/squashfs-root/usr/bin/quiet"
+ln -s "$OUTPUT" "$stage/quiet"
+QUIET_NO_TELEMETRY=1 "$stage/quiet" version | grep -q '^quiet '
+QUIET_NO_TELEMETRY=1 "$OUTPUT" --cli version | grep -q '^quiet '
 payload="$stage/squashfs-root/usr/bin/quiet_md"
 LD_LIBRARY_PATH="$stage/squashfs-root/usr/lib" ldd "$payload" > "$OUTPUT.libraries.txt"
 if grep -q 'not found' "$OUTPUT.libraries.txt"; then cat "$OUTPUT.libraries.txt" >&2; exit 1; fi

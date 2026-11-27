@@ -214,8 +214,10 @@ impl Editor {
             self.cat_entries = Rc::new(entries(&self.core.doc));
         }
         let o = f32::from(self.pane_size().width);
+        // 外观 › 文档大纲 off, or 专注模式: as a document without headings, no outline and no button
+        let shown = !crate::settings::prefs().hide_outline && !self.focus_mode && !self.cat_entries.is_empty();
         let pinned = if crate::theme::compact(o) { self.cat_float } else { self.cat_pinned };
-        self.layout = page_layout(o, self.column_max(), !self.cat_entries.is_empty(), pinned);
+        self.layout = page_layout(o, self.column_max(), shown, pinned);
     }
 
     /// Scroll-spy: the last heading at most 90px below the viewport top. A
@@ -370,7 +372,7 @@ impl Editor {
                 .when(floating, |d| d.bg(theme::ta(255, 255, 255, 0.96)).rounded(px(8.)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when(!compact, |d| d.child(pin))
-                .when(compact, |d| d.pt(px(8.)).bg(Theme::bg_body()).shadow(crate::theme::shadow_menu()))
+                .when(compact, |d| d.pt(px(8.)).bg(Theme::bg_body()).shadow(crate::design::shadow::popover()))
                 .children(body)
                 .into_any_element(),
         )
@@ -390,7 +392,7 @@ impl Editor {
                 .child(div().id("outline-scrim").absolute().inset_0().bg(crate::design::color::overlay()).occlude()
                     .on_mouse_down(MouseButton::Left, cx.listener(|ed, _, _, cx| { cx.stop_propagation(); ed.cat_float = false; cx.notify(); })))
                 .child(div().id("outline-panel").absolute().top_0().right_0().h_full().w(px(w)).pt(px(top + 12.)).pb(px(bottom)).pl(px(8.))
-                    .bg(Theme::bg_body()).shadow(crate::theme::shadow_panel()).occlude().cursor(CursorStyle::Arrow)
+                    .bg(Theme::bg_body()).shadow(crate::design::shadow::dialog()).occlude().cursor(CursorStyle::Arrow)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     // Named, as a panel is: 目录.
                     .child(div().h(px(44.)).pl(px(24.)).flex().items_center().text_size(px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text())
@@ -426,7 +428,6 @@ impl Editor {
             }
         }
         let collapsed = self.cat_collapsed.clone();
-        let text_w = width - 11.;
         let mut style = window.text_style();
         style.font_family = theme::ui_family().into();
         let entity = cx.entity();
@@ -434,6 +435,8 @@ impl Editor {
         let rows = Rc::new(rows);
         let h = (n as f32 * ROW_H + 22.).min(max_h.max(ROW_H));
         let scrolls = n as f32 * ROW_H + 22. > h;
+        // a list that scrolls runs out to the side, its rows `room_for` clear of the shared scrollbar's lane
+        let text_w = if scrolls { width - crate::design::scroll::room_for(0.) } else { width - 11. };
         let list = uniform_list("catalogue-list", n, move |range, window, _| {
             range
                 .map(|ix| {
@@ -515,13 +518,14 @@ impl Editor {
                 .collect()
         })
         .track_scroll(&self.cat_scroll)
-        .w(px(width - 11.))
+        .w(px(if scrolls { width } else { width - 11. }))
         .h(px(h))
         // A list that scrolls ends 44 below its last row: GPUI 0.2's
         // uniform_list counted the bottom padding twice.
         .pb(px(if scrolls { 44. } else { 22. }));
         // A list that scrolls keeps the wheel: the page under it stays put.
-        div().w(px(width)).when(scrolls, |d| d.on_scroll(|_, _, cx| cx.stop_propagation())).child(list).into_any_element()
+        let handle = self.cat_scroll.0.borrow().base_handle.clone();
+        div().relative().w(px(width)).when(scrolls, |d| d.on_scroll(|_, _, cx| cx.stop_propagation())).child(list).child(self.cat_bar.render(&handle)).into_any_element()
     }
 }
 

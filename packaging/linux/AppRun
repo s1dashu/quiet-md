@@ -3,4 +3,8 @@ set -eu
 appdir=$(dirname "$(readlink -f "$0")")
 # Use Compose data matching the bundled xkbcommon, not newer host keysyms.
 export XLOCALEDIR="$appdir/usr/share/X11/locale"
+# The quiet command line tool: called through a link named quiet (the AppImage
+# runtime passes its name as ARGV0), or as `quiet-md.AppImage --cli ARGS`.
+case $(basename "${ARGV0:-$0}") in quiet) exec "$appdir/usr/bin/quiet" "$@" ;; esac
+if [ "${1:-}" = --cli ]; then shift; exec "$appdir/usr/bin/quiet" "$@"; fi
 exec "$appdir/usr/bin/quiet_md" "$@"

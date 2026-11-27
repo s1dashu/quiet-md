@@ -24,23 +24,31 @@ $install = Start-Process -FilePath $Installer -Wait -PassThru -ArgumentList @(
 if ($install.ExitCode -ne 0) { throw "installer exited with $($install.ExitCode); see $Output\install.log" }
 if (!(Test-Path -LiteralPath $exe)) { throw "the installer left no $exe" }
 Write-Output "installed into $place"
-
+# The quiet command line tool beside the app, its folder on the user's PATH (task addtopath, on by default).
+$onPath = { ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $place }
 $status = 1
 try {
+    $quiet = Join-Path $place 'quiet.exe'
+    if (!(Test-Path -LiteralPath $quiet)) { throw "the installer left no $quiet" }
+    $env:QUIET_NO_TELEMETRY = '1'
+    $version = & $quiet version
+    if ($LASTEXITCODE -ne 0 -or "$version" -notmatch '^quiet \d') { throw "quiet.exe version printed: $version" }
+    if (!(& $onPath)) { throw "the installer did not add $place to the user's PATH" }
     $run = Start-Process -FilePath $exe -Wait -PassThru -NoNewWindow `
         -ArgumentList @('--self-test', "`"$Output\run`"", "`"$Output\report.json`"") `
         -RedirectStandardOutput "$Output\self-test.txt" -RedirectStandardError "$Output\self-test-err.txt"
     $status = $run.ExitCode
     Get-Content -LiteralPath "$Output\self-test.txt", "$Output\self-test-err.txt" -Encoding UTF8 -ErrorAction SilentlyContinue
 } finally {
-    # The uninstaller copies itself away and returns at once: wait for the program to go.
+    # The uninstaller copies itself away and returns at once: wait for the program (and its PATH entry) to go.
     $uninstaller = Join-Path $place 'unins000.exe'
     if (Test-Path -LiteralPath $uninstaller) {
         Start-Process -FilePath $uninstaller -Wait -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') | Out-Null
         $deadline = (Get-Date).AddSeconds(60)
-        while ((Test-Path -LiteralPath $exe) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+        while (((Test-Path -LiteralPath $exe) -or (& $onPath)) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
     }
 }
 if (Test-Path -LiteralPath $exe) { throw "uninstalling left $exe behind" }
+if (& $onPath) { throw "uninstalling left $place on the user's PATH" }
 Write-Output "uninstalled; self-test output: $Output"
 exit $status

@@ -2,7 +2,7 @@
 # Release self-test of a macOS package: unpacks the zip scripts/release.sh
 # made into a fresh folder (spaces and CJK in its path, as users' have) and
 # runs the app's built-in checks (src/selftest.rs) on a temporary library.
-# Never touches ~/Documents/Quiet.md. Usage:
+# Never touches the default library (~/Documents/Quiet Notes or Quiet.md). Usage:
 #   scripts/self-test-macos.sh <quiet-md-…-macos-<arch>[-unsigned].zip> [output dir]
 # The output dir (default: a new temporary one) gets report.json, logs and,
 # for a failed scenario, its screenshot. Exit code 0: every scenario passed.

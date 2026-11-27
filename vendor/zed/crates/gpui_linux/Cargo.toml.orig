@@ -18,6 +18,7 @@ test-support = ["gpui/test-support"]
 wayland = [
     "dep:accesskit_unix",
     "gpui_wgpu",
+    "dep:yeslogic-fontconfig-sys",
     "ashpd/wayland",
 
     "calloop-wayland-source",
@@ -36,6 +37,7 @@ wayland = [
 x11 = [
     "dep:accesskit_unix",
     "gpui_wgpu",
+    "dep:yeslogic-fontconfig-sys",
     "ashpd",
 
     "as-raw-xcb-connection",
@@ -83,6 +85,9 @@ raw-window-handle.workspace = true
 
 # Used in both windowing options
 ashpd = { workspace = true, optional = true }
+# quiet.md: the system's sans for `.SystemUIFont` (text_system.rs). Already
+# linked through font-kit's fontconfig source.
+yeslogic-fontconfig-sys = { version = "6.0", optional = true }
 filedescriptor = { version = "0.8.2", optional = true }
 open = { version = "5.2.0", optional = true }
 xkbcommon = { workspace = true, optional = true }

@@ -127,7 +127,8 @@ impl LinuxCommon {
         let (power_sender, power_receiver) = calloop::channel::channel();
 
         #[cfg(any(feature = "wayland", feature = "x11"))]
-        let text_system = Arc::new(crate::linux::CosmicTextSystem::new("IBM Plex Sans"));
+        // quiet.md: `.SystemUIFont` is the system's sans, not Zed's bundled IBM Plex Sans.
+        let text_system = Arc::new(crate::linux::CosmicTextSystem::new(&crate::linux::system_ui_font_family()));
         #[cfg(not(any(feature = "wayland", feature = "x11")))]
         let text_system = Arc::new(gpui::NoopTextSystem::new());
 
@@ -1751,6 +1752,23 @@ async fn await_idle_sleep_prevention(
             "Idle sleep prevention acquisition timed out after 10 seconds"
         )),
     }
+}
+
+/// quiet.md: a `text/html` clipboard target as text. UTF-8 normally;
+/// Firefox has offered UTF-16 with a byte-order mark.
+#[cfg(any(feature = "wayland", feature = "x11"))]
+pub(crate) fn clipboard_html(bytes: &[u8]) -> Option<String> {
+    let utf16 = |le: bool| {
+        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        String::from_utf16_lossy(&units)
+    };
+    let s = match bytes {
+        [0xff, 0xfe, ..] => utf16(true),
+        [0xfe, 0xff, ..] => utf16(false),
+        _ => String::from_utf8_lossy(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)).into_owned(),
+    };
+    let s = s.trim_end_matches('\0');
+    (!s.trim().is_empty()).then(|| s.to_string())
 }
 
 #[cfg(test)]

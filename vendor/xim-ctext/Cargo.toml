@@ -1,0 +1,22 @@
+# xim-ctext 0.3.0 from https://github.com/Riey/xim-rs (MIT, LICENSE), with the
+# decoder rewritten (README.md). The root Cargo.toml patches crates.io's copy
+# with this one; zed-xim, GPUI's XIM client on X11, is its only user.
+[package]
+name = "xim-ctext"
+description = "compound text en/decoder"
+version = "0.3.0"
+authors = ["Riey <creeper844@gmail.com>"]
+repository = "https://github.com/Riey/xim-rs"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+encoding_rs = "0.8.28"
+
+[features]
+default = ["std"]
+std = []
+
+[lints]
+workspace = true

@@ -21,6 +21,7 @@ pub mod control;
 pub mod dialog;
 pub mod field;
 pub mod menu;
+pub mod scroll;
 pub mod toolbar;
 
 // The library's surface, whether or not every piece has a caller yet.
@@ -33,13 +34,14 @@ pub use button::{Button, ButtonSize, ButtonVariant};
 #[allow(unused_imports)]
 pub use card::{Card, Item, Separator, Toast, ToastTone};
 #[allow(unused_imports)]
-pub use control::{Checkbox, Radio, Segment, Segmented, Switch};
+pub use control::{Checkbox, Radio, Segment, Segmented, Slider, Swatch, Switch};
 #[allow(unused_imports)]
 pub use dialog::{Dialog, DialogFocus, scrim};
 #[allow(unused_imports)]
 pub use field::{Field, FieldSize, Label, Textarea};
 #[allow(unused_imports)]
-pub use menu::{MenuItem, MenuLabel, MenuSeparator, Popover};
+pub use scroll::ScrollBar;
+pub use menu::{Align, MenuItem, MenuLabel, MenuSeparator, Popover, hang, room, sub_hover, sub_move, submenu_area};
 pub use toolbar::{ButtonGroup, ButtonGroupSeparator, Toggle, ToggleSize, Toolbar};
 
 use crate::theme::{dark, rgbaf};
@@ -155,7 +157,8 @@ pub mod chip {
     pub const LIME: Chip = Chip(0xd8f999, 0x3c6300, 0x192e03, 0.6, 0x7ccf00);
     pub const YELLOW: Chip = Chip(0xfff085, 0x894b00, 0x432004, 0.6, 0xf0b100);
     pub const ORANGE: Chip = Chip(0xffd6a7, 0x9f2d00, 0x441306, 0.6, 0xff6900);
-    pub const ROSE: Chip = Chip(0xffccd3, 0xa50036, 0x4d0218, 0.6, 0xff2056);
+    // rose-400 in the dark, not the 500 (#ff2056 read 4.4:1 on its fill), the same hue
+    pub const ROSE: Chip = Chip(0xffccd3, 0xa50036, 0x4d0218, 0.6, 0xff637e);
     pub const PINK: Chip = Chip(0xfccee8, 0xa3004c, 0x510424, 0.6, 0xfb64b6);
     pub const PURPLE: Chip = Chip(0xe9d4ff, 0x6e11b0, 0x3c0366, 0.6, 0xc27aff);
     pub const CYAN: Chip = Chip(0xa2f4fd, 0x005f78, 0x053345, 0.6, 0x00d3f2);
@@ -168,7 +171,20 @@ pub mod chip {
         if dark() { (alpha(hex(c.2), c.3), hex(c.4)) } else { (hex(c.0), hex(c.1)) }
     }
     /// The grey option: `secondary` under `muted-foreground`.
-    pub fn neutral() -> (Hsla, Hsla) { (super::color::secondary(), super::color::muted_foreground()) }
+    /// In the light its text a step darker than `muted-foreground` (#737373 read 4.35:1 on `secondary`).
+    pub fn neutral() -> (Hsla, Hsla) { (super::color::secondary(), if dark() { super::color::muted_foreground() } else { hex(0x6b6b6b) }) }
+}
+
+/// A menu's width: one of three, as shadcn sets each DropdownMenuContent by hand (`w-56`, `w-64`,
+/// `w-72`), never its content's, so a menu is as wide in every language. A label too long is cut
+/// with an ellipsis; a description wraps to two lines.
+pub mod menu_w {
+    /// Row and context menus, submenus, short pickers.
+    pub const SM: f32 = 224.;
+    /// Menus whose rows carry a description or a shortcut, and the editor's block menus.
+    pub const MD: f32 = 256.;
+    /// The roomiest menus.
+    pub const LG: f32 = 288.;
 }
 
 /// Corner radii past the `R` steps.
@@ -221,6 +237,8 @@ pub struct Geo {
     /// Between the lines of a filter / sort panel.
     pub panel_gap: f32,
     pub label_gap: f32,
+    /// Between a settings page's sections (a caption and its card): shadcn's settings forms, `gap-8`.
+    pub section_gap: f32,
     /// Dialogs: corners, padding, the gap between header, body and footer.
     pub dialog_r: f32,
     pub dialog_pad: f32,
@@ -281,7 +299,7 @@ pub const G: Geo = Geo {
     field_h: 36., field_r: R - 2., field_sm_h: 32., field_sm_r: R - 2., field_px: 10.,
     area_r: R - 2., area_pad: 10.,
     menu_r: R - 2., menu_pad: 4., menu_row_h: 32., menu_row_r: R - 4., menu_row_px: 8., menu_gap: 8., rule_inset: 12., sidebar_gap: 1.,
-    popover_pad: 16., popover_gap: 16., panel_gap: 8., label_gap: 8.,
+    popover_pad: 16., popover_gap: 16., panel_gap: 8., label_gap: 8., section_gap: 32.,
     dialog_r: R + 4., dialog_pad: 24., dialog_gap: 24.,
     badge_h: 20., badge_r: radius::PILL, badge_px: 8.,
     checkbox: 16., checkbox_r: 4., switch_w: 32., switch_h: 18.4, thumb: 16.,
@@ -302,11 +320,19 @@ pub const T: Geo = Geo {
     ..G
 };
 
+/// How far a page's own surface sits in from the pane under the header, on the sides and at the
+/// foot: the header's margin round its buttons, so the surface lines up with them. At the top it
+/// starts at the header's foot (that margin is already above it). The 数据表's sheet and the board's
+/// floating controls (menu, tool bar, styles panel, zoom, help) both keep to it.
+pub const PAGE_INSET: f32 = (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2.;
+
 /// The geometry (a function, so a later density or step-up can choose): `T` on touch.
 pub fn geo() -> &'static Geo { if touch() { &T } else { &G } }
 
 /// Shadows (Tailwind's, and affectUI's for floating things), each heavier in the dark look so it
-/// still reads.
+/// still reads. One ladder of elevation (docs/design/DESIGN_SYSTEM.md, 阴影层级): 0 flat (`plane`'s
+/// edge only), 1 resting (`xs`, `sm`, `rest`, `frame`, `sheet`), 2 lifted for a moment (`toast`),
+/// 3 floating (`popover`), 4 modal (`dialog`); `sticky` apart.
 pub mod shadow {
     use super::*;
 
@@ -319,7 +345,21 @@ pub mod shadow {
     pub fn ring(c: Hsla, w: f32) -> BoxShadow { s(c, 0., 0., w) }
     /// shadow-xs: fields and outline buttons. None in the dark look, where those are translucent
     /// (`input/30`) and GPUI would paint the shadow through them.
-    pub fn xs() -> Vec<BoxShadow> { if dark() { vec![] } else { vec![drop(0.05, 1., 2., 0.)] } }
+    pub fn xs() -> Vec<BoxShadow> { if dark() { vec![] } else { rest() } }
+    /// Level 1 on an opaque face, so kept in the dark look: shadow-xs (file cards, the inline
+    /// button at rest, the app's icon).
+    pub fn rest() -> Vec<BoxShadow> { vec![drop(0.05, 1., 2., 0.)] }
+    /// Level 1, a loose sheet on a page (a folder page's document cards, a table's full pane): the
+    /// faintest lift, cast from a box inset as the folder card's shadow is; the sheet draws its own
+    /// squircle hairline, so no ring.
+    pub fn sheet() -> Vec<BoxShadow> { vec![drop(0.035, 8., 22., -2.)] }
+    /// Level 0: the note plane's left edge over the sidebar, a faint shade cast leftward so the two
+    /// read as layers (the plane meets the window's other edges, where nothing shows).
+    pub fn plane() -> Vec<BoxShadow> {
+        let mut v = vec![drop(0.012, 0., 1., 0.), drop(0.014, 0., 6., 0.)];
+        v[1].offset.x = px(-1.);
+        v
+    }
     /// shadow-sm: the picked segment of a segmented control.
     pub fn sm() -> Vec<BoxShadow> { if dark() { vec![] } else { vec![drop(0.1, 1., 3., 0.), drop(0.1, 1., 2., -1.)] } }
     /// A card's edge (a table in a page): a 10% hairline 0.5pt wide (Vega's card ring,
@@ -329,13 +369,25 @@ pub mod shadow {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.12), 0.5), s(rgbaf(0, 0, 0, 0.4), 1., 2., 0.)]; }
         vec![ring(rgbaf(0, 0, 0, 0.10), 0.5), s(rgbaf(0, 0, 0, 0.1), 1., 1., -1.), s(rgbaf(0, 0, 0, 0.05), 1., 2., 0.)]
     }
-    /// affectUI's `--aui-shadow-popover` (menus, popovers, dialogs): a 0.5pt ring and a soft drop
+    /// Level 2, lifted for a moment (a toast, a card or row being dragged, the inline button under
+    /// the pointer): the popover's ring over a drop about half as deep and wide.
+    pub fn toast() -> Vec<BoxShadow> {
+        if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.42), 4., 12., -2.), s(rgbaf(0, 0, 0, 0.25), 1., 3., 0.)]; }
+        vec![ring(rgbaf(0, 0, 0, 0.08), 0.5), s(rgbaf(0, 0, 0, 0.10), 4., 12., -2.), s(rgbaf(0, 0, 0, 0.06), 1., 3., 0.)]
+    }
+    /// Level 3, affectUI's `--aui-shadow-popover` (menus, popovers, floating panels): a 0.5pt ring and a soft drop
     /// read as one crisp edge, where Nova's `ring-foreground/10` border over shadow-md read as two.
     pub fn popover() -> Vec<BoxShadow> {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.6), 12., 32., -8.)]; }
         vec![ring(rgbaf(0, 0, 0, 0.08), 0.5), s(rgbaf(0, 0, 0, 0.14), 8., 24., -6.), s(rgbaf(0, 0, 0, 0.06), 2., 6., -2.)]
     }
-    /// A dialog: the popover's edge over a deeper drop (it sits over a dimmed window).
+    /// A frozen column's edge over the columns scrolled under it (飞书's): shadow-sm turned to the
+    /// right (`0 1px 3px / 0 1px 2px -1px`, black 10%), on an element at that edge.
+    pub fn sticky() -> Vec<BoxShadow> {
+        let side = |a: f32, x: f32, blur: f32, spread: f32| { let mut d = drop(a, 0., blur, spread); d.offset.x = px(x); d };
+        vec![side(0.1, 1., 3., 0.), side(0.1, 1., 2., -1.)]
+    }
+    /// Level 4, a dialog: the popover's edge over a deeper drop (it sits over a dimmed window).
     pub fn dialog() -> Vec<BoxShadow> {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.6), 24., 48., -12.)]; }
         vec![ring(rgbaf(0, 0, 0, 0.08), 0.5), s(rgbaf(0, 0, 0, 0.18), 24., 48., -12.), s(rgbaf(0, 0, 0, 0.06), 4., 12., -4.)]

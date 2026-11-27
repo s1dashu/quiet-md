@@ -77,7 +77,7 @@ x11rb::atom_manager! {
         TEXT,
         TEXT_MIME_UNKNOWN: b"text/plain",
 
-        // HTML: b"text/html",
+        HTML: b"text/html",
         // URI_LIST: b"text/uri-list",
 
         PNG__MIME: ImageFormat::mime_type(ImageFormat::Png ).as_bytes(),
@@ -1069,7 +1069,11 @@ impl Clipboard {
         } else {
             String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)?
         };
-        Ok(ClipboardItem::new_string(text))
+        // quiet.md: the formatted version beside the text, when the owner has one.
+        let html = self.inner.read(&[self.inner.atoms.HTML], selection).ok().and_then(|d| crate::linux::platform::clipboard_html(&d.bytes));
+        let mut string = gpui::ClipboardString::new(text);
+        string.html = html;
+        Ok(ClipboardItem { entries: vec![gpui::ClipboardEntry::String(string)] })
     }
 
     pub fn is_owner(&self, selection: ClipboardKind) -> bool {

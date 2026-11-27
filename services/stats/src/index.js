@@ -23,6 +23,12 @@
 //     cli.errors             commands that failed  {}
 //     cli.commands           runs per command name  {command}
 //     cli.versions           installs per quiet version  {version}
+//   app         what the Quiet.md app reports to POST telemetry.quiet.md/v1/app (src/usage.rs),
+//               kept per day and random install id in app_reports, summed here
+//     app.users              installs opened that day (daily active)  {os}
+//     app.new                installs whose first reported day it is  {}
+//     app.opens              times opened (launched or brought to the front, at most once per half hour)  {os}
+//     app.versions           installs per app version  {version}
 //
 // channel: "update" is the in-app updater (curl fetching a versioned v<x.y.z>/ package,
 // the URL its manifest names); "cdn" is everything else on download.quiet.md, i.e. the
@@ -38,21 +44,29 @@ export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(collect(env));
   },
-  // The one thing it serves: `quiet`'s daily usage counts (crates/cli/src/usage.rs).
+  // What it serves: the daily usage counts of `quiet` (crates/cli/src/usage.rs)
+  // and of the app (src/usage.rs).
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname !== '/v1/cli') return new Response('Not found', { status: 404 });
+    const kind = { '/v1/cli': 'cli', '/v1/app': 'app' }[url.pathname];
+    if (!kind) return new Response('Not found', { status: 404 });
     if (req.method !== 'POST') return new Response('POST only', { status: 405 });
     const text = await req.text();
     if (text.length > 32768) return new Response('Too large', { status: 413 });
     let body;
     try { body = JSON.parse(text); } catch { return new Response('Not JSON', { status: 400 }); }
-    const rows = cliRows(body, new Date());
+    const rows = kind === 'cli' ? cliRows(body, new Date()) : appRows(body, new Date());
     if (!rows) return new Response('Bad report', { status: 400 });
     const at = new Date().toISOString();
-    const upsert = env.DB.prepare(`INSERT INTO cli_reports (day, install, version, os, arch, runs, errors, commands, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT (day, install) DO UPDATE SET version = excluded.version, os = excluded.os, arch = excluded.arch, runs = excluded.runs, errors = excluded.errors, commands = excluded.commands, received_at = excluded.received_at`);
-    if (rows.length) await env.DB.batch(rows.map((r) => upsert.bind(r.day, body.id, body.version, body.os, body.arch, r.runs, r.errors, r.commands, at)));
+    const upsert = kind === 'cli'
+      ? env.DB.prepare(`INSERT INTO cli_reports (day, install, version, os, arch, runs, errors, commands, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (day, install) DO UPDATE SET version = excluded.version, os = excluded.os, arch = excluded.arch, runs = excluded.runs, errors = excluded.errors, commands = excluded.commands, received_at = excluded.received_at`)
+      : env.DB.prepare(`INSERT INTO app_reports (day, install, version, os, arch, opens, received_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (day, install) DO UPDATE SET version = excluded.version, os = excluded.os, arch = excluded.arch, opens = excluded.opens, received_at = excluded.received_at`);
+    const bind = kind === 'cli'
+      ? (r) => upsert.bind(r.day, body.id, body.version, body.os, body.arch, r.runs, r.errors, r.commands, at)
+      : (r) => upsert.bind(r.day, body.id, body.version, body.os, body.arch, r.opens, at);
+    if (rows.length) await env.DB.batch(rows.map(bind));
     return new Response(null, { status: 204 });
   },
 };
@@ -79,6 +93,29 @@ export function cliRows(b, now) {
   return out;
 }
 
+/// The shared head of a report (id, version, os, arch, days in range); the days' own
+/// fields are `day`'s to check. Null when anything in it is off.
+function reportDays(b, now, day) {
+  if (!b || b.v !== 1 || typeof b.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(b.id)) return null;
+  if (typeof b.version !== 'string' || !/^\d+\.\d+\.\d+[\w.+-]{0,24}$/.test(b.version)) return null;
+  if (!CLI_OS.has(b.os) || typeof b.arch !== 'string' || !/^[a-z0-9_]{1,16}$/.test(b.arch)) return null;
+  if (!Array.isArray(b.days) || b.days.length > 40) return null;
+  const from = dayOf(new Date(now.getTime() - 40 * 86400e3)), to = dayOf(new Date(now.getTime() + 86400e3));
+  const out = [];
+  for (const d of b.days) {
+    if (!d || typeof d.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d.day) || d.day < from || d.day > to) return null;
+    const r = day(d);
+    if (!r) return null;
+    out.push({ day: d.day, ...r });
+  }
+  return out;
+}
+
+/// An app report's days, checked; null when anything in it is off.
+export function appRows(b, now) {
+  return reportDays(b, now, (d) => count(d.opens, 100000) && d.opens > 0 ? { opens: d.opens } : null);
+}
+
 export async function collect(env, now = new Date()) {
   const yesterday = dayOf(new Date(now.getTime() - 86400e3));
   // Cloudflare: every day since the last good run, oldest first, at most MAX_DAYS per run
@@ -97,6 +134,7 @@ export async function collect(env, now = new Date()) {
   // quiet's reports arrive when its user next runs it, often days later: the last week again.
   for (let day = dayOf(new Date(now.getTime() - 7 * 86400e3)); day <= yesterday; day = next(day)) {
     await run(env, 'cli', day, () => cli(env, day));
+    await run(env, 'app', day, () => app(env, day));
   }
 }
 
@@ -115,6 +153,21 @@ async function cli(env, day) {
   for (const r of versions) rows.push(['cli.versions', key({ version: r.version }), r.n]);
   for (const r of commands) rows.push(['cli.commands', key({ command: r.command }), r.n]);
   return replace(env, day, 'cli', rows);
+}
+
+/// The day's app_reports as app.* metrics.
+async function app(env, day) {
+  const q = (sql) => env.DB.prepare(sql).bind(day);
+  const [byOs, fresh, versions] = (await env.DB.batch([
+    q('SELECT os, COUNT(*) AS users, SUM(opens) AS opens FROM app_reports WHERE day = ? GROUP BY os'),
+    q('SELECT COUNT(*) AS n FROM (SELECT install, MIN(day) AS first FROM app_reports GROUP BY install) WHERE first = ?'),
+    q('SELECT version, COUNT(*) AS n FROM app_reports WHERE day = ? GROUP BY version'),
+  ])).map((r) => r.results);
+  const rows = [];
+  for (const r of byOs) rows.push(['app.users', key({ os: r.os }), r.users], ['app.opens', key({ os: r.os }), r.opens]);
+  if (byOs.length) rows.push(['app.new', '{}', fresh[0]?.n || 0]);
+  for (const r of versions) rows.push(['app.versions', key({ version: r.version }), r.n]);
+  return replace(env, day, 'app', rows);
 }
 
 async function run(env, source, day, f) {

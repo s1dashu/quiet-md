@@ -1,0 +1,23 @@
+<title>Quiet.md 里的 Markdown</title>
+<p>Quiet.md 原样读写 Markdown：<code>.md</code> 文件始终是 <code>.md</code> 文件，不管它在文档文件夹里还是电脑上别的地方，其他 Markdown 编辑器照样能用。想找个真实的文件试试，打开这个文件夹里的 <cite type="doc" href="Markdown 示例.md" file-type="docx">Markdown 示例</cite>。</p>
+<h1>文档文件夹里的 Markdown</h1><p>文档文件夹里的每个 <code>.md</code> 文件都会作为文档显示在侧栏里。要新建一个，在文件夹的“新建”菜单里选“Markdown”。在设置的“快捷新建默认类型”里，可以让 <code>⌘ N</code> 直接新建 Markdown。</p>
+<h1>电脑上的 Markdown 文件</h1><p>在“文件”菜单中选择“打开 Markdown 文件…”，或按 <code>⌘ O</code>。在访达中，也可以用“打开方式 › Quiet.md”打开。文件在单独的窗口里打开，在原位置编辑：不会复制到文档文件夹，侧栏里只放文件夹。</p>
+<ul><li><b>只提供 Markdown 能表达的内容：</b>Markdown 页面只提供 Markdown 能保存的功能。颜色、对齐、高亮块、分栏、公式、按钮、提醒、倒计时、图标和封面都不会出现在它的菜单里。</li><li><b>你的格式原样保留：</b>保存时只重写你改动过的块，其他行、空行和 front matter 都保持原样。</li><li><b>图片放在文件旁边：</b>粘贴或插入的图片会复制到以文件命名的文件夹里，比如 <code>计划.assets</code>，并用相对路径链接。</li><li><b>标题就是文件名：</b>重命名页面，就是重命名文件。</li><li><b>外部修改不被覆盖：</b>如果文件打开期间有其他应用保存了它，Quiet.md 不会覆盖。</li></ul>
+<p>在条目的“更多”菜单里，可以“导入到文档库”（复制一份到文档文件夹），在访达中显示该文件，或“从列表中移除”。从列表中移除不会删除文件。</p>
+<h1>Markdown 页面能写什么</h1><p>Markdown 本身包括标题、段落、粗体斜体、列表、引用、代码、链接和图片。Quiet.md 还读写几种常见的扩展和约定，分别是：</p>
+<table><colgroup><col width="230"/><col width="460"/></colgroup><thead><tr><th><p>内容</p></th><th><p>来源</p></th></tr></thead><tbody>
+<tr><td><p>标题、列表、引用、代码块、链接、图片、粗体和斜体</p></td><td><p>标准 Markdown（CommonMark）</p></td></tr>
+<tr><td><p>表格、任务列表、删除线</p></td><td><p>GFM，即 GitHub 带火的扩展语法</p></td></tr>
+<tr><td><p>front matter</p></td><td><p>一种约定：文件开头两行 <code>---</code> 之间的 YAML。Quiet.md 原样保留，不显示在页面上。</p></td></tr>
+<tr><td><p>公式</p></td><td><p>一种约定：写在 <code>$</code> 或 <code>$$</code> 之间的 LaTeX</p></td></tr>
+<tr><td><p>Mermaid 图表</p></td><td><p>一种约定：语言写成 <code>mermaid</code> 的代码块。Quiet.md 会把它画成图（和 GitHub、Obsidian 一样）；文件里仍是标准代码块，在不支持的编辑器里显示为代码。</p></td></tr>
+</tbody></table>
+<h1>在任何页面里打 Markdown</h1><p>不管是不是 Markdown 页面，输入下面这些标记都会即时排版。除非另有说明，都是在行首输入标记再加一个空格。</p>
+<table><colgroup><col width="310"/><col width="380"/></colgroup><tbody>
+<tr><td><p><code>#</code> 到 <code>#########</code></p></td><td><p>一级到九级标题</p></td></tr><tr><td><p><code>-</code>、<code>*</code> 或 <code>+</code></p></td><td><p>无序列表</p></td></tr><tr><td><p><code>1.</code></p></td><td><p>有序列表；<code>5.</code> 从 5 开始编号</p></td></tr><tr><td><p><code>[]</code></p></td><td><p>任务</p></td></tr><tr><td><p><code>&gt;</code></p></td><td><p>引用</p></td></tr><tr><td><p><code>```</code> 或 <code>```python</code></p></td><td><p>代码块，按空格或回车生效</p></td></tr><tr><td><p><code>---</code></p></td><td><p>分隔线，输入第三个短横线时立即生效</p></td></tr><tr><td><p><code>**粗体**</code>、<code>*斜体*</code>、<code>~~删除线~~</code>、<code>`代码`</code></p></td><td><p>文字样式，输入结尾标记时生效</p></td></tr><tr><td><p><code>$E=mc^2$</code></p></td><td><p>行内公式 <latex>E=mc^2</latex></p></td></tr>
+</tbody></table>
+<h2>全角写法</h2><p>用中文输入法时不用切换到半角：<code>＃</code>、<code>－</code>、<code>＋</code>、<code>＊</code>、<code>＞</code>、<code>》</code>、<code>｜</code> 和 <code>1．</code>、<code>1。</code> 与对应的半角符号效果相同；<code>——</code> 变成无序列表，<code>【】</code> 变成任务，<code>···</code> 或 <code>｀｀｀</code> 变成代码块；在空行输入 <code>、</code> 会打开斜杠菜单。</p>
+<p>转换后立刻按 <code>⌘ Z</code>，可以撤销转换、保留原样输入的字符。</p>
+<h1>导出为 Markdown</h1><p>任何文档都能导出成 Markdown：打开文档的“更多”菜单，或右键点击侧栏中的条目，选择下载格式。</p><grid><column width-ratio="0.5"><h3>仅文本</h3><p>导出单个 Markdown 文件，不复制图片和附件。</p></column><column width-ratio="0.5"><h3>所有内容</h3><p>导出 Markdown 文件和一个资源文件夹。图片和附件以相对路径链接。</p></column></grid>
+<p>有些富文本排版在 Markdown 中没有完全对应的写法：</p><table><colgroup><col width="220"/><col width="470"/></colgroup><tbody><tr><td><p>高亮块</p></td><td><p>以高亮块图标开头的引用</p></td></tr><tr><td><p>公式</p></td><td><p>用美元符号包裹的 LaTeX</p></td></tr><tr><td><p>表格</p></td><td><p>用竖线分隔的表格；单元格中的多个段落用换行分隔</p></td></tr><tr><td><p>分栏</p></td><td><p>各栏内容依次排列，而不是并排</p></td></tr><tr><td><p>颜色和精细排版</p></td><td><p>无法全部保留；在意外观时，请导出 PDF</p></td></tr></tbody></table>
+<hr/><p>下一篇：<cite type="doc" href="../画板/画板：图表与草图.xml" file-type="docx">画板：图表与草图</cite>。</p>

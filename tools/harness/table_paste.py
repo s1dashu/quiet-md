@@ -95,7 +95,7 @@ print("undo: restored empty paste target", flush=True)
 verify(run("redo", paste + "key cmd-z\nwait 200\nkey cmd-shift-z"), expected)
 # Importing leaves the current page open and writes the file in the background;
 # it then shows as the first sidebar row.
-imported = run("import", f"pick {clipboard}\nkey cmd-shift-i\nwait 3000\nclick 60 129")
+imported = run("import", f"pick {clipboard}\nkey cmd-shift-i\nwait 3000\nclick 60 166")
 files = docs(imported / "lib", "md")
 assert len(files) == 1 and files[0].read_bytes() == clipboard.read_bytes()
 # Markdown files store text, not column widths. Check the rendered grid's

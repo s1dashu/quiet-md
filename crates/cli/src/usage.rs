@@ -1,4 +1,4 @@
-//! How much `quiet` is used, for stats.quiet.md: per UTC day, how many
+//! How much `quiet` is used, for the stats.quiet.md dashboard (sent to telemetry.quiet.md): per UTC day, how many
 //! commands ran, which ones (by name only), and how many failed, under a
 //! random id for this computer. Nothing about the library, the documents or
 //! the arguments is kept or sent.
@@ -7,7 +7,8 @@
 //! go out at most once an hour, in a background `quiet` that posts them with
 //! `curl` (as the app's update check fetches) and forgets them once accepted.
 //! Off with `quiet telemetry off`, `DO_NOT_TRACK` or `QUIET_NO_TELEMETRY`,
-//! in CI, and when 自动检查更新 is off in the app: then nothing is written either.
+//! in CI, and when 匿名使用统计 is off in the app's 设置 › 通用 (untouched, it
+//! follows 自动检查更新): then nothing is written either.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -21,10 +22,10 @@ const URL: &str = "https://telemetry.quiet.md/v1/cli";
 const KEEP: usize = 31;
 /// The commands counted by name; anything else counts as `other`.
 const NAMES: &[&str] = &["ls", "find", "outline", "read", "blocks", "links", "check", "new", "mkdir", "insert", "replace", "delete", "move", "set",
-    "rename", "mv", "rm", "table", "table add", "table update", "table delete", "board", "board add", "board rm", "history", "restore", "trash",
-    "untrash", "import", "run", "call", "skill", "skill install", "help", "telemetry", "mcp"];
+    "rename", "mv", "rm", "table", "table add", "table update", "table delete", "table import", "table field", "table view", "table new", "table rename", "table remove", "board", "board add", "board rm", "history", "restore", "trash",
+    "untrash", "import", "run", "call", "skill", "help", "telemetry", "mcp", "folders", "folders add", "folders remove", "open", "pin", "unpin", "duplicate"];
 
-const NOTICE: &str = "quiet counts how often its commands run (which ones and how many, under a random id; never your notes or arguments) and sends those counts once a day to stats.quiet.md. `quiet telemetry off` turns it off; `quiet help telemetry` says more.";
+const NOTICE: &str = "quiet counts how often its commands run (which ones and how many, under a random id; never your notes or arguments) and sends those counts once a day to telemetry.quiet.md. Turn it off with `quiet telemetry off` or in Quiet.md's Settings › General › Anonymous usage statistics; `quiet telemetry status` shows what is sent.";
 
 fn file() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("QUIET_TELEMETRY_FILE") { return Some(PathBuf::from(p)); }
@@ -41,12 +42,16 @@ fn blocked() -> Option<&'static str> {
     if env("DO_NOT_TRACK") { return Some("DO_NOT_TRACK is set"); }
     if env("QUIET_NO_TELEMETRY") { return Some("QUIET_NO_TELEMETRY is set"); }
     if env("CI") { return Some("running in CI"); }
-    // The app's 自动检查更新 off: the user wants it to stay offline.
-    // 应用级设置 since 主页; before, the library's `.quiet/`.
+    // The app's 设置 › 通用 › 匿名使用统计 off; untouched, it follows
+    // 自动检查更新 (off: the user wants the app to stay offline).
+    // 应用级设置 since there are several top-level folders; before, the library's `.quiet/`.
     let prefs = [fdl_core::store::Store::settings_dir(), fdl_core::store::Store::legacy_dir().join(".quiet")].map(|d| d.join("preferences.json"));
-    if let Some(p) = prefs.iter().find_map(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        && p.get("auto_update").and_then(Value::as_bool) == Some(false) {
-        return Some("自动检查更新 (Check for updates automatically) is off in Quiet.md");
+    if let Some(p) = prefs.iter().find_map(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) {
+        match p.get("usage_stats").and_then(Value::as_bool) {
+            Some(false) => return Some("匿名使用统计 (Anonymous usage statistics) is off in Quiet.md's settings"),
+            None if p.get("auto_update").and_then(Value::as_bool) == Some(false) => return Some("自动检查更新 (Check for updates automatically) is off in Quiet.md"),
+            _ => {}
+        }
     }
     None
 }

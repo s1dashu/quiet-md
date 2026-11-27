@@ -32,9 +32,10 @@
 | `base.rs` | `under()`（组件样式垫在调用方样式下面）、`element!` 宏、`icon()` | — |
 | `button.rs` | `Button` + `ButtonVariant`（Primary / Outline / Secondary / Ghost / Destructive / Link）+ `ButtonSize`（Lg 40 / Default 36 / Sm 32 / Tool 28 / Xs 24）；`icon`、`icon_end`、`label`、`selected`、`disabled`、`variant` | Button |
 | `card.rs` | `Card`、`Item`、`Separator`、`Toast` + `ToastTone` | Card、Item、Separator、Sonner |
-| `menu.rs` | `Popover`（`.menu()`、`.padded()`）、`MenuItem`、`MenuLabel`、`MenuSeparator`；常量 `menu::PAD`、`ROW_H`、`SEP_H`、`LABEL_H` 给算子菜单位置用 | DropdownMenu、Popover |
+| `menu.rs` | `Popover`（`.menu()`、`.padded()`）、`MenuItem`、`MenuLabel`、`MenuSeparator`；常量 `menu::PAD`、`ROW_H`、`SEP_H`、`LABEL_H` 给算子菜单位置用 ；`MenuItem::switch(on)`（带开关的行：点了只切换，菜单留着，Esc 和点外面才关）；`hang`（按钮菜单挂在量到的按钮下 4、`Align::Start / End`、放不下翻上去）、`room` + `Popover::fit`（放不下时限高、滚动） | DropdownMenu、Popover |
+| `scroll.rs` | `ScrollBar`（`render(&handle)`；`rounded(r)` / `corners(top, bottom)`：上下各让出整个圆角加 1，`ends_for`，贴窗口角的用 `WINDOW_R`；`make_room(el, inset)` / `room(inset)`：框溢出时右边让出滚动条通道，`inset` 是内容本来离右边的距离，定宽的框加宽）、`scroll::bar(key, &handle, r)` / `bar_corners`（给任何 `overflow_y_scroll` 框挂上，放在框的最后一个子元素）和 `scroll::make_room(el, key, inset)`（同一个框，放在它样式的最后）、`Fade`、`THUMB` / `PAD` / `thumb_color`（页面和宽表格自己的滚动条也用）。`Popover::fit` 自己做好这些，内容不是菜单行时用 `.inset(x)` 说明 | ScrollArea、ScrollBar |
 | `field.rs` | `Field`（`Field::select`、`Field::select_value`，`FieldSize`）、`Textarea`、`Label` | Input、SelectTrigger、Textarea、Label |
-| `control.rs` | `Checkbox`（含半选）、`Radio`、`Switch`、`Segmented` + `Segment`（可带图标） | Checkbox、RadioGroupItem、Switch、Tabs |
+| `control.rs` | `Checkbox`（含半选）、`Radio`、`Switch`（`.keyed(id)`：切换时滑过去）、`Segmented` + `Segment`（可带图标） | Checkbox、RadioGroupItem、Switch、Tabs |
 | `badge.rs` | `Badge`（`new` / `primary` / `outline` / `destructive`、`chip(i)`、`colored`、`closable`）、`Kbd`、`KbdGroup` | Badge、Kbd、KbdGroup |
 | `dialog.rs` | `Dialog`（`title`、`description`、`footer`、`closable`、`keys`；`Dialog::alert`）、`DialogFocus`、`scrim()` | Dialog、AlertDialog |
 | `toolbar.rs` | `Toggle`（`ToggleSize`）、`ButtonGroup`、`ButtonGroupSeparator`、`Toolbar`、`block_handle()`；常量 `TOOLBAR_H`、`TOOLBAR_PAD`、`TOOLBAR_GAP`、`toolbar::w::*` 和 `toolbar_layout()` 给算下拉位置用 | Toggle、ToggleGroup、ButtonGroup（Toolbar 是这几样拼的） |
@@ -56,6 +57,8 @@
 | `Checkbox` | `Checkbox::new(checked)` | — | `.partial(bool)`（部分选中：实心加横杠）、`.disabled(bool)` | `Styled`（点击由外层可点元素接） |
 | `Radio` | `Radio::new(picked)` | — | `.disabled(bool)` | `Styled`（同上） |
 | `Switch` | `Switch::new(on)` | — | `.disabled(bool)` | `Styled`（同上） |
+| `Swatch` | `Swatch::new(id, fill)` | `.sized(f32)`（默认 22） | `.selected(bool)`（选中：2pt 的 `ring` 环，用边框画；否则 1pt 的 `border` 边）；`.child()` 叠在颜色上（快捷键角标、无色的棋盘格） | 同 `Button` |
+| `Slider` | `Slider::new(id, value)`（0–1） | — | `.mixed(bool)`（多选值不同：只显示轨道和滑块）、`.disabled(bool)`；6pt 的 `muted` 轨道、`primary` 已选段、16pt 白底 `primary` 边的滑块，悬停时 4pt 焦点光晕（shadcn 的 Slider）；拖动由外层元素接，`design::control::SLIDER_THUMB` 是滑块直径 | `Styled` |
 | `Segmented` / `Segment` | `Segmented::new().child(Segment::new(id, label).selected(bool))`；`Segmented::of(id, &[..], picked)` | — | `Segment::selected(bool)`、`Segment::disabled(bool)`、`Segment::icon(name)`（文字为空时是图标分段，如宫格 / 列表切换） | `Segment`：同 `Button` |
 | `Badge` | `Badge::new(s)`（secondary）、`Badge::primary / outline / destructive(s)`、`Badge::chip(s, i)`（第 i 种选项色，9 为灰）、`Badge::colored(s, (底, 字))` | — | `.closable()`（末尾 ×） | `Styled` |
 | `Kbd` | `Kbd::new(s)` | — | — | — |
@@ -115,6 +118,7 @@ shadcn 没有 Toolbar，这里按它已有的零件拼（2026-11-23，维护者�
 - 悬停和 `selected`（键盘当前行）谁后变谁说了算：指针移到一行上、在一行上移动、或离开所有行，指针说了算；`selected` 换了一行，键盘说了算。**指针离开所有行时一行都不亮**（Radix 的规则；键盘再动一下，键盘行才重新亮）。
 - 亮的行文字、图标、快捷键、说明都换成 `accent-foreground`。行在排版时读上一帧定下的亮行；定下的亮行变了，就再画一帧。
 - 子菜单开着的那一行用 `.open(true)`：不管指针在哪都亮着（shadcn 的 `data-open:bg-accent`）。照 Radix，指针移到同一菜单的兄弟行时，调用方把子菜单关上。
+- 指针斜着往子菜单走时有缓冲（Radix 的 pointer grace）：离开开着子菜单的行（`.submenu(true).open(true)`）时，离开点和子菜单靠近一侧的两个角围成一块区域，指针在里面朝子菜单那一侧移动，路过的兄弟行不亮、不接手；离开区域、掉头，或离开那一行 300ms（`menu::GRACE_MS`）后，指针所在的行照常接手。点击和按键立刻结束缓冲，键盘不受影响。左右两侧都适用。调用方要做两件事：打开 / 关闭子菜单的悬停处理包一层 `design::sub_hover`（`on_hover`）或 `sub_move`（`on_mouse_move`）；子菜单用 `Popover::submenu()` 标出位置，不是 `Popover` 的子面板加一个 `design::submenu_area()`。
 - 指针在不可用的行上时谁都不亮。不在任何 `Popover` 里的 `MenuItem`（对话框里嵌的列表）照旧：悬停、`selected` 或 `open` 就亮。
 - 2026-11-23 起，表示「子菜单开着」的调用点从 `.selected` 改成了 `.open`：`docmenu.rs` 的 `menu_item`、`sidebar.rs` 的「下载」、`editor/overlays.rs` 的 `row`（块菜单的缩进、颜色、在下方添加）和斜杠菜单里带子面板的行（`.open(sub && n == selected)`）、组件面板的子菜单演示。
 
@@ -143,20 +147,20 @@ shadcn 没有 Toolbar，这里按它已有的零件拼（2026-11-23，维护者�
 
 | 类 | 状态 | 范围 |
 |---|---|---|
-| 数据表 | ✅ | `table::style` 改成转发到组件库（`menu_item`、`primary_btn`、`input_box` 等保留名字，返回新组件）；表格专用的部分（网格尺寸、选项颜色 `tag_colors`、选区、`swatch`、`person`、`inset_list`）留在 `style.rs`。所有 `popover()` 换成 `Popover` |
+| 数据表 | ✅ | `table::style` 改成转发到组件库（`menu_item`、`primary_btn`、`input_box` 等保留名字，返回新组件）；表格专用的部分（网格尺寸、选项颜色 `tag_colors`、选区、`swatch`（2026-11-27 起转发到 `design::Swatch`）、`person`、`inset_list`）留在 `style.rs`。所有 `popover()` 换成 `Popover` |
 | 1. 菜单（应用外壳） | ✅ | 「…」文档菜单和它的子菜单（`docmenu.rs`）、侧栏右键菜单和批量菜单、下载子菜单（`sidebar.rs`）、新建菜单和文件夹右键（`folders.rs`）、本机文件 / 挂载文件夹右键（`local_files.rs`、`local_folders.rs`）、导入和「…」位置菜单（`transfer.rs`）、主页排序（`home.rs`）、回收站右键（`trash.rs`）、编辑 / 阅读模式（`modes.rs`）、引导页语言（`onboarding.rs`）、设置里的主题 / 偏好 / 字体 / 语言下拉（`settings.rs`）。删掉了 `ui::menu_label`、`ui::menu_glyph`、`theme::shadow_s4_down` |
 
 | 2. 全应用（2026-11-22，分支 `claude/swap-all-components-da81f8`） | ✅ | **编辑器菜单**：斜杠、块、转换、工具栏下拉、链接、@ 提及、编号（`overlays.rs`、`link.rs`、`links.rs`、`numbering.rs`），位置计算改用 `menu::{PAD, ROW_H, SEP_H, LABEL_H}`；**按钮**：页头图标按钮（`ui::header_icon` 现在返回 `Button::ghost`）、侧栏和主页的工具按钮、批量工具栏、文件夹卡片上的浮动按钮、各处手写的悬停图标按钮；**对话框**：确认、移动到、导出 Markdown、文档信息、搜索、强制更新、倒计时、表格记录详情（`Dialog` + `scrim()`）；**开关 / 复选框 / 分段 / 单选**：设置、文档菜单、批量勾选（含半选）、主页标签和宫格 / 列表切换、导出范围、倒计时；**输入框**：移动到、查找替换、链接、表情、封面、按钮块设置、提醒、倒计时、设置里的快捷键录制（`Field` + `KbdGroup`）；**卡片**：设置分组、引导页、更新日志（`Card` + `Item` + `Separator`）；**浮层外壳**：版本历史、查找栏、图片 / 附件工具栏、封面和表情面板、画板主菜单和右键菜单（`Popover`）；**提示气泡和 toast**：`ui::Tooltip` 改成 shadcn 的样子，toast 用 `Toast`。删掉了 `ui::popover`、`ui::menu_row`、`ui::MENU_*`、`ui::primary_button`、`ui::secondary_button`、`ui::close_button`、`ui::dialog`、`ui::scrim`、`ui::checkbox`、`ui::pill`、`ui::continuous_surface`、`editor_ui` 里的菜单转发 |
+| 3. 画板外壳（2026-11-27，分支 `feat/board-chrome-refresh`） | ✅ | `board/chrome/`：顶部工具条 `Toolbar` + `Toggle`（按下 = 当前工具，编号角标保留）+ `ButtonGroupSeparator`，「更多工具」下拉 `Popover` 菜单；左上主菜单按钮 ghost `Button` 放在单按钮 `Toolbar` 里；左下缩放 / 撤销重做、右下帮助各一条 `Toolbar` + ghost sm `Button`；属性面板 `Popover`（padded 16、宽 200），选项是 `ButtonGroup` 里的 outline `Toggle`，操作 / 图层 / 对齐是 outline `Button`，透明度新加 `Slider`；颜色选择器用新加的 `Swatch`、`Popover`、`Field`；箭头端点和字体选择器 `Popover` + `Toggle` / `MenuItem` + `MenuLabel` + `Badge`；帮助 `Dialog`（可关、960 宽）+ `Card` + `Separator` + `Kbd`；清空画布 `Dialog::alert`；字体下载提示 `Toolbar` + link `Button`。工具和角落按钮换成 Nucleo 图标（新增 15 个，菱形自己画）。删掉了 `chrome::island`、`outline_button`、`filled_button`、`style` 里 Excalidraw 的界面色和阴影，提示气泡改用 `ui::Tooltip` |
 
 ### 还没换的
 
-- **画板工具栏、属性面板、颜色选择器、帮助对话框外壳**（`board/chrome/`）：照搬 Excalidraw 的样式和图标，工具按钮带编号角标、色块和字号滑块，组件库里没有对应的东西；只换了它的菜单和确认按钮。要不要整体换成 design 风格待定。
+- **画板属性面板里的选项图**（`assets/icons/excalidraw/`）：填充、描边宽度 / 样式、线条风格、边角、箭头、字体、对齐、图层这些按钮里画的是画布上画出来的样子，仍用 Excalidraw 的图；按钮本身已是 `Toggle` / `Button`。Nucleo 授权最多 100 个，换不过来，也没有对应的图。
 - **压在影片背景上的引导页按钮**（跳过、上一步、全选）：深色半透明白字，组件的悬停底色在草地画面上看不清；背景是平的时候已经用 design 按钮。
 - **图片大图查看器的深色控制条**：压在黑色遮罩上的白色图标，ghost 的 `muted` 在上面看不见。
 - **代码块头上的语言 / 复制 / 换行**（`render.rs`）：在块里面、跟文档主题走（文档字体、主题色），不是浮起来的工具条。
 - **倒计时块的设置 / 颜色按钮**（`countdown.rs`）、**斜杠菜单和块菜单的图标格子**（`overlays.rs` 的 `tool`）：在菜单或块里面，不是工具条。
 - **表格的行 / 列选择条**（`table.rs`）：贴着表格边的细条，带插入点，不是按钮。
-- **选中文字时的字数小块**：2026-11-23 起照 outline xs 按钮的外观画（1px `border`、shadow-xs、圆角 8、12 号 muted 字），但它不是按钮，没有套组件。
 - **侧栏的「更新」药丸**：带下载进度的波浪填充。
 - **没有对应组件、各只有一两处的**：提醒和倒计时的小日历、表情格子、封面面板和查找框顶部带下划线的页签、引用列表的页签、颜色色块、尺寸选择器格子、倒计时的两张选项卡片。
 - **列表行**（侧栏树、主页列表、回收站、搜索结果、设置导航、版本历史行）：按约定保持列表行的样子，只把颜色换成 token。

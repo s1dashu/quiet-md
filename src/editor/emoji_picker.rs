@@ -36,7 +36,6 @@ const ROW_H: f32 = 36.;
 const CELL: f32 = 36.;
 /// Rows start 24px in from the popover edge (23 inside its border).
 const INSET: f32 = 23.;
-const THUMB_MIN: f32 = 96.;
 
 const NAV: [(&str, &str); 8] = [
     ("最近", "emoji-frequent"),
@@ -273,11 +272,9 @@ impl Editor {
             let y = (next - off - TITLE_H).min(0.);
             title_el(s.title, TITLE_H).absolute().top(px(y)).left_0().bg(theme::ta(255, 255, 255, 0.8))
         });
-        let thumb = (content_h > scroll_h && !phone).then(|| {
-            let h = (scroll_h * scroll_h / content_h).max(THUMB_MIN);
-            let top = (scroll_h - h) * off / (content_h - scroll_h);
-            div().absolute().right_0().top(px(top)).w(px(7.)).h(px(h)).rounded(px(3.5)).group_hover("emoji-scroll", |s| s.bg(Theme::scrollbar_thumb()))
-        });
+        // the shared scrollbar (shadcn's ScrollArea), square-edged: the area sits inside the picker's padding;
+        // a phone's sheet scrolls under the finger, with no bar
+        let thumb = (!phone).then(|| self.emoji_bar.render(&self.emoji_scroll));
         let scroll = div()
             .id("emoji-scroll-area")
             .group("emoji-scroll")
@@ -347,7 +344,7 @@ impl Editor {
                 .left_0()
                 .right_0()
                 .h(px(2.))
-                .bg(linear_gradient(180., linear_color_stop(theme::rgbaf(0, 0, 0, 0.05), 0.), linear_color_stop(theme::rgbaf(0, 0, 0, 0.), 1.))),
+                .bg(linear_gradient(180., linear_color_stop(theme::rgbaf(0, 0, 0, if crate::theme::dark() { 0.35 } else { 0.05 }), 0.), linear_color_stop(theme::rgbaf(0, 0, 0, 0.), 1.))),
         );
         for (i, (label, ic)) in NAV.iter().enumerate() {
             let on = !searching && i == current;
@@ -430,7 +427,7 @@ impl Editor {
                 .child(div().id("emoji-scrim").absolute().inset_0().bg(color::overlay()).occlude()
                     .on_mouse_down(MouseButton::Left, cx.listener(|ed, _, window, cx| { cx.stop_propagation(); ed.close_menu_focus(window, cx); })))
                 .child(div().absolute().left_0().right_0().bottom_0().pb(px(if ime > 0. { ime } else { bottom })).bg(color::popover())
-                    .rounded_t(px(crate::design::R + 6.)).shadow(crate::theme::shadow_panel()).occlude()
+                    .rounded_t(px(crate::design::R + 6.)).shadow(crate::design::shadow::dialog()).occlude()
                     .child(picker.w_full().rounded_none().rounded_t(px(crate::design::R + 6.)).shadow_none())),
         )).with_priority(3).into_any_element()
     }

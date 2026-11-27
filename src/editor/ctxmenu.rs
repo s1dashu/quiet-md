@@ -50,7 +50,7 @@ impl Panel {
 
 /// A submenu panel, hung at `top` beside the main one.
 fn sub_menu(id: &'static str, top: f32) -> Popover {
-    Popover::new(id).menu().absolute().left(px(MENU_W + SUB_DX)).top(px(top)).w(px(MENU_W))
+    Popover::new(id).menu().submenu().absolute().left(px(MENU_W + SUB_DX)).top(px(top)).w(px(MENU_W))
 }
 
 fn item(id: impl Into<ElementId>, icon_name: &str, label: impl Into<SharedString>) -> MenuItem {
@@ -87,14 +87,14 @@ where
 
 /// Hovering a row opens (`Some`) or closes (`None`) its submenu.
 fn hover(s: Option<CtxSub>, cx: &Context<Editor>) -> impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static {
-    cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
+    crate::design::sub_move(cx.listener(move |e: &mut Editor, _: &MouseMoveEvent, _, cx| {
         if let Some(Menu::Ctx { sub, .. }) = &mut e.menu
             && *sub != s
         {
             *sub = s;
             cx.notify();
         }
-    })
+    }))
 }
 
 /// A row that runs an action.

@@ -112,7 +112,7 @@ pub fn parse(xml: &str) -> Result<Document> {
     Ok(doc)
 }
 
-fn is_block_tag(name: &str) -> bool {
+pub(crate) fn is_block_tag(name: &str) -> bool {
     matches!(
         name,
         "p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "h7" | "h8" | "h9" | "ul" | "ol" | "li"
@@ -753,7 +753,7 @@ fn esc(s: &str) -> String {
     o
 }
 
-fn esc_attr(s: &str) -> String {
+pub(crate) fn esc_attr(s: &str) -> String {
     esc(s).replace('"', "&quot;")
 }
 

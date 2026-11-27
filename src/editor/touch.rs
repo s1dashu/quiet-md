@@ -303,7 +303,7 @@ impl Editor {
         let y = if above { hp.y - px(h + 14.) } else { hp.y + lh + px(28.) };
         let side = || div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex();
         let el = div().w(px(w)).h(px(h)).rounded_full().bg(crate::design::color::popover()).border_1().border_color(crate::design::color::border())
-            .shadow(crate::theme::shadow_menu()).overflow_hidden().flex().items_center().px(px(14.))
+            .shadow(crate::design::shadow::popover()).overflow_hidden().flex().items_center().px(px(14.))
             .text_size(px(size)).text_color(Theme::text())
             .child(side().justify_end().child(crate::editor_ui::ui_text(b)))
             .child(div().flex_none().w(px(2.)).h(px(size + 6.)).mx(px(1.)).rounded_full().bg(Theme::primary()))

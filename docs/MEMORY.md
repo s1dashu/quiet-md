@@ -121,7 +121,7 @@ Other builds were running on the machine during measurement. Differences were wi
 
 ### 5. Smaller thumbnails (adopted)
 
-Home cards decode at 0.75 times their drawn size (`THUMB` in `home.rs`). The slightly softer result was indistinguishable on the cards. With experiment 2 already releasing CPU copies, the savings on macOS were about 3 MB of GPU textures.
+Home cards decode at 0.75 times their drawn size (`THUMB` in `folder_page.rs`). The slightly softer result was indistinguishable on the cards. With experiment 2 already releasing CPU copies, the savings on macOS were about 3 MB of GPU textures.
 
 ### 6. Downsample PNGs during decoding (adopted)
 

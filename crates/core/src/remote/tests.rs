@@ -308,7 +308,10 @@ mod with_curl {
             }
             got
         });
-        let http = CurlHttp::plain();
+        // Its own temporary folder: other test processes use the system's at the same time.
+        let temp = crate::vfs::temp_dir().join(format!("quiet-curl-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&temp).unwrap();
+        let http = CurlHttp::plain_in(&temp);
         let r = http.send(Request {
             method: "PATCH".into(),
             url: format!("http://127.0.0.1:{port}/first"),
@@ -321,13 +324,18 @@ mod with_curl {
         assert!(got[0].starts_with("PATCH /first ") && got[0].contains("Authorization: Bearer t0ken") && got[0].ends_with("{\"周\":1}"), "{}", got[0]);
         // 307 keeps the method and body.
         assert!(got[1].starts_with("PATCH /next "), "{}", got[1]);
-        // Nothing left behind in the temporary folder.
-        let left = std::fs::read_dir(std::env::temp_dir()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("quiet-curl-")).count();
-        assert_eq!(left, 0);
+        // Nothing left behind in the temporary folder, after a failure either.
+        let left = || std::fs::read_dir(&temp).unwrap().count();
+        assert_eq!(left(), 0);
 
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let r = http.send(Request { method: "GET".into(), url: format!("http://127.0.0.1:{closed}/"), ..Default::default() });
+        let r = http.send(Request { method: "GET".into(), url: format!("http://127.0.0.1:{closed}/"), body: Some(b"x".to_vec()), ..Default::default() });
         assert!(matches!(r, Err(Error::Offline(_))), "{r:?}");
+        assert_eq!(left(), 0);
+        // The files really go there: with the folder gone, the request can't start.
+        std::fs::remove_dir(&temp).unwrap();
+        let r = http.send(Request { method: "GET".into(), url: format!("http://127.0.0.1:{closed}/"), ..Default::default() });
+        assert!(matches!(r, Err(Error::Local(_))), "{r:?}");
     }
 
     /// Against a real repository (set QUIET_MD_GITHUB_TOKEN and

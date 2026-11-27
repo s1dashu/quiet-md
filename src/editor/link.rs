@@ -139,7 +139,7 @@ const CARD_H: f32 = 40.;
 /// The 更多 button's left edge in the card.
 const CARD_MORE_X: f32 = CARD_W - 8. - 24.;
 /// The 更多 menus: native-style, 200 wide.
-const SUBMENU_W: f32 = 200.;
+const SUBMENU_W: f32 = crate::design::menu_w::SM;
 
 #[derive(Default)]
 pub struct LinkUi {
@@ -412,13 +412,13 @@ impl Editor {
         let host = url.split("://").nth(1).unwrap_or(&url).split(['/', '?', '#']).next().unwrap_or_default().to_string();
         let row = |id: &'static str, glyph: &'static str, label: &'static str| MenuItem::new(id).icon(glyph).label(label);
         let (go, copy, edit, remove) = (url.clone(), url.clone(), lr.clone(), lr.clone());
-        let preview = div().w(px(vw - 32.)).p(px(16.)).rounded(px(14.)).bg(color::popover()).shadow(crate::theme::shadow_panel()).occlude().flex().items_center().gap(px(12.))
+        let preview = div().w(px(vw - 32.)).p(px(16.)).rounded(px(14.)).bg(color::popover()).shadow(crate::design::shadow::popover()).occlude().flex().items_center().gap(px(12.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().size(px(40.)).flex_none().rounded(px(10.)).bg(color::muted()).flex().items_center().justify_center().child(icon("globe", 22., color::muted_foreground())))
             .child(div().flex_1().min_w_0()
                 .child(div().text_size(px(17.)).line_height(px(22.)).font_weight(FontWeight::SEMIBOLD).text_color(color::foreground()).truncate().child(crate::editor_ui::ui_text(if label.trim().is_empty() { host.clone() } else { label })))
                 .child(div().text_size(px(13.)).line_height(px(18.)).text_color(color::muted_foreground()).line_clamp(3).child(crate::editor_ui::ui_text(url.clone()))));
-        let menu = div().w(px(250.)).p(px(6.)).rounded(px(14.)).bg(color::popover()).shadow(crate::theme::shadow_panel()).occlude()
+        let menu = div().w(px(250.)).p(px(6.)).rounded(px(14.)).bg(color::popover()).shadow(crate::design::shadow::popover()).occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(row("lh-open", "globe", crate::settings::tr("打开链接", "Open link")).on_click(cx.listener(move |e, _, _, cx| { e.link_ui.held = None; open(cx, &go); cx.notify(); })))
             .child(row("lh-copy", "copy", crate::settings::tr("拷贝链接", "Copy link")).on_click(cx.listener(move |e, _, _, cx| { e.link_ui.held = None; cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); cx.notify(); })))
@@ -508,7 +508,7 @@ impl Editor {
                 .absolute()
                 .left(px(CARD_MORE_X - 9.))
                 .top(px(8. + 24. + 2.))
-                .min_w(px(SUBMENU_W))
+                .w(px(SUBMENU_W))
                 .on_hover(cx.listener(|e, h: &bool, _, cx| e.card_over(2, *h, cx)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(menu_item("lc-copy", "globe", crate::settings::text("复制原始网页链接")).on_click(cx.listener(move |e, _, _, cx| {
@@ -601,7 +601,7 @@ impl Editor {
     pub(super) fn tb_more_menu(&self, cx: &mut Context<Self>) -> Popover {
         Popover::new("tb-more-menu")
             .menu()
-            .min_w(px(SUBMENU_W))
+            .w(px(SUBMENU_W))
             .on_hover(cx.listener(|e, h: &bool, _, cx| e.tb_drop_over(Menu::TbMore, 1, *h, cx)))
             .child(menu_item("tm-search", "search", crate::settings::text("文档库内搜索")).on_click(cx.listener(|e, _, _, cx| {
                 e.menu = None;

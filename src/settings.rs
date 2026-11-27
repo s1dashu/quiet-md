@@ -20,18 +20,21 @@ use std::sync::{Arc, LazyLock, Mutex, RwLock};
 static FEISHU: AtomicBool = AtomicBool::new(false);
 static LANG: AtomicU8 = AtomicU8::new(Lang::En as u8);
 static MOTION_HIGH: AtomicBool = AtomicBool::new(false);
+static TYPEWRITER: AtomicBool = AtomicBool::new(false);
+static PARAGRAPH_FOCUS: AtomicBool = AtomicBool::new(false);
 static PREFS: RwLock<Option<Preferences>> = RwLock::new(None);
 
 /// The active document theme draws blocks the 飞书 way (else Craft's).
 pub fn feishu() -> bool { FEISHU.load(Ordering::Relaxed) }
 pub(crate) fn set_base(feishu: bool) { FEISHU.store(feishu, Ordering::Relaxed); }
-/// 界面语言, in the order Settings lists them. Chinese strings are the keys:
+/// 界面语言, in the order Settings lists them (English first, then the two Chinese).
+/// `ALL` keeps the variants' order: `LANG` holds a variant's index in it. Chinese strings are the keys:
 /// other languages look them up in `l10n` and fall back to English.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Lang { Zh, ZhTw, En, Ja, Ko, Fr, Es, Ar, Tr }
+pub enum Lang { En, Zh, ZhTw, Ja, Ko, Fr, Es, Ar, Tr }
 
 impl Lang {
-    pub const ALL: [Lang; 9] = [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
+    pub const ALL: [Lang; 9] = [Lang::En, Lang::Zh, Lang::ZhTw, Lang::Ja, Lang::Ko, Lang::Fr, Lang::Es, Lang::Ar, Lang::Tr];
     /// The `language` preference value.
     pub fn code(self) -> &'static str { match self { Lang::Zh => "zh", Lang::ZhTw => "zh-TW", Lang::En => "en", Lang::Ja => "ja", Lang::Ko => "ko", Lang::Fr => "fr", Lang::Es => "es", Lang::Ar => "ar", Lang::Tr => "tr" } }
     /// The language's own name, as Settings lists it.
@@ -43,6 +46,10 @@ pub fn lang() -> Lang { Lang::ALL.get(LANG.load(Ordering::Relaxed) as usize).cop
 pub fn english() -> bool { lang() != Lang::Zh }
 /// 外观 › 动画 is 丰富: folding, the selection and hover animate too (else they answer at once).
 pub fn motion_high() -> bool { MOTION_HIGH.load(Ordering::Relaxed) }
+/// 打字机模式 is on (typewriter.rs).
+pub fn typewriter() -> bool { TYPEWRITER.load(Ordering::Relaxed) }
+/// 段落聚焦 is on (typewriter.rs).
+pub fn paragraph_focus() -> bool { PARAGRAPH_FOCUS.load(Ordering::Relaxed) }
 pub fn tr(zh: &'static str, en: &'static str) -> &'static str { match lang() { Lang::Zh => zh, Lang::En => en, l => crate::l10n::get(l, zh).unwrap_or(en) } }
 /// `localized_format!` for a given language: `zh` / `en` build the two
 /// originals; other languages refill their translation of `template`.
@@ -98,10 +105,16 @@ pub struct Preferences {
     pub language: String,
     /// Fetch `http(s)` images referenced by documents.
     pub remote_images: bool,
-    /// The system-wide quick note hotkey is registered.
+    /// Older builds' 快速新建笔记 switch. Read once: off clears that shortcut's key instead
+    /// (`shortcuts::init`), and it is written back on; a cleared key is off now.
     pub quick_hotkey: bool,
     /// Look for a new version now and then (update.rs).
     pub auto_update: bool,
+    /// 匿名使用统计: the `quiet` command line tool's daily counts of which
+    /// commands ran (crates/cli/src/usage.rs reads it). None until the switch
+    /// is touched: it then follows 自动检查更新, as before there was a switch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage_stats: Option<bool>,
     /// Light or dark look: "light", "dark", or empty to follow the system.
     pub appearance: String,
     /// The last version that opened this library (changelog.rs).
@@ -114,15 +127,19 @@ pub struct Preferences {
     pub last_new: String,
     /// 网页搜索 engine: "baidu", "bing", "duckduckgo"; empty is Google.
     pub search_engine: String,
-    /// 启动时打开: true shows the home page; false returns to the
-    /// document read last (#234).
-    pub start_home: bool,
+    /// 启动时打开: true shows the default folder's page; false returns to the
+    /// document read last (#234). Named `start_home` in older files.
+    #[serde(alias = "start_home")]
+    pub start_folder: bool,
     /// 打开链接: the browser a link opens in ("Safari", "Microsoft Edge"…),
     /// empty for the system default.
     pub browser: String,
     /// 外观 › 窗口背景: paint the window opaque instead of letting the desktop
     /// show through the sidebar material.
     pub opaque_window: bool,
+    /// 外观 › 文档大纲 off: no heading outline (nor its button) beside the page.
+    #[serde(default)]
+    pub hide_outline: bool,
     /// 外观 › 界面字号: "small" or "large"; empty is the 13pt standard.
     pub ui_font: String,
     /// 外观 › 界面字体: the family the sidebar, menus and settings are drawn in
@@ -158,6 +175,10 @@ pub struct Preferences {
     /// or a top-level folder that is gone, is the first open top-level folder (2.8).
     #[serde(default, alias = "quick_note_root")]
     pub quick_note_folder: String,
+    /// 打字机模式 (typewriter.rs): the caret's line stays in the middle of the page.
+    pub typewriter: bool,
+    /// 段落聚焦 (typewriter.rs): the paragraph being written stays clear, the others fade.
+    pub paragraph_focus: bool,
 }
 
 /// A week between asks to move the library to real folders.
@@ -196,7 +217,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_home: false, browser: String::new(), opaque_window: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new() }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, usage_stats: None, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_folder: false, browser: String::new(), opaque_window: false, hide_outline: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new(), typewriter: false, paragraph_focus: false }
     }
 }
 
@@ -235,6 +256,10 @@ pub fn load() {
         p.doc_family = look.doc_family.unwrap_or(d.doc_family);
         p.doc_size = look.doc_size.unwrap_or(d.doc_size);
     }
+    // Tests read the interface in English, whatever the machine's language or
+    // the preferences a `QUIET_MD_HOME` holds; one that needs another language says so.
+    #[cfg(test)]
+    p.set_lang(Lang::En);
     apply(p);
 }
 
@@ -244,7 +269,7 @@ fn look_dir() -> Option<std::path::PathBuf> {
     (has_folders() && root.join(crate::store::INTERNAL).exists()).then_some(root)
 }
 
-/// Whether 主页 has a folder (none before first launch picks one).
+/// Whether any top-level folder is open (none before first launch picks one).
 fn has_folders() -> bool { HAS_FOLDERS.load(Ordering::Relaxed) }
 static HAS_FOLDERS: AtomicBool = AtomicBool::new(false);
 pub(crate) fn set_has_folders(on: bool) { HAS_FOLDERS.store(on, Ordering::Relaxed); }
@@ -271,6 +296,8 @@ fn apply(p: Preferences) {
     LANG.store(p.lang() as u8, Ordering::Relaxed);
     crate::model::set_untitled(translate(crate::model::UNTITLED, p.lang()));
     MOTION_HIGH.store(p.motion == "high", Ordering::Relaxed);
+    TYPEWRITER.store(p.typewriter, Ordering::Relaxed);
+    PARAGRAPH_FOCUS.store(p.paragraph_focus, Ordering::Relaxed);
     // Before the themes are read (startup) the base comes from `feishu`.
     themes::select(&p.theme_id());
     themes::set_doc_font(&p.doc_family);
@@ -457,7 +484,7 @@ pub(crate) fn watch_themes(cx: &mut Context<Workspace>) {
 // ---- the view
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Page { #[default] General, Appearance, Shortcuts, Library, About }
+pub enum Page { #[default] General, Appearance, Shortcuts, Library, Agents, About }
 
 impl Page {
     fn title(self) -> &'static str {
@@ -466,6 +493,7 @@ impl Page {
             Page::Appearance => tr("外观", "Appearance"),
             Page::Shortcuts => tr("快捷键", "Shortcuts"),
             Page::Library => tr("文档库", "Documents"),
+            Page::Agents => tr("连接 Agent", "Agent Connector"),
             Page::About => tr("关于", "About"),
         }
     }
@@ -474,15 +502,16 @@ impl Page {
             Page::General => "view-settings",
             Page::Appearance => "palette",
             Page::Shortcuts => "keyboard",
-            Page::Library => "storage",
+            Page::Library => "folder",
+            Page::Agents => "code",
             Page::About => "info",
         }
     }
 }
 
-/// The sidebar list, one evenly spaced run (six rows need no unlabelled
+/// The sidebar list, one evenly spaced run (seven rows need no unlabelled
 /// groups); `None` is 回收站 (its own view, shown with this sidebar).
-const NAV: [Option<Page>; 6] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), None, Some(Page::About)];
+const NAV: [Option<Page>; 7] = [Some(Page::General), Some(Page::Appearance), Some(Page::Shortcuts), Some(Page::Library), Some(Page::Agents), None, Some(Page::About)];
 
 // ---- controls (switch on the accent, 30pt buttons, grouped rows)
 
@@ -497,7 +526,8 @@ pub(crate) fn group(id: impl Into<ElementId>, title: Option<&'static str>, rows:
         card = card.child(div().w_full().flex().flex_col().child(r));
         if i + 1 < n { card = card.child(Separator::new()); }
     }
-    div().w_full().flex().flex_col().gap(px(8.)).children(title.map(caption)).child(card)
+    // the caption hangs over its own card (`label_gap`), sections stand `section_gap` apart
+    div().w_full().flex().flex_col().gap(px(crate::design::geo().label_gap)).children(title.map(caption)).child(card)
 }
 
 pub(crate) fn caption(t: &'static str) -> Div {
@@ -513,7 +543,8 @@ fn desc(s: &'static str) -> Option<SharedString> { Some(s.into()) }
 
 /// A `Switch` that takes the click (the switch itself only draws).
 pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
-    div().id(id).flex_none().flex().items_center().cursor_pointer().child(Switch::new(on))
+    let id = id.into();
+    div().id(id.clone()).flex_none().flex().items_center().cursor_pointer().child(Switch::new(on).keyed(id))
 }
 
 /// 外观 › 主题 CSS (duplicate, edit, restore a theme's stylesheet): hidden in
@@ -742,7 +773,7 @@ fn font_row(family: &str, dl: Option<&'static str>, flat: bool, g: SharedString,
         else { div().text_color(crate::design::color::disabled()).child(tr("下载后可预览", "Preview after download")) };
     let (del, star) = (dl.map(str::to_string), family.to_string());
     let hover_key = key.clone();
-    div().w_full().flex().flex_col().child(MenuItem::new(g.clone()).selected(focused)
+    div().w_full().flex().flex_col().relative().children(crate::devtools::row_probe(label.clone())).child(MenuItem::new(g.clone()).selected(focused)
         // Touch: a tap's pointer would preview the font under it; a tap picks.
         .on_hover(cx.listener(move |w, hovered: &bool, _, cx| if *hovered && !crate::design::touch() { w.preview_font(hover_key.clone(), row, cx) }))
         .on_click(cx.listener(move |w, _, window, cx| w.pick_font(key.clone(), target, window, cx)))
@@ -750,11 +781,19 @@ fn font_row(family: &str, dl: Option<&'static str>, flat: bool, g: SharedString,
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(theme::ui_font())).child(sample))
         .children(tags.into_iter().map(tag))
         .child(status)
-        .when(e.is_some_and(|e| fd::on_disk(&e.id) && !fd::pending(&e.id)), |d| d.child(Button::ghost(SharedString::from(format!("font-del-{}", del.clone().unwrap_or_default()))).sized(ButtonSize::Xs).icon("bin")
-            .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); if let Some(id) = &del { w.delete_download(id, cx) } }))))
+        .when(e.is_some_and(|e| fd::on_disk(&e.id) && !fd::pending(&e.id)), |d| d.child(div().relative().children(crate::devtools::anchor_probe(format!("font-del-{}", del.clone().unwrap_or_default())))
+            .child(Button::ghost(SharedString::from(format!("font-del-{}", del.clone().unwrap_or_default()))).sized(ButtonSize::Xs).icon("bin")
+            .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); if let Some(id) = &del { w.delete_download(id, cx) } })))))
         .child(Button::ghost(SharedString::from(format!("{g}-star"))).sized(ButtonSize::Xs)
             .child(crate::design::icon("star", 14., if fav { crate::design::color::primary() } else { crate::design::color::disabled() }))
             .on_click(cx.listener(move |w, _, _, cx| { cx.stop_propagation(); w.toggle_favorite(&star, cx) }))))
+}
+
+thread_local! {
+    /// 正文字号's 自定义 was picked this session: its stepper shows though the size may be a preset's.
+    static DOC_CUSTOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Bumped at each step of 正文字号's stepper, so only the last of a burst is written.
+    static DOC_SIZE_GEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// A segmented control, each segment `(id, i)`.
@@ -892,7 +931,7 @@ fn sample_page(t: &themes::Theme, s: f32) -> Div {
         .border_1().border_color(st.color("pre.border").unwrap_or_else(|| st.token("code_border")))
         .font_family(mono.clone()).text_size(sc(dl(st.num("pre.size")))).line_height(sc(dl(st.num("pre.line")))).text_color(st.color("pre.color").unwrap_or_else(|| st.token("code_text")))
         .child(code_line("1", vec![tok("# ", syn("comment")), tok(tr("备份文档库", "back up your documents"), syn("comment"))]))
-        .child(code_line("2", vec![tok("cd ", syn("function")), tok("~/Documents ", text), tok("&& ", syn("keyword")), tok("tar ", syn("function")), tok("-czf ", syn("attr")), tok("\"Quiet.tar.gz\" ", syn("string")), tok("Quiet.md", text)]))
+        .child(code_line("2", vec![tok("cd ", syn("function")), tok("~/Documents ", text), tok("&& ", syn("keyword")), tok("tar ", syn("function")), tok("-czf ", syn("attr")), tok("\"Quiet.tar.gz\" ", syn("string")), tok("\"Quiet Notes\"", syn("string"))]))
         .child(code_line("3", vec![tok("echo ", syn("function")), tok("\"done\"", syn("string"))]));
     // One column, like a page: a centred text column (the theme's width, scaled,
     // up to 880 so a wide frame isn't mostly margin) whose bottom fades into
@@ -962,7 +1001,7 @@ pub(crate) fn phone_sheet(id: &'static str, title: SharedString, tall: bool, bod
     let panel = div().id(SharedString::from(format!("{id}-sheet"))).absolute().left_0().right_0().bottom(px(-f.pull.max(0.)))
         .when(tall, |d| d.top(px(top + 12. + rest + f.pull))).max_h(px(vh - top - 12.))
         .pb(px(if ime > 0. { ime } else { bottom })).flex().flex_col()
-        .bg(crate::design::color::popover()).rounded_t(px(r)).shadow(theme::shadow_panel()).occlude()
+        .bg(crate::design::color::popover()).rounded_t(px(r)).shadow(crate::design::shadow::dialog()).occlude()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(div().flex_none().h(px(56.)).relative().flex().items_center().justify_center()
             .child(grab)
@@ -1034,8 +1073,8 @@ impl Workspace {
                 w.theme_menu = None;
                 cx.notify();
             }))
-            .child(div().id("theme-menu-list").w(px(220.)).max_h(px(302.)).overflow_y_scroll().py(px(menu::PAD)).flex().flex_col().children(rows));
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+            .child({ let h = crate::design::scroll::handle("theme-menu-list"); crate::design::scroll::make_room(div().id("theme-menu-list").w(px(220.)).max_h(px(302.)).overflow_y_scroll().track_scroll(&h).py(px(menu::PAD)).flex().flex_col(), "theme-menu-list", menu::PAD).children(rows).child(crate::design::scroll::bar("theme-menu-list", &h, crate::design::geo().menu_r)) });
+        Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
     }
 
     /// A choice as a dropdown button, like 界面语言's: the picked label, a menu of the rest.
@@ -1070,14 +1109,14 @@ impl Workspace {
         let b = *self.pref_anchors.borrow().get(m.id)?;
         let anchors = self.pref_anchors.clone();
         let id = m.id;
-        let menu = Popover::new("pref-menu").menu().min_w(px(160.))
+        let menu = Popover::new("pref-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchors.borrow().get(id).is_some_and(|b| b.contains(&ev.position)) { return }
                 w.pref_menu = None;
                 cx.notify();
             }))
             .children(rows);
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        { let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element()) }
     }
 
     fn pick_pref(&mut self, i: usize, cx: &mut Context<Self>) {
@@ -1189,7 +1228,8 @@ impl Workspace {
             div().px(px(10.)).py(px(6.)).text_size(px(theme::ui_font_small())).line_height(px(theme::ui_font_small() + 5.))
                 .text_color(Theme::text_caption()).child(tr("没有匹配的字体", "No matching font")).into_any_element()
         } else {
-            uniform_list("font-list", n, cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
+            // the rows keep the menu's 4 from the side: while the list scrolls, the shared scrollbar's lane beside them
+            crate::design::scroll::make_room(uniform_list("font-list", n, cx.processor(move |_, range: std::ops::Range<usize>, _, cx| {
                 range.map(|i| {
                     let g = SharedString::from(format!("font-{}-{i}", target.key()));
                     match &choices[i] {
@@ -1213,7 +1253,7 @@ impl Workspace {
                 }).collect()
             }))
             .track_scroll(&menu.scroll)
-            .h(px(if phone { list_h.max(menu::ROW_H) } else { (n as f32 * menu::ROW_H).min(420.) }))
+            .h(px(if phone { list_h.max(menu::ROW_H) } else { (n as f32 * menu::ROW_H).min(420.) })), "font-list", menu::PAD)
             .into_any_element()
         };
         let search = div().p(px(menu::PAD))
@@ -1226,6 +1266,7 @@ impl Workspace {
             return Some(phone_sheet("font-menu", title.into(), true, body, |w, window, cx| { w.close_font_menu(cx); window.focus(&w.focus, cx); }, window, cx))
         }
         let b = *self.font_anchors.borrow().get(target.key())?;
+        let bar_handle = menu.scroll.0.borrow().base_handle.clone();
         let anchors = self.font_anchors.clone();
         let key = target.key();
         let popup = Popover::new("font-menu").flex()
@@ -1237,8 +1278,10 @@ impl Workspace {
             }))
             .child(div().w(px(460.)).flex().flex_col()
                 .child(search)
-                .child(div().pb(px(menu::PAD)).child(list)));
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(popup)).with_priority(2).into_any_element())
+                .child(div().relative().pb(px(menu::PAD)).child(list)
+                    // its bottom end clear of the popover's corner, which is the menu's padding below it
+                    .when(n > 0, |d| d.child(crate::design::scroll::bar_corners("font-list", &bar_handle, 0., (crate::design::geo().menu_r - menu::PAD).max(0.))))));
+        Some(deferred({ let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); anchored().anchor(corner).position(pos) }.snap_to_window_with_margin(px(8.)).child(popup)).with_priority(2).into_any_element())
     }
 
     /// A row picked (its key): saved, and kept in 最近使用.
@@ -1368,14 +1411,14 @@ impl Workspace {
         }
         let b = self.lang_anchor.get()?;
         let anchor = self.lang_anchor.clone();
-        let menu = Popover::new("lang-menu").menu().w(px(160.))
+        let menu = Popover::new("lang-menu").menu().w(px(crate::design::menu_w::SM))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 if anchor.get().is_some_and(|b| b.contains(&ev.position)) { return }
                 w.lang_menu = None;
                 cx.notify();
             }))
             .children(rows);
-        Some(deferred(anchored().anchor(Anchor::TopRight).position(point(b.right(), b.bottom() + px(4.))).snap_to_window_with_margin(px(8.)).child(menu)).with_priority(2).into_any_element())
+        { let (pos, corner) = crate::design::hang(b, crate::design::Align::End, None); Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element()) }
     }
 
     /// Keys while the language dropdown is open; true when used.
@@ -1410,6 +1453,21 @@ impl Workspace {
 
 impl Workspace {
     /// Change preferences and refresh what depends on them.
+    /// 正文字号's stepper moved to `pref`: the note and the sample redraw at once; the preferences and
+    /// the folder's look are written when the steps stop for half a second, not at every step.
+    pub(crate) fn set_doc_size_soon(&mut self, pref: String, cx: &mut Context<Self>) {
+        let mut p = prefs();
+        p.doc_size = pref.clone();
+        apply(p);
+        refresh_all(self, cx);
+        cx.notify();
+        let turn = DOC_SIZE_GEN.with(|g| { g.set(g.get() + 1); g.get() });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(500)).await;
+            let _ = this.update(cx, |w, cx| if DOC_SIZE_GEN.with(|g| g.get()) == turn { w.set_pref(|p| p.doc_size = pref, cx) });
+        }).detach();
+    }
+
     pub(crate) fn set_pref(&mut self, f: impl FnOnce(&mut Preferences), cx: &mut Context<Self>) {
         let old = prefs();
         let mut p = old.clone();
@@ -1418,9 +1476,8 @@ impl Workspace {
             self.show_toast_kind(ui::ToastKind::Error, &format!("{}: {e}", tr("设置保存失败", "Could not save settings")), cx);
             return;
         }
-        if p.quick_hotkey != old.quick_hotkey {
-            if p.quick_hotkey { crate::quick_note::register(cx); } else { crate::quick_note::suspend_hotkey(); }
-        }
+        // 匿名使用统计 off: forget the app's id and waiting days.
+        if old.usage_stats.unwrap_or(old.auto_update) && !p.usage_stats.unwrap_or(p.auto_update) { crate::usage::forget(); }
         if p.appearance != old.appearance { apply_appearance(&p.appearance); }
         if p.doc_family != old.doc_family { crate::fonts::probe(&p.doc_family, cx); }
         if p.ui_family != old.ui_family { crate::fonts::probe(&p.ui_family, cx); }
@@ -1480,12 +1537,14 @@ impl Workspace {
     }
 
     pub(crate) fn render_settings_sidebar(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        crate::devtools::rows_begin(window);
         let current = (self.view == View::Settings).then_some(self.settings_page);
         let in_trash = self.view == View::Trash;
         let nav_row = |page: Option<Page>, cx: &mut Context<Self>| {
             let on = if page.is_some() { page == current } else { in_trash };
             let (title, icon) = page.map_or((tr("回收站", "Trash"), "bin"), |p| (p.title(), p.icon()));
             div().id(SharedString::from(format!("settings-nav-{page:?}"))).h(px(sb::ROW_H)).flex().items_center().pl(px(6.)).pr(px(4.)).rounded(px(sb::ROW_R))
+                .relative().children(crate::devtools::row_probe(title))
                 .text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).cursor_pointer()
                 .when(on, |d| d.bg(Theme::sidebar_selected()).text_color(Theme::text()))
                 .when(!on, |d| d.text_color(Theme::sidebar_text()).hover(|s| s.bg(Theme::sidebar_hover())))
@@ -1494,41 +1553,35 @@ impl Workspace {
                 .on_click(cx.listener(move |w, _, _, cx| match page { Some(p) => w.open_settings(p, cx), None => w.show_view(View::Trash, cx) }))
         };
         div().w(px(self.sidebar_w(window))).h_full().flex_none().flex().flex_col().text_color(Theme::text()).font_family(theme::ui_family())
-            .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().pl(px(theme::TRAFFIC_LIGHTS_W)).pr(px(12.)).title_bar().child(self.header_navigation(cx))
-                .child(div().flex_1()).children(update_pill(cx)))
-            // The document sidebar's rhythm: 主页 sits 8 under the bar, a section
-            // header like 我的文档's, rows `ROW_GAP` apart. 设置's line sits on
-            // 主页's, not a section header's: the 34pt box keeps the rows below.
-            .child(div().pt(px(8.)).px(px(sb::SB_X)).flex().flex_col()
-                .child(div().h(px(sb::SECTION_H)).pl(px(4.)).pt(px((sb::SECTION_TOP + sb::SECTION_H) / 2. - sb::ROW_H / 2.))
+            // The document sidebar's header, 返回 where 添加文件夹 is: the toggle doesn't move.
+            .child(self.sidebar_header(Some(crate::ui::header_icon("settings-back", "arrow-left").relative().child(self.folder_page.track("settings-back")).tip(tr("返回", "Back"), Some("Esc"))
+                .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx)))), cx))
+            // The document sidebar's rhythm: 设置 sits where the first folder's heading does, a
+            // row right under the bar, and the rows follow `ROW_GAP` apart.
+            .child(div().px(px(sb::SB_X)).flex().flex_col().gap(px(sb::ROW_GAP))
+                .child(div().h(px(sb::ROW_H)).flex().items_center().pl(px(4.))
                     .child(div().px(px(4.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::sidebar_section()).child(tr("设置", "Settings"))))
-                .child(div().flex().flex_col().gap(px(sb::ROW_GAP)).children(NAV.iter().map(|p| nav_row(*p, cx)).collect::<Vec<_>>())))
-            // Where 设置 was: 返回, back to the page 设置 was opened from.
-            .child(div().flex_1())
-            .child(sb::footer_slot(sb::footer_row("ft-back", "arrow-left", tr("返回", "Back")).tip(tr("返回", "Back"), Some("Esc"))
-                .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx)))))
+                .children(NAV.iter().map(|p| nav_row(*p, cx)).collect::<Vec<_>>()))
             .into_any_element()
     }
 
-    /// 收起 / 展开侧栏 and 返回, in the very box the document sidebar's
-    /// 收起侧栏 uses (28pt, 4pt past the traffic lights, glyph 17), so the
-    /// buttons don't move when switching between the document list and 设置.
+    /// With the sidebar hidden: 展开侧栏 where the document page's waits by the traffic lights,
+    /// alone, as there.
     pub(crate) fn header_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         let open = self.sidebar_open;
         let bar_button = |id: &'static str, glyph: &'static str| Button::ghost(id).icon(glyph).no_drag();
         // Touch: the button's glyph on the drawer's icon column, as on the document's bar.
-        div().flex().items_center().ml(px(if crate::design::touch() { sb::TOUCH_BUTTON_X - theme::TRAFFIC_LIGHTS_W } else { 4. })).gap(px(4.))
+        div().flex().items_center().ml(px(if crate::design::touch() { sb::TOUCH_BUTTON_X - theme::TRAFFIC_LIGHTS_W } else { 4. })).gap(px(crate::app::HEADER_ACTIONS_GAP))
             .child(bar_button("settings-collapse", sb::toggle_glyph(open))
                 .tip(if open { tr("收起侧栏", "Hide sidebar") } else { tr("展开侧栏", "Show sidebar") }, Some(crate::shortcuts::hint("workspace::ToggleSidebar", "⌘ + ]")))
                 .on_click(cx.listener(|w, _, _, cx| { w.sidebar_open = !w.sidebar_open; cx.notify(); })))
-            // 返回, where navigation goes back (HIG): to the page 设置 was opened from, as the footer's 返回 does.
-            .child(bar_button("settings-back", "arrow-left").tip(tr("返回", "Back"), Some("Esc"))
-                .on_click(cx.listener(|w, _, _, cx| w.close_settings(cx))))
+            // no 返回 beside it: it sits where the document sidebar's 添加文件夹 does, and that hides
+            // with the sidebar too, so the toggle stays the only thing by the traffic lights (Esc goes back)
             .into_any_element()
     }
 
     /// Back to where 设置 was opened from: the document, a folder's page or
-    /// 主页 (主页 when what it was is gone).
+    /// the default page (that one too when what it was is gone).
     pub(crate) fn close_settings(&mut self, cx: &mut Context<Self>) {
         // 回收站 opened from a phone's 设置 list: back to that list.
         if self.view == View::Trash && self.trash_from_settings { self.trash_from_settings = false; self.settings_index = true; return self.show_view(View::Settings, cx) }
@@ -1544,7 +1597,7 @@ impl Workspace {
         let back = match self.settings_from {
             View::Doc if self.editor.is_some() && self.current.is_some() => View::Doc,
             View::Folder if self.folder_current.is_some() => View::Folder,
-            _ => View::Home,
+            _ => View::Default,
         };
         self.show_view(back, cx);
     }
@@ -1594,13 +1647,14 @@ impl Workspace {
             Page::Appearance => self.appearance_page(cx),
             Page::Shortcuts => self.shortcut_settings(cx),
             Page::Library => self.library_page(cx),
+            Page::Agents => crate::agent_connect::page(cx),
             Page::About => self.about_page(cx),
         };
         div().flex_1().min_w_0().h_full().flex().flex_col().bg(Theme::bg_body()).text_color(Theme::text()).font_family(theme::ui_family())
             // The bar only drags the window; the page title heads the centred column.
             .child(div().h(px(crate::app::HEADER_H)).flex_none().flex().items_center().title_bar()
                 .when(!self.sidebar_open, |d| d.pl(px(theme::TRAFFIC_LIGHTS_W)).child(self.header_navigation(cx))))
-            .child(div().id("settings-content").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.settings_scroll)
+            .child(div().id("settings-content").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.settings_scroll).child(crate::design::scroll::bar_corners("settings-content", &self.settings_scroll, 0., crate::design::scroll::WINDOW_R))
                 .child(div().w_full().flex().flex_col().items_center().px(px(if phone { 16. } else { 32. })).pb(px(64.))
                     .child(div().w_full().max_w(px(if page == Page::Shortcuts { 760. } else { COLUMN_W })).flex().flex_col().gap(px(28.))
                         .child(div().flex().items_center().gap(px(16.))
@@ -1629,8 +1683,9 @@ impl Workspace {
                 }, cx)
             }).into_any_element()]
         };
-        div().w_full().flex().flex_col().gap(px(28.))
-            .child(group("group-general", None, vec![
+        let g = crate::design::geo();
+        div().w_full().flex().flex_col().gap(px(g.section_gap))
+            .child(group("group-general", Some(tr("基本", "Basics")), vec![
                 row(tr("界面语言", "Interface language"), None, {
                     let anchor = self.lang_anchor.clone();
                     let current = p.lang();
@@ -1639,23 +1694,23 @@ impl Workspace {
                         .relative()
                         .on_click(cx.listener(move |w, _, _, cx| { w.pref_menu = None; w.lang_menu = if w.lang_menu.is_some() { None } else { Some(current) }; cx.notify(); }))
                 }).into_any_element(),
-                row(tr("启动时打开", "On launch"), desc(tr("上次阅读的文档，或主页。", "The document read last, or the home page.")),
-                    segmented("pref-start", &[tr("上次文档", "Last document"), tr("主页", "Home page")], p.start_home as usize,
-                        |w, i, cx| w.set_pref(|p| p.start_home = i == 1, cx), cx)).into_any_element(),
-                row(tr("自动下载网络图片", "Download web images"), desc(tr("关闭后不联网，网络图片显示为占位，点击单独加载。", "When off the app stays offline; web images show a placeholder you can click to load.")),
-                    switch("pref-remote", p.remote_images).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.remote_images = !p.remote_images, cx)))).into_any_element(),
-                row(tr("自动检查更新", "Check for updates automatically"), desc(tr("只读取一份版本信息，不发送任何数据；新版本由你决定何时下载安装。", "Reads a version file and sends nothing about you; you decide when to download and install.")),
-                    switch("pref-update", p.auto_update).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.auto_update = !p.auto_update, cx)))).into_any_element(),
-                row(tr("退格键回到标题", "Backspace returns to title"), desc(tr("在正文开头按退格键时回到标题，第一段文字并入标题。关闭后光标留在正文。", "Backspace at the start of the body moves to the title, joining the first paragraph to it. When off the caret stays in the body.")),
-                    switch("pref-backspace-title", p.backspace_to_title).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.backspace_to_title = !p.backspace_to_title, cx)))).into_any_element(),
-                row(tr("中英文之间自动加空格", "Space between Chinese and English"), desc(tr("输入时在汉字和英文字母、数字之间自动加一个空格，代码、链接和公式里不加。已有的文字可用「编辑 › 整理本文空格」。", "While typing, adds a space between Chinese characters and Latin letters or digits, except in code, links and formulas. For existing text use Edit › Add Spaces Between Chinese and English.")),
-                    switch("pref-cjk-spacing", p.cjk_spacing).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.cjk_spacing = !p.cjk_spacing, cx)))).into_any_element(),
+                row(tr("启动时打开", "On launch"), desc(tr("上次阅读的文档，或文档文件夹。", "The document read last, or the documents folder.")),
+                    segmented("pref-start", &[tr("上次文档", "Last document"), tr("文档文件夹", "Documents folder")], p.start_folder as usize,
+                        |w, i, cx| w.set_pref(|p| p.start_folder = i == 1, cx), cx)).into_any_element(),
                 // The key as bound (Ctrl+N off macOS, or the user's own), in every language's text.
                 row(tr("快捷新建默认类型", "Quick new (⌘N)").replace("⌘N", new_key), Some(tr("⌘N 新建时创建的类型；「记住上次」沿用你上次从新建菜单选的类型。", "What ⌘N creates; “Last used” repeats the type you last picked from the New menu.").replace("⌘N", new_key).into()), {
                     let sel = match p.new_default.as_str() { "doc" => 1, "markdown" => 2, _ => 0 };
                     self.select("quick-new", vec![tr("记住上次", "Last used"), tr("文档", "Document"), "Markdown"], sel,
                         |w, i, cx| w.set_pref(|p| p.new_default = ["", "doc", "markdown"][i].into(), cx), cx)
                 }).into_any_element(),
+            ]))
+            .child(group("group-editing", Some(tr("编辑", "Editing")), vec![
+                row(tr("退格键回到标题", "Backspace returns to title"), desc(tr("在正文开头按退格键时回到标题，第一段文字并入标题。关闭后光标留在正文。", "Backspace at the start of the body moves to the title, joining the first paragraph to it. When off the caret stays in the body.")),
+                    switch("pref-backspace-title", p.backspace_to_title).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.backspace_to_title = !p.backspace_to_title, cx)))).into_any_element(),
+                row(tr("中英文之间自动加空格", "Space between Chinese and English"), desc(tr("输入时在汉字和英文字母、数字之间自动加一个空格，代码、链接和公式里不加。已有的文字可用「编辑 › 整理本文空格」。", "While typing, adds a space between Chinese characters and Latin letters or digits, except in code, links and formulas. For existing text use Edit › Add Spaces Between Chinese and English.")),
+                    switch("pref-cjk-spacing", p.cjk_spacing).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.cjk_spacing = !p.cjk_spacing, cx)))).into_any_element(),
+            ]))
+            .child(group("group-links", Some(tr("链接与搜索", "Links and search")), links.into_iter().chain([
                 // 网页搜索 opens the selection in the browser; which site is the
                 // user's habit, so it is a preference rather than a constant.
                 row(tr("网页搜索", "Web search"), desc(tr("选中文字后「网页搜索」用哪个网站。", "Which site “Web search” opens the selected text in.")), {
@@ -1663,7 +1718,15 @@ impl Workspace {
                     self.select("search-engine", vec!["Google", tr("百度", "Baidu"), "Bing", "DuckDuckGo"], sel,
                         |w, i, cx| w.set_pref(|p| p.search_engine = ["", "baidu", "bing", "duckduckgo"][i].into(), cx), cx)
                 }).into_any_element(),
-            ].into_iter().chain(links).collect()))
+            ]).collect()))
+            .child(group("group-privacy", Some(tr("网络与隐私", "Network and privacy")), vec![
+                row(tr("自动下载网络图片", "Download web images"), desc(tr("关闭后不联网，网络图片显示为占位，点击单独加载。", "When off the app stays offline; web images show a placeholder you can click to load.")),
+                    switch("pref-remote", p.remote_images).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.remote_images = !p.remote_images, cx)))).into_any_element(),
+                row(tr("自动检查更新", "Check for updates automatically"), desc(tr("只读取一份版本信息，不发送任何数据；新版本由你决定何时下载安装。", "Reads a version file and sends nothing about you; you decide when to download and install.")),
+                    switch("pref-update", p.auto_update).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.auto_update = !p.auto_update, cx)))).into_any_element(),
+                row(tr("匿名使用统计", "Anonymous usage statistics"), desc(tr("Quiet.md 和命令行工具 quiet 每天发送一次匿名的使用次数，例如应用打开了几次、各命令运行了几次。只有计数，不含任何个人信息、文档内容或文件名。", "Quiet.md and the quiet command line tool send anonymous usage counts once a day, such as how often the app was opened and each command ran. Only counts: no personal information, documents or file names.")),
+                    switch("pref-usage-stats", p.usage_stats.unwrap_or(p.auto_update)).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.usage_stats = Some(!p.usage_stats.unwrap_or(p.auto_update)), cx)))).into_any_element(),
+            ]))
             .into_any_element()
     }
 
@@ -1688,6 +1751,7 @@ impl Workspace {
             let open = self.font_menu.as_ref().is_some_and(|m| m.target == target);
             popup_button(format!("{}-font-picker", target.key()), label, open)
                 .child(canvas(move |b, _, _| { anchors.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().inset_0())
+                .children(crate::devtools::anchor_probe(format!("{}-font-picker", target.key())))
                 .relative()
                 .on_click(cx.listener(move |w, _, window, cx| w.toggle_font_menu(target, window, cx)))
         })
@@ -1725,8 +1789,8 @@ impl Workspace {
         // The page itself, the group's last row: no frame around it.
         let shown = { let list = themes::themes(); list.iter().find(|t| t.id == current).or_else(|| list.first()).map(|t| sample_page(t, PAGE_S)) };
         let sample = div().w_full().h(px(640.)).children(shown);
-        div().w_full().flex().flex_col().gap(px(28.))
-            .child(div().w_full().flex().flex_col().gap(px(8.))
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
+            .child(div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
                 .child(group("group-appearance", None, vec![
                     row(tr("外观", "Appearance"), None, {
                         let at = match prefs().appearance.as_str() { "light" => 1, "dark" => 2, _ => 0 };
@@ -1743,6 +1807,13 @@ impl Workspace {
                             w.set_pref(|p| p.opaque_window = !p.opaque_window, cx);
                             window.refresh();
                         }))).into_any_element(),
+                ]))
+                // 界面, then 文档: each font before its size, and the document theme last, right above
+                // the sample it shapes (the user's order, 2026-11-25)
+                .child(group("group-interface", Some(tr("界面", "Interface")), vec![
+                    // 界面字体: the chrome — sidebar, menus, this page.
+                    self.font_row(FontTarget::Ui, tr("界面字体", "Interface font"),
+                        tr("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "The sidebar, menus and settings use it; the note has its own below."), cx).into_any_element(),
                     // 界面字号: the sidebar and this page together, so the pairs
                     // (label, description) stay in proportion.
                     row(tr("界面字号", "Interface size"), None, {
@@ -1750,20 +1821,41 @@ impl Workspace {
                         segmented("ui-font", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large")], sel,
                             |w, i, cx| w.set_pref(|p| p.ui_font = ["small", "", "large"][i].into(), cx), cx)
                     }).into_any_element(),
-                    // 界面字体: the chrome — sidebar, menus, this page.
-                    self.font_row(FontTarget::Ui, tr("界面字体", "Interface font"),
-                        tr("侧栏、菜单和设置页用这个字体；文档用下面的「文档字体」。", "The sidebar, menus and settings use it; the note has its own below."), cx).into_any_element(),
-                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
+                ]))
+                .child(group("group-document", Some(tr("文档", "Document")), vec![
                     // 文档字体: every family the system has, for the note's
                     // body text and headings (code keeps the theme's).
                     self.font_row(FontTarget::Doc, tr("文档字体", "Document font"),
                         tr("正文和标题用这个字体，代码块仍用主题的等宽字体。", "Body text and headings use it; code keeps the theme's monospace face."), cx).into_any_element(),
                     // 正文字号: the note's text, headings and code together (themes::doc_len).
+                    // Presets and 自定义: a custom size (12–28pt) steps by 1 under the presets; a size that
+                    // is a preset's lights that preset unless 自定义 was picked this time.
                     row(tr("正文字号", "Text size"), None, {
-                        let sel = match prefs().doc_size.as_str() { "small" => 0, "large" => 2, "xlarge" => 3, _ => 1 };
-                        segmented("doc-size", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large"), tr("特大", "Extra large")], sel,
-                            |w, i, cx| w.set_pref(|p| p.doc_size = ["small", "", "large", "xlarge"][i].into(), cx), cx)
+                        let body = themes::active().num("page.size");
+                        let pref = prefs().doc_size.clone();
+                        let pt = themes::doc_size_pt(&pref, body);
+                        let preset = themes::DOC_PRESETS.iter().position(|n| themes::doc_size_pt(n, body) == pt);
+                        let custom = DOC_CUSTOM.with(|c| c.get()) || preset.is_none();
+                        let sel = if custom { 4 } else { preset.unwrap_or(1) };
+                        let step = move |d: f32| move |w: &mut Workspace, _: &ClickEvent, _: &mut Window, cx: &mut Context<Workspace>| {
+                            let next = (pt + d).clamp(themes::DOC_MIN, themes::DOC_MAX);
+                            if next != pt { w.set_doc_size_soon(format!("{next}"), cx) }
+                        };
+                        div().flex_none().flex().flex_col().items_end().gap(px(10.))
+                            .child(segmented("doc-size", &[tr("小", "Small"), tr("标准", "Default"), tr("大", "Large"), tr("特大", "Extra large"), tr("自定义", "Custom")], sel,
+                                move |w, i, cx| {
+                                    DOC_CUSTOM.with(|c| c.set(i == 4));
+                                    // 自定义 starts at the size in force; a preset brings its own
+                                    w.set_pref(|p| p.doc_size = if i == 4 { format!("{pt}") } else { themes::DOC_PRESETS[i].into() }, cx)
+                                }, cx))
+                            .when(custom, |d| d.child(div().flex_none().flex().items_center().gap(px(12.))
+                                .child(button("doc-size-minus", "−").on_click(cx.listener(step(-1.))))
+                                .child(div().w(px(56.)).flex().items_center().justify_center().text_size(px(theme::ui_font())).text_color(Theme::text()).child(format!("{pt} pt")))
+                                .child(button("doc-size-plus", "+").on_click(cx.listener(step(1.))))))
                     }).into_any_element(),
+                    row(tr("文档大纲", "Outline"), desc(tr("在正文左侧显示标题目录。", "Shows the headings beside the text.")),
+                        switch("pref-outline", !prefs().hide_outline).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.hide_outline = !p.hide_outline, cx)))).into_any_element(),
+                    row(tr("文档主题", "Document theme"), None, picker).into_any_element(),
                     sample.into_any_element(),
                 ].into_iter().chain(THEME_CSS.then(|| {
                     row(tr("主题 CSS", "Theme CSS"), Some(where_),
@@ -1799,7 +1891,7 @@ impl Workspace {
         let short = |root: &std::path::Path| if cfg!(target_os = "windows") { root.display().to_string() } else {
             dirs::home_dir().and_then(|h| root.strip_prefix(h).ok().map(|r| format!("~/{}", r.display()))).unwrap_or_else(|| root.display().to_string())
         };
-        // 主页: every top-level folder alike, each with its own 回收站 and history.
+        // Every top-level folder alike, each with its own 回收站 and history.
         let mut folders: Vec<AnyElement> = self.store.top_folders().into_iter().map(|(key, name, path, error)| {
             let (k, n, p) = (key.clone(), name.clone(), path.clone());
             let sub: SharedString = match error { Some(e) => format!("{} · {}", short(&path), diagnostic(&e)).into(), None => short(&path).into() };
@@ -1816,16 +1908,16 @@ impl Workspace {
             folders.push(row(tr("快速笔记保存到", "Quick notes go to"), desc(tr("「新建笔记窗口」和全局快捷键记下的笔记放在这个文件夹里。", "Notes from New Note Window and the global shortcut are saved in this folder.")),
                 self.select("quick-note-folder", open.into_iter().map(|r| r.1).collect(), at, move |w, i, cx| { let k = keys[i].clone(); w.set_pref(|p| p.quick_note_folder = k, cx) }, cx)).into_any_element());
         }
-        folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("打开电脑上已有的文件夹，或新建一个，都会显示在侧栏里。", "Open a folder already on your computer, or make a new one; either shows in the sidebar.").into()), div().flex_none().flex().gap(px(8.))
-            .child(button("open-folder", tr("打开…", "Open…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx))))
-            .child(button("new-folder", tr("新建…", "New…")).on_click(cx.listener(|w, _, window, cx| w.new_folder_dialog(window, cx))))).into_any_element());
-        div().w_full().flex().flex_col().gap(px(8.))
+        // A new folder is made in the system's own open panel (its 新建文件夹 button), not here.
+        folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("电脑上的文件夹原位使用，显示在侧栏里；要新的文件夹，在选择窗口里新建。", "A folder on your computer is used in place and shows in the sidebar; for a new one, make it in the picker.").into()),
+            button("open-folder", tr("添加…", "Add…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx)))).into_any_element());
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
             .child(group("group-folders", Some(tr("文件夹", "Folders")), folders))
             .child(group("group-library", None, vec![
-                row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", crate::store::TRASH_DAYS).into()),
+                row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", self.store.trash_days()).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
                 // #237: files no document (the Trash included) mentions.
-                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和本机文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and local files. Nothing is moved until you confirm.").into()),
+                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和单独打开过的文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and files opened on their own. Nothing is moved until you confirm.").into()),
                     button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
                         let root = crate::store::Store::active_dir();
                         let (live, outside) = w.sweep_inputs(window, cx);
@@ -1849,7 +1941,7 @@ impl Workspace {
     }
 
     fn about_page(&self, cx: &mut Context<Self>) -> AnyElement {
-        div().w_full().flex().flex_col().gap(px(28.)).child(div().w_full().pt(px(24.)).flex().flex_col().items_center().gap(px(10.))
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap)).child(div().w_full().pt(px(24.)).flex().flex_col().items_center().gap(px(10.))
             .child(img(about_icon()).size(px(88.)))
             .child(div().text_size(px(20.)).line_height(px(26.)).font_weight(FontWeight::SEMIBOLD).child("Quiet.md"))
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 5.)).text_color(Theme::text_caption()).child(format!("{} {}", tr("版本", "Version"), env!("CARGO_PKG_VERSION"))))
@@ -1858,8 +1950,6 @@ impl Workspace {
             .child(group("group-update", None, vec![update_row(cx).into_any_element()]))
             .child(group("group-repo", None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
                 button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
-            .child(group("group-onboarding", None, vec![row("Onboarding", Some(tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is").into()),
-                button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
     }
 }
@@ -1949,7 +2039,6 @@ pub(crate) fn translate(text: &str, lang: Lang) -> &str {
 pub(crate) fn localize(text: &str, english: bool) -> &str {
     if !english { return text; }
     match text {
-        "主页" => "Home",
         "我的文档" => "My documents",
         "置顶" => "Pinned",
         "收藏" => "Favorites",
@@ -1988,11 +2077,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "导出" => "Export",
         "下载" => "Download",
         "移动到" => "Move to",
-        "添加到收藏" => "Add to favorites",
-        "取消收藏" => "Remove from favorites",
         "取消置顶" => "Unpin",
         "文档信息" => "Document information",
-        "字数统计" => "Word count",
         "快捷键" => "Keyboard shortcuts",
         "最近浏览" => "Recently viewed",
         "所有文档" => "All documents",
@@ -2001,12 +2087,9 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "创建" => "Created",
         "修改" => "Modified",
         "访问" => "Visited",
-        "收藏时间" => "Date favorited",
         "文档标题" => "Document title",
         "暂无文档" => "No documents yet",
         "没有找到相关文档" => "No documents found",
-        "暂无收藏文档" => "No favorites yet",
-        "收藏的文档会显示在这里" => "Your favorites will appear here",
         "左对齐" => "Align left",
         "居中对齐" => "Align center",
         "右对齐" => "Align right",
@@ -2175,10 +2258,7 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "删除成功" => "Deleted successfully",
         "已添加到“置顶”" => "Pinned",
         "已从“置顶”移除" => "Unpinned",
-        "已添加到“收藏”" => "Added to favorites",
-        "已从“收藏”中移除" => "Removed from favorites",
         "保存失败" => "Save failed",
-        "返回主页" => "Back to Home",
         "搜索(⌘ + J)" => "Search (⌘ + J)",
         "导出失败，请重试" => "Export failed. Please try again.",
         "正在导出文档" => "Exporting document",
@@ -2269,8 +2349,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "文件不存在" => "File not found",
         "文件夹不存在" => "Folder not found",
         "这个文件夹在文档库里，它的内容已经在我的文档中" => "This folder is inside the library; its notes are already in My documents",
-        "这个文件夹里有文档库，不能作为本机文件夹打开" => "This folder holds the library, so it can't be opened as a folder on this computer",
-        "本机文件夹和文档库之间只能复制，不能移动" => "Between folders on this computer and the library, notes can be copied but not moved",
         "加载失败，" => "Could not load. ",
         "点击重试" => "Retry",
         "图片过小，请放大后重试" => "Image too small. Enlarge it and try again.",
@@ -2429,17 +2507,14 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "不展示" => "None",
         "不等于" => "Is not",
         "业务" => "Business",
-        "个隐藏字段" => "hidden fields",
         "中等" => "Medium",
         "为空" => "Is empty",
         "人员" => "Person",
         "人民币" => "Chinese yuan",
-        "任一" => "Any",
+        "任一" => "any",
         "位" => "places",
-        "位小数" => "decimal places",
         "低" => "Short",
         "俄罗斯卢布" => "Russian ruble",
-        "保留" => "Keep",
         "修改字段/列" => "Edit field",
         "倒序" => "Descending",
         "允许关联多条记录" => "Allow linking to multiple records",
@@ -2459,7 +2534,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "分组" => "Group",
         "创建于" => "Created",
         "删除字段/列" => "Delete field",
-        "个字段" => "fields",
+        "主字段作为记录标题保留" => "Kept as each record’s title",
+        "撤销可以恢复。" => "Undo brings it back.",
         "删除数据表" => "Delete table",
         "删除视图" => "Delete view",
         "删除记录" => "Delete record",
@@ -2504,12 +2580,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "已勾选" => "Checked",
         "已填写" => "Filled",
         "已填写占比" => "Percent filled",
-        "已选" => "Selected",
         "巴西雷亚尔" => "Brazilian real",
         "常规" => "General",
         "平均值" => "Average",
         "成员" => "Members",
-        "所有" => "All",
+        "所有" => "all",
         "按 A 到 Z 排序" => "Sort A to Z",
         "按 Z 到 A 排序" => "Sort Z to A",
         "按此字段分组" => "Group by this field",
@@ -2534,7 +2609,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "早于" => "Is before",
         "显示时间" => "Include time",
         "晚于" => "Is after",
-        "暂未支持" => " is not supported yet",
         "最后更新于" => "Last modified",
         "最后更新时间" => "Last modified time",
         "最大值" => "Max",
@@ -2552,13 +2626,23 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "未来 7 天内" => "Next 7 days",
         "本周" => "This week",
         "本月" => "This month",
-        "条件" => "conditions",
         "条码" => "Barcode",
-        "条记录" => "records",
-        "条，使用筛选缩小范围" => "more: narrow them down with a filter",
         "查找引用" => "Lookup",
         "查找或创建选项" => "Find or create an option",
         "查看详情" => "Open record",
+        "打开链接" => "Open link",
+        "⌘ + 点击" => "⌘ + click",
+        "一起删除" => "Delete both",
+        "保留笔记" => "Keep the notes",
+        "找不到笔记" => "Note not found",
+        "指向已有笔记" => "Point to an existing note",
+        "搜索笔记" => "Search notes",
+        "整页打开" => "Open as a page",
+        "新建笔记" => "New note",
+        "没有笔记" => "No notes",
+        "独立的数据表才能加笔记列" => "Only a data table of its own can have a note column",
+        "空笔记" => "Empty",
+        "笔记" => "Note",
         "欧元" => "Euro",
         "求和" => "Sum",
         "没有符合筛选条件的记录" => "No records match the filter",
@@ -2582,7 +2666,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "看板视图" => "Kanban view",
         "看板需要按单选字段分组，请先添加一个单选字段" => "A kanban is grouped by a single select field: add one first",
         "空" => "Empty",
-        "符合以下" => "Match",
         "等于" => "Is",
         "筛选" => "Filter",
         "统计" => "Summary",
@@ -2626,11 +2709,11 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "货币" => "Currency",
         "超链接" => "URL",
         "超高" => "Extra tall",
+        "适应内容" => "Fit to content",
         "输入名字后回车添加" => "Type a name and press Enter",
         "输入名称后回车新建选项" => "Type a name and press Enter to create an option",
         "过去 30 天内" => "Past 30 days",
         "过去 7 天内" => "Past 7 days",
-        "还有" => "And",
         "还没有附件" => "No attachments yet",
         "进度" => "Progress",
         "选择一个单选或人员字段作为看板的分组依据" => "Choose a single select or person field to stack the kanban by",
@@ -2708,6 +2791,15 @@ fn diagnostic_for(message: &str, english: bool) -> String {
         ("这篇文档还在从 iCloud 下载，请稍后再打开", "This document is still downloading from iCloud. Open it again in a moment."),
         ("恢复文档 {} 失败，已恢复的文档保留在文档库", "Could not restore document {}. Documents already restored remain in Documents."),
         ("文档已恢复，回收站索引清理失败：{}", "Document restored, but the Trash index could not be cleaned up: {}"),
+        // 移到另一个顶层文件夹（core across.rs）
+        ("已在这个文件夹里", "Already in this folder"),
+        ("不能移动到自身或后代文件夹中", "A folder can't move into itself or a folder inside it"),
+        ("已存在同名文件：{}", "A file with this name is already there: {}"),
+        ("文档或文件夹不存在", "This page or folder is no longer here"),
+        ("旧格式的文档库没有真实文件夹", "Move the library to real folders first"),
+        ("单独打开的文件只能复制进文件夹", "A file opened on its own is copied into a folder, not moved"),
+        ("目标位置已改变，请重试", "The folder changed. Try again."),
+        ("目标文件夹里已有相同编号的文档", "That folder already has a page with this ID"),
     ];
     for (source, target) in TEMPLATES {
         let parts: Vec<_> = source.split("{}").collect();
@@ -2767,12 +2859,14 @@ mod localization_tests {
         assert_eq!(diagnostic_for(source, false), source);
         assert_eq!(diagnostic_for(source, true), "Could not remove expired Trash document 我的笔记.xml: Permission denied");
         assert_eq!(diagnostic_for("文档索引已损坏，已从备份恢复（原文件保留为 index.json.bad）", true), "Document index was damaged and restored from backup (original retained as index.json.bad).");
+        assert_eq!(diagnostic_for("已存在同名文件：项目/甲.xml", true), "A file with this name is already there: 项目/甲.xml");
+        assert_eq!(diagnostic_for("目标位置已改变，请重试", true), "The folder changed. Try again.");
         assert_eq!(diagnostic_for("unknown OS error", true), "unknown OS error");
     }
 
     #[test]
     fn user_titles_are_never_translation_keys() {
-        for title in ["主页", "收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
+        for title in ["收藏", "未命名文档", "My notes", "我的中文笔记"] { assert_eq!(display_title(title), title); }
     }
 }
 
@@ -2862,7 +2956,7 @@ mod tests {
         let dl: Vec<_> = ["lxgw-wenkai", "zhuque-fangsong"].iter().filter_map(|id| crate::font_downloads::entry(id)).collect();
         let zh = arrange("", false, &all, &dl, &[], &[], Lang::Zh);
         assert_eq!(zh[0], Choice::Reset);
-        // English labels under test (the language store isn't set)
+        // English labels: tests read the interface in English (`load`)
         assert_eq!(headers(&zh), ["Chinese sans", "Chinese serif", "Kai & handwriting", "Monospace", "Sans serif", "Serif"]);
         assert_eq!(fonts(&zh), ["PingFang SC", "Songti SC", "\u{1}zhuque-fangsong", "Kaiti SC", "\u{1}lxgw-wenkai", "Menlo", "Helvetica", "Georgia"]);
         assert!(matches!(zh.last(), Some(Choice::Others(1, false))), "Webdings folded");

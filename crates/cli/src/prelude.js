@@ -20,6 +20,8 @@ const __where = (w) => {
   }
   throw Object.assign(new TypeError(`where: use "start", "end", {after: ref}, {before: ref}, {into: ref} or {endOf: heading}`), { code: "bad_args" });
 };
+// which 数据表: a datatable block (`at`) and a table of its file (`table`)
+const __t = (o) => ({ at: __anchor(o.at), table: o.table });
 const __fmt = (v) => typeof v === "string" ? v : v === undefined ? "undefined" : JSON.stringify(v);
 globalThis.console = { log: (...a) => __print(a.map(__fmt).join(" ")), info: (...a) => __print(a.map(__fmt).join(" ")), warn: (...a) => __print(a.map(__fmt).join(" ")), error: (...a) => __print(a.map(__fmt).join(" ")) };
 globalThis.print = console.log;
@@ -45,12 +47,28 @@ class Doc {
   rename(title) { this._call("rename", { title }); }
   moveTo(folder) { this._call("mv", { folder: folder ?? "/" }); }
   trash() { this._call("trash"); }
+  pin(on = true) { this._call(on ? "pin" : "unpin"); }
+  duplicate(title) { this._call("duplicate", { title }); }
   links() { return this._call("links"); }
-  table(o = {}) { return this._call("table", { at: __anchor(o.at), table: o.table, limit: o.limit, offset: o.offset }); }
+  table(o = {}) { return this._call("table", { ...__t(o), view: o.view, where: o.where, any: o.any, sort: o.sort, group: o.group, fields: o.fields, stats: o.stats, as: o.as, limit: o.limit, offset: o.offset }); }
   addRows(rows, o = {}) { return this._call("table_add", { rows, at: __anchor(o.at), table: o.table }).added; }
   updateRows(rows, o = {}) { return this._call("table_update", { rows, at: __anchor(o.at), table: o.table }).updated; }
   updateRow(row, set, o = {}) { return this.updateRows([{ ...set, _id: typeof row === "object" ? row._id : row }], o); }
   deleteRows(rows, o = {}) { return this._call("table_delete", { rows: [].concat(rows).map((r) => typeof r === "object" ? r._id : r), at: __anchor(o.at), table: o.table }).deleted; }
+  updateWhere(where, set, o = {}) { return this._call("table_update", { ...__t(o), where, set, any: o.any, view: o.view }).updated; }
+  deleteWhere(where, o = {}) { return this._call("table_delete", { ...__t(o), where, any: o.any, view: o.view }).rows; }
+  importRows(rows, o = {}) { return this._call("table_import", { ...__t(o), ...(typeof rows === "string" ? { csv: rows } : { rows }), create_fields: o.createFields }); }
+  addField(name, type, o = {}) { return this._call("table_field_add", { ...__t(o), name, type, options: o.options, formula: o.formula, link: o.link, lookup: o.lookup, rollup: o.rollup, format: o.format, after: o.after, description: o.description, two_way: o.twoWay, single: o.single }); }
+  changeField(name, c = {}) { return this._call("table_field_change", { ...c, ...__t(c), field: name, add_options: c.addOptions, remove_options: c.removeOptions, rename_options: c.renameOptions }); }
+  deleteFields(names, o = {}) { return this._call("table_field_delete", { ...__t(o), fields: [].concat(names) }); }
+  views(o = {}) { return this._call("table_views", __t(o)).views; }
+  addView(name, o = {}) { return this._call("table_view_add", { ...__t(o), name, kind: o.kind }).added; }
+  setView(name, s = {}) { return this._call("table_view_set", { ...s, ...__t(s), view: name }).view; }
+  renameView(name, to, o = {}) { this._call("table_view_rename", { ...__t(o), view: name, name: to }); }
+  deleteView(name, o = {}) { this._call("table_view_delete", { ...__t(o), view: name }); }
+  addTable(name, o = {}) { return this._call("table_new", { at: __anchor(o.at), name, fields: o.fields, csv: o.csv }); }
+  renameTable(name, to, o = {}) { this._call("table_rename", { at: __anchor(o.at), table: name, name: to }); }
+  removeTable(name, o = {}) { return this._call("table_remove", { at: __anchor(o.at), table: name, force: o.force }); }
   board(o = {}) { return this._call("board", { at: __anchor(o.at), full: o.full }); }
   addToBoard(elements, o = {}) { return this._call("board_add", { elements, at: __anchor(o.at), replace: o.replace }).added; }
   removeFromBoard(ids, o = {}) { return this._call("board_remove", { ids: [].concat(ids), at: __anchor(o.at) }).removed; }
@@ -61,7 +79,7 @@ class Doc {
 globalThis.lib = {
   ls(folder, o = {}) { if (typeof folder === "object" && folder) { o = folder; folder = o.folder; } return __call("ls", { folder, recursive: o.recursive, kind: o.kind }); },
   find(query, o = {}) { return __call("find", { query, folder: o.folder ?? o.in, limit: o.limit }); },
-  doc(path, o = {}) { return new Doc(__call("open", { doc: path, rev: o.rev })); },
+  doc(path, o = {}) { return new Doc(__call("load", { doc: path, rev: o.rev })); },
   create(title, o = {}) { const r = __call("create", { title, folder: o.folder ?? o.in, md: o.md, markdown: o.markdown, kind: o.kind, csv: o.csv, fields: o.fields }); return r.key ? new Doc(r) : r; },
   mkdir(name, o = {}) { return __call("mkdir", { name, folder: o.folder ?? o.in }); },
   check() { return __call("check"); },

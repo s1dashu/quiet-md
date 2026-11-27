@@ -11,7 +11,7 @@ use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
 use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
 
 use crate::linux::platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
-use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
+use gpui::{ClipboardEntry, ClipboardItem, ClipboardString, Image, ImageFormat, hash};
 
 /// Text mime types that we'll offer to other programs.
 pub(crate) const TEXT_MIME_TYPES: [&str; 3] =
@@ -114,7 +114,11 @@ impl<T: ReceiveData> DataOffer<T> {
         // copying from eg: firefox inserts a lot of blank
         // lines, and that is super annoying.
         let result = text_content.replace("\r\n", "\n");
-        Some(ClipboardItem::new_string(result))
+        // quiet.md: the formatted version beside the text.
+        let html = self.has_mime_type("text/html").then(|| self.read_bytes(connection, "text/html")).flatten().and_then(|b| crate::linux::platform::clipboard_html(&b));
+        let mut string = ClipboardString::new(result);
+        string.html = html;
+        Some(ClipboardItem { entries: vec![ClipboardEntry::String(string)] })
     }
 
     fn read_image(&self, connection: &Connection) -> Option<ClipboardItem> {

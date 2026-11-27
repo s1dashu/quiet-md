@@ -351,6 +351,8 @@ fn migrate(root: &Path, format: u32, plan: &mut Plan, warnings: &mut Vec<String>
     let internal = root.join(INTERNAL);
     let docs_dir = root.join("docs");
     let mut index: HashMap<String, Meta> = load_json(&root.join("index.json"), "文档索引", warnings);
+    // `Attached::of` writes no 收藏: it goes over as the 置顶 it is now.
+    index.values_mut().for_each(Meta::take_star);
     let trash: HashMap<String, Trashed> = load_json(&root.join("trash").join("index.json"), "回收站索引", warnings);
     let file_of = |id: &str| -> Option<PathBuf> { ["xml", "md"].iter().map(|x| docs_dir.join(format!("{id}.{x}"))).find(|p| p.fs_is_file()) };
     if format < 2 {

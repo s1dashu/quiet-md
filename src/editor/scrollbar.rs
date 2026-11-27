@@ -2,14 +2,14 @@
 //! the virtualized list after it lays out, so it never lags a frame behind.
 
 use super::view::Editor;
-use crate::feishu_theme::{self as theme, Theme, craft};
+
 use gpui::*;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-const W: f32 = 4.;
-const W_HOT: f32 = 6.;
-const INSET: f32 = 2.;
+// The shared look (`design::scroll`, shadcn's ScrollArea): a 7pt `border` thumb 1pt in, shown while
+// the pointer is on the bar, while the page scrolls and while held, fading out after.
+use crate::design::scroll::{HELD, HOVER, PAD as INSET, THUMB as W, WINDOW_R, ends_for, thumb_tone};
 const MIN_H: f32 = 32.;
 /// The grab zone is wider than the thumb.
 const HIT_W: f32 = 12.;
@@ -23,6 +23,10 @@ pub struct Scrollbar {
     /// A wide table's thumb while dragged: pointer offset into the thumb, and
     /// its width (the middle is unused).
     grab: Cell<Option<(Pixels, Pixels, Pixels)>>,
+    fade: crate::design::scroll::Fade,
+    tone: crate::design::scroll::Tone,
+    /// The pointer was over the table last paint (a wide table's bar).
+    over: Cell<bool>,
 }
 
 /// A thumb being dragged. It stays under the pointer, and the page follows
@@ -109,13 +113,16 @@ impl Editor {
                         grab = None;
                     }
                 }
-                let (y, h) = thumb(offset, content, view, bounds.size.height, grab)?;
-                let top = bounds.top() + y;
-                let f = if bounds.size.height > h { y / (bounds.size.height - h) } else { 0. };
+                // under the top bar a straight edge; at the bottom the page runs into the window's corner
+                let (ends, ends_b) = (px(INSET), px(ends_for(WINDOW_R)));
+                let track = (bounds.size.height - ends - ends_b).max(px(1.));
+                let (y, h) = thumb(offset, content, view, track, grab)?;
+                let top = bounds.top() + ends + y;
+                let f = if track > h { y / (track - h) } else { 0. };
                 let zone = Bounds::new(point(bounds.right() - px(HIT_W), top), size(px(HIT_W), h));
                 Some((top, h, f, window.insert_hitbox(zone, HitboxBehavior::BlockMouseExceptScroll)))
             },
-            move |bounds, state, window, _| {
+            move |bounds, state, window, cx| {
                 let sb = sb2;
                 let Some((top, h, f, hitbox)) = state else {
                     if sb.held.take().is_some() {
@@ -127,17 +134,10 @@ impl Editor {
                 let hovered = hitbox.is_hovered(window);
                 sb.hot.set(hovered);
                 let dragging = sb.held.get().is_some_and(|g| g.down);
-                let w = if hovered || dragging { W_HOT } else { W };
-                // Black at 22%, darker under the pointer and while held.
-                let color = if dragging {
-                    theme::ca(craft::N1000, 0.4)
-                } else if hovered {
-                    theme::ca(craft::N1000, 0.32)
-                } else {
-                    Theme::scrollbar_thumb()
-                };
-                let thumb = Bounds::new(point(bounds.right() - px(INSET + w), top), size(px(w), h));
-                window.paint_quad(fill(thumb, color).corner_radii(px(w / 2.)));
+                let a = sb.fade.step(hovered || dragging, f32::from(top), window, cx);
+                let tone = sb.tone.step(if dragging { HELD } else if hovered { HOVER } else { 0. }, window, cx);
+                let thumb = Bounds::new(point(bounds.right() - px(INSET + W), top), size(px(W), h));
+                if a > 0. { window.paint_quad(fill(thumb, thumb_tone(tone, a)).corner_radii(px(W / 2.))); }
 
                 window.on_mouse_event({
                     let (sb, hitbox, list) = (sb.clone(), hitbox.clone(), list2.clone());
@@ -158,8 +158,8 @@ impl Editor {
                         }
                         match sb.held.get().filter(|g| g.down) {
                             Some(g) if ev.pressed_button == Some(MouseButton::Left) => {
-                                let travel = (bounds.size.height - g.h).max(px(1.));
-                                let f = ((ev.position.y - g.dy - bounds.top()) / travel).clamp(0., 1.);
+                                let travel = (bounds.size.height - px(INSET + ends_for(WINDOW_R)) - g.h).max(px(1.));
+                                let f = ((ev.position.y - g.dy - bounds.top() - px(INSET)) / travel).clamp(0., 1.);
                                 sb.held.set(Some(Grab { f, tries: TRIES, moved: Instant::now(), ..g }));
                                 let (_, content, view) = list.estimated_scroll_metrics();
                                 list.scroll_to_estimated_offset(aim(f, content, view));
@@ -205,6 +205,7 @@ impl Editor {
 pub(super) fn table_scrollbar(handle: ScrollHandle, sb: std::rc::Rc<Scrollbar>) -> Canvas<Option<(Pixels, Pixels, Hitbox)>> {
     let sb2 = sb.clone();
     let list = handle.clone();
+    let area = handle.clone();
     canvas(
         move |bounds, window, _| {
             let max = list.max_offset().x;
@@ -221,7 +222,7 @@ pub(super) fn table_scrollbar(handle: ScrollHandle, sb: std::rc::Rc<Scrollbar>) 
             let zone = Bounds::new(point(left, bounds.top()), size(w, px(HIT_W)));
             Some((left, w, window.insert_hitbox(zone, HitboxBehavior::BlockMouseExceptScroll)))
         },
-        move |bounds, state, window, _| {
+        move |bounds, state, window, cx| {
             let sb = sb2;
             let Some((left, w, hitbox)) = state else {
                 sb.grab.set(None);
@@ -231,16 +232,19 @@ pub(super) fn table_scrollbar(handle: ScrollHandle, sb: std::rc::Rc<Scrollbar>) 
             let hovered = hitbox.is_hovered(window);
             sb.hot.set(hovered);
             let dragging = sb.grab.get().is_some();
-            let h = if hovered || dragging { W_HOT } else { W };
-            let color = if dragging {
-                theme::ca(craft::N1000, 0.4)
-            } else if hovered {
-                theme::ca(craft::N1000, 0.32)
-            } else {
-                Theme::scrollbar_thumb()
-            };
-            let thumb = Bounds::new(point(left, bounds.top() + px(INSET)), size(w, px(h)));
-            window.paint_quad(fill(thumb, color).corner_radii(px(h / 2.)));
+            // shown while the pointer is over the table, as shadcn's ScrollArea is over its box
+            let over = area.bounds().contains(&window.mouse_position()) || bounds.contains(&window.mouse_position());
+            if over != sb.over.get() { sb.over.set(over); }
+            window.on_mouse_event({
+                let (sb, area) = (sb.clone(), area.clone());
+                move |ev: &MouseMoveEvent, phase, window, _| {
+                    if phase == DispatchPhase::Bubble && (area.bounds().contains(&ev.position) || bounds.contains(&ev.position)) != sb.over.get() { window.refresh(); }
+                }
+            });
+            let a = sb.fade.step(over || hovered || dragging, f32::from(left), window, cx);
+            let tone = sb.tone.step(if dragging { HELD } else if hovered { HOVER } else { 0. }, window, cx);
+            let thumb = Bounds::new(point(left, bounds.top() + px(INSET)), size(w, px(W)));
+            if a > 0. { window.paint_quad(fill(thumb, thumb_tone(tone, a)).corner_radii(px(W / 2.))); }
 
             window.on_mouse_event({
                 let (sb, hitbox) = (sb.clone(), hitbox.clone());

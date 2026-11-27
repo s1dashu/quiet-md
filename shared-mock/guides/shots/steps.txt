@@ -1,20 +1,15 @@
-# The Getting Started screenshots. SHOT is `shot` (offscreen check) or `deskshot`
-# (on the wallpaper, via shots.sh). Window positions assume a 1352×878 screen.
+# The Getting Started screenshots of the guides' own library (shots.sh; home.jpg is
+# the README's folder page). Offscreen shots, put on the meadow by compose.py.
 resize 1280 800
-place 126 104
-wait 900
-key cmd-alt-home
-wait 1200
-move 1090 690
-wait 400
-SHOT home
-click 120 232
+wait 1500
+row Documents
+wait 600
+row Writing: text, lists and callouts
 wait 1200
 move 1270 790
 wait 400
-SHOT editor
+shot editor
 resize 900 600
-place 226 154
 wait 700
 move 890 590
 wait 400
@@ -34,11 +29,11 @@ key cmd-left
 key right right right right
 key shift-right shift-right shift-right shift-right shift-right shift-right shift-right shift-right shift-right
 wait 900
-SHOT toolbar
+shot toolbar
 key down
 key down
 key cmd-right
 key enter
 type /
 wait 900
-SHOT slash
+shot slash

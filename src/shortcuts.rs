@@ -41,7 +41,10 @@ pub fn init(cx: &mut App) {
     let base = match cx.try_global::<Shortcuts>() { Some(s) => s.base.clone(), None => cx.key_bindings().borrow().bindings().cloned().collect::<Vec<_>>() };
     #[cfg(not(target_os = "macos"))]
     let base = if mac() || again { base } else { base.into_iter().filter_map(pc_binding).collect() };
-    let custom = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let mut custom = fdl_core::vfs::read(path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    // Older builds' 快速新建笔记 switch, left off: its key cleared instead, once.
+    let mut p = crate::settings::prefs();
+    if migrate_quick_switch(&mut custom, p.quick_hotkey) && write(&custom).is_ok() { p.quick_hotkey = true; let _ = crate::settings::save(&p); }
     cx.set_global(Shortcuts { base, custom });
     rebuild(cx);
 }
@@ -74,7 +77,36 @@ fn load(keys: &str, like: &KeyBinding) -> Option<KeyBinding> {
 
 #[cfg(test)]
 mod tests {
-    use super::{pc_binding, unparse};
+    use super::{migrate_quick_switch, pc_binding, store, stored, unparse};
+    use std::collections::BTreeMap;
+    #[test]
+    fn a_cleared_key_is_off_until_reset() {
+        let mut custom = BTreeMap::new();
+        assert_eq!(stored(&custom, "global", "alt-space"), "alt-space");
+        // 移除: kept as empty, which reads as no key at all (not the default)
+        store(&mut custom, "global", "", "alt-space");
+        assert_eq!(stored(&custom, "global", "alt-space"), "");
+        // 恢复默认: back to the default, nothing kept
+        store(&mut custom, "global", "alt-space", "alt-space");
+        assert!(custom.is_empty());
+        assert_eq!(stored(&custom, "global", "alt-space"), "alt-space");
+        // each global key on its own
+        store(&mut custom, "global-last", "", "cmd-alt-space");
+        assert_eq!((stored(&custom, "global", "alt-space"), stored(&custom, "global-last", "cmd-alt-space")), ("alt-space".into(), String::new()));
+    }
+    #[test]
+    fn the_old_quick_note_switch_off_clears_its_key() {
+        let mut custom = BTreeMap::from([("global".to_string(), "ctrl-alt-n".to_string())]);
+        assert!(!migrate_quick_switch(&mut custom, true));
+        assert_eq!(custom["global"], "ctrl-alt-n");
+        assert!(migrate_quick_switch(&mut custom, false));
+        assert_eq!(custom["global"], "");
+        // once: already cleared, nothing to do
+        assert!(!migrate_quick_switch(&mut custom, false));
+        let mut fresh = BTreeMap::new();
+        assert!(migrate_quick_switch(&mut fresh, false));
+        assert_eq!(stored(&fresh, "global", "alt-space"), "");
+    }
     use gpui::KeyBinding;
     #[test]
     fn pc_word_deletion_has_no_line_deletion_collision() {
@@ -212,17 +244,22 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
         "Minimize" => (0, "最小化窗口", "Minimize window"),
         "ToggleFullScreen" => (0, "进入 / 退出全屏", "Enter / exit full screen"),
         "OpenSettings" => (0, "打开设置", "Open Settings"),
-        "GoHome" => (0, "返回主页", "Go to Home"),
         "ToggleSidebar" => (0, "展开 / 收起侧栏", "Show / hide sidebar"),
+        "ToggleFocus" => (1, "进入 / 退出专注模式", "Enter / exit Focus Mode"),
         "ToggleDarkMode" => (0, "切换深色 / 浅色", "Toggle dark mode"),
         "FocusSearch" => (0, "搜索文档", "Search documents"),
         "ToggleShortcuts" => (0, "查看快捷键", "Show shortcuts"),
         "OpenFile" => (1, "打开 Markdown 文件", "Open Markdown file"),
-        "OpenFolder" => (1, "打开文件夹", "Open folder"),
+        "OpenFolder" => (1, "添加文件夹", "Add folder"),
         "ImportDoc" => (1, "导入文档", "Import documents"),
         "Save" => (1, "保存文档", "Save document"),
         "EditMode" => (1, "编辑模式", "Edit mode"),
         "ReadMode" => (1, "阅读模式", "Reading mode"),
+        "ToggleTypewriter" => (1, "打字机模式", "Typewriter mode"),
+        "ZoomInText" => (1, "放大正文", "Zoom in"),
+        "ZoomOutText" => (1, "缩小正文", "Zoom out"),
+        "ResetTextZoom" => (1, "正文实际大小", "Actual size"),
+        "ToggleParagraphFocus" => (1, "段落聚焦", "Paragraph focus"),
         "FindInDoc" => (1, "文档内查找", "Find in document"),
         "ReplaceInDoc" => (1, "查找和替换", "Find and replace"),
         "Undo" => (2, "撤销", "Undo"),
@@ -268,6 +305,20 @@ fn info(name: &str) -> Option<(usize, &'static str, &'static str)> {
     })
 }
 pub fn label(name: &str) -> Option<&'static str> { info(name).map(|(_, zh, en)| tr(zh, en)) }
+/// Keeps `id` on `key` in the shortcuts file: nothing at its default, else the key; an empty
+/// key is cleared, which turns the shortcut off (a global one isn't registered).
+fn store(custom: &mut BTreeMap<String, String>, id: &str, key: &str, default: &str) {
+    if key == default { custom.remove(id); } else { custom.insert(id.into(), key.into()); }
+}
+/// The key `id` runs on: its own ("" when cleared), else `default`.
+fn stored(custom: &BTreeMap<String, String>, id: &str, default: &str) -> String { custom.get(id).cloned().unwrap_or_else(|| default.into()) }
+/// Older builds turned 快速新建笔记 off with a switch (`Preferences::quick_hotkey`); now a
+/// cleared key is off. Whether `custom` changed.
+fn migrate_quick_switch(custom: &mut BTreeMap<String, String>, quick_hotkey: bool) -> bool {
+    if quick_hotkey || custom.get("global").is_some_and(String::is_empty) { return false }
+    custom.insert("global".into(), String::new());
+    true
+}
 fn default_key(s: &Shortcuts, id: &str) -> String {
     if id == "global" { return GLOBAL_DEFAULT.into(); }
     if id == LAST_ID { return LAST_DEFAULT.into(); }
@@ -276,7 +327,7 @@ fn default_key(s: &Shortcuts, id: &str) -> String {
 }
 /// The key an action runs on now.
 pub fn key_of(cx: &App, id: &str) -> String {
-    cx.try_global::<Shortcuts>().map(|s| s.custom.get(id).cloned().unwrap_or_else(|| default_key(s, id))).unwrap_or_default()
+    cx.try_global::<Shortcuts>().map(|s| stored(&s.custom, id, &default_key(s, id))).unwrap_or_default()
 }
 /// (action, label, key) of the shortcuts the user can change, in settings order (the global one first).
 pub fn rows(cx: &App) -> Vec<(String, String, String)> {
@@ -298,6 +349,12 @@ pub fn rows(cx: &App) -> Vec<(String, String, String)> {
     [("global".to_string(), tr("全局快速新建笔记窗口", "Quick note from anywhere").to_string(), global_key()), (LAST_ID.to_string(), tr("打开上次使用的文档", "Open last used document").to_string(), key_of(cx, LAST_ID))]
         .into_iter().filter(|_| cfg!(target_os = "macos"))
         .chain(rows.into_iter().map(|(_, id, t, k)| (id, t, k))).collect()
+}
+/// 移除 on a shortcut's row: a bin before its keys while the row is hovered; cleared, the
+/// shortcut is off and its keys read 未设置.
+fn clear_button(id: SharedString) -> crate::design::Button {
+    use crate::ui::TipExt;
+    crate::design::Button::ghost(id).icon("bin").invisible().group_hover("shortcut-row", |s| s.visible()).tip(tr("移除", "Remove"), None)
 }
 pub fn pretty(key: &str) -> String {
     if key.is_empty() { return tr("未设置", "Not set").into(); }
@@ -362,19 +419,17 @@ fn change(id: &str, key: Option<String>, cx: &mut App) -> anyhow::Result<()> {
             anyhow::ensure!(!overlaps(&parsed, &sequence(last)?), tr("与全局打开上次文档的快捷键冲突，请先修改那一项", "Change the shortcut for opening the last document first"));
         }
     }
-    anyhow::ensure!(id != "global" || !parsed.is_empty(), tr("请使用开关关闭全局快捷键", "Use the switch to disable the global shortcut"));
     for other in conflicts(s, id, &key) { custom.insert(other, String::new()); }
     // Empty means explicitly unbound, rather than falling back to the default.
-    if key == default_key(s, id) { custom.remove(id); } else { custom.insert(id.into(), key.clone()); }
-    let old = s.custom.get(id).cloned().unwrap_or_else(|| default_key(s, id));
+    store(&mut custom, id, &key, &default_key(s, id));
+    let old = stored(&s.custom, id, &default_key(s, id));
     let set = |key: &str, cx: &mut App| match id { "global" => crate::quick_note::set_hotkey(key, cx), LAST_ID => crate::quick_note::set_last_hotkey(key, cx), _ => Ok(()) };
-    if crate::settings::prefs().quick_hotkey { set(&key, cx)?; }
-    if let Err(e) = write(&custom) { if crate::settings::prefs().quick_hotkey { let _ = set(&old, cx); } return Err(e); }
+    // a global key is registered while it has one, let go when cleared
+    set(&key, cx)?;
+    if let Err(e) = write(&custom) { let _ = set(&old, cx); return Err(e); }
     cx.global_mut::<Shortcuts>().custom = custom;
     rebuild(cx); cx.refresh_windows(); Ok(())
 }
-/// First launch's choice of the quick-note shortcut.
-pub(crate) fn set_global(key: &str, cx: &mut App) -> anyhow::Result<()> { change("global", Some(key.into()), cx) }
 fn write(custom: &BTreeMap<String, String>) -> anyhow::Result<()> {
     use std::io::Write;
     let tmp = path().with_extension("json.tmp");
@@ -389,7 +444,7 @@ impl Workspace {
         self.shortcut_strokes.clear();
         if self.shortcut_recording.take().is_some() {
             rebuild(cx);
-            if crate::settings::prefs().quick_hotkey { crate::quick_note::register(cx); }
+            crate::quick_note::register(cx);
         }
     }
 
@@ -507,7 +562,7 @@ impl Workspace {
                     .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(title))
                     .when(is_custom && !recording, |d| d.child(crate::settings::link_button(SharedString::from(format!("reset-{reset}")), tr("恢复默认", "Reset"))
                         .on_click(cx.listener(move |w, _, _, cx| w.reset_shortcut(&reset, cx)))))
-                    .when(!recording && !key.is_empty(), |d| d.child(crate::settings::link_button(SharedString::from(format!("clear-{clear}")), tr("移除", "Remove")).invisible().group_hover("shortcut-row", |s| s.visible()).on_click(cx.listener(move |w, _, _, cx| w.clear_shortcut(&clear, cx)))))
+                    .when(!recording && !key.is_empty(), |d| d.child(clear_button(SharedString::from(format!("clear-{clear}"))).on_click(cx.listener(move |w, _, _, cx| w.clear_shortcut(&clear, cx)))))
                     .child(crate::settings::keycap(SharedString::from(id.clone()), &shown_key, recording)
                         .on_click(cx.listener(move |w, _, window, cx| w.start_recording(&rec, window, cx)))))
                 .when(recording, |d| d.child(self.shortcut_recorder(cx)))
@@ -516,36 +571,32 @@ impl Workspace {
         }
         let empty = groups.iter().all(|g| g.is_empty());
         let general_error = self.shortcut_error.as_ref().filter(|(id, _)| id.is_empty()).map(|(_, e)| e.clone());
-        // 快速笔记 from anywhere: the one system-wide shortcut, which can be off.
-        let on = crate::settings::prefs().quick_hotkey;
+        // The system-wide shortcuts, laid out as the rest: a cleared key is off (not registered).
         let global = global_key();
-        let global_rec = self.shortcut_recording.as_deref() == Some("global");
         let last = key_of(cx, LAST_ID);
-        let last_rec = self.shortcut_recording.as_deref() == Some(LAST_ID);
-        let global_err = self.shortcut_error.as_ref().filter(|(id, _)| is_global(id)).map(|(_, e)| e.clone())
-            .or_else(|| on.then(crate::quick_note::hotkey_error).flatten());
         let matches = |zh: &str, en: &str, key: &str| q.is_empty() || [zh.to_lowercase(), en.to_lowercase(), key.to_lowercase()].iter().any(|s| s.contains(&q));
         let show_global = cfg!(target_os = "macos") && (matches("快速新建笔记", "Quick note", &pretty(&global)) || matches("打开上次使用的文档", "Open last used document", &pretty(&last)));
         let empty = empty && !show_global;
-        let global_group = div().w_full().flex().flex_col().gap(px(8.))
-            .child(crate::settings::group("shortcuts-global", Some(tr("全局", "Global")), vec![
-                div().w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
-                    .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(tr("快速新建笔记", "Quick note")))
-                    .when(on && global != GLOBAL_DEFAULT && !global_rec, |d| d.child(crate::settings::link_button("global-reset", tr("恢复默认", "Reset")).on_click(cx.listener(|w, _, _, cx| w.reset_shortcut("global", cx)))))
-                    .when(on, |d| d.child(crate::settings::keycap("global-key", &if global_rec { self.shortcut_strokes.join(" ") } else { global.clone() }, global_rec).on_click(cx.listener(|w, _, window, cx| w.start_recording("global", window, cx)))))
-                    .child(crate::settings::switch("pref-hotkey", on).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.quick_hotkey = !p.quick_hotkey, cx))))
-                    .into_any_element(),
-                // Off with the switch above, like 快速新建笔记; 移除 turns just this one off.
-                div().group("shortcut-row").w_full().px(px(16.)).py(px(10.)).flex().items_center().gap(px(12.))
-                    .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(tr("打开上次使用的文档", "Open last used document")))
-                    .when(on && last != LAST_DEFAULT && !last_rec, |d| d.child(crate::settings::link_button("global-last-reset", tr("恢复默认", "Reset")).on_click(cx.listener(|w, _, _, cx| w.reset_shortcut(LAST_ID, cx)))))
-                    .when(on && !last_rec && !last.is_empty(), |d| d.child(crate::settings::link_button("global-last-clear", tr("移除", "Remove")).invisible().group_hover("shortcut-row", |s| s.visible()).on_click(cx.listener(|w, _, _, cx| w.clear_shortcut(LAST_ID, cx)))))
-                    .when(on, |d| d.child(crate::settings::keycap("global-last-key", &if last_rec { self.shortcut_strokes.join(" ") } else { last.clone() }, last_rec).on_click(cx.listener(|w, _, window, cx| w.start_recording(LAST_ID, window, cx)))))
-                    .into_any_element(),
-            ]))
-            .when(global_rec || last_rec, |d| d.child(self.shortcut_recorder(cx)))
-            .children(global_err.map(|e| div().px(px(4.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::danger()).child(e)));
-        div().w_full().flex().flex_col().gap(px(28.))
+        let global_row = |id: &'static str, n: u32, title: &'static str, key: String, default: &'static str, cx: &mut Context<Self>| {
+            let recording = self.shortcut_recording.as_deref() == Some(id);
+            // its own failure under it: a refused change, or a key the system wouldn't take
+            let error = self.shortcut_error.as_ref().filter(|(e, _)| e == id).map(|(_, e)| e.clone())
+                .or_else(|| (!key.is_empty()).then(|| crate::quick_note::hotkey_error(n)).flatten());
+            div().group("shortcut-row").w_full().px(px(16.)).py(px(7.)).flex().flex_col().gap(px(2.))
+                .child(div().w_full().min_h(px(28.)).flex().items_center().gap(px(12.))
+                    .child(div().flex_1().min_w_0().text_size(px(13.)).line_height(px(20.)).child(title))
+                    .when(key != default && !recording, |d| d.child(crate::settings::link_button(SharedString::from(format!("{id}-reset")), tr("恢复默认", "Reset")).on_click(cx.listener(move |w, _, _, cx| w.reset_shortcut(id, cx)))))
+                    .when(!recording && !key.is_empty(), |d| d.child(clear_button(SharedString::from(format!("{id}-clear"))).on_click(cx.listener(move |w, _, _, cx| w.clear_shortcut(id, cx)))))
+                    .child(crate::settings::keycap(SharedString::from(format!("{id}-key")), &if recording { self.shortcut_strokes.join(" ") } else { key }, recording).on_click(cx.listener(move |w, _, window, cx| w.start_recording(id, window, cx)))))
+                .when(recording, |d| d.child(self.shortcut_recorder(cx)))
+                .children(error.map(|e| div().text_size(px(12.)).line_height(px(17.)).text_color(Theme::danger()).child(e)))
+                .into_any_element()
+        };
+        let global_group = crate::settings::group("shortcuts-global", Some(tr("全局", "Global")), vec![
+            global_row("global", 1, tr("快速新建笔记", "Quick note"), global, GLOBAL_DEFAULT, cx),
+            global_row(LAST_ID, 2, tr("打开上次使用的文档", "Open last used document"), last, LAST_DEFAULT, cx),
+        ]);
+        div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
             .children(general_error.map(|e| div().px(px(4.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::danger()).child(e)))
             .when(show_global, |d| d.child(global_group))
             .when(empty, |d| d.child(div().py(px(40.)).flex().justify_center().text_size(px(13.)).text_color(Theme::text_caption()).child(tr("没有匹配的快捷键", "No matching shortcuts"))))

@@ -1,0 +1,23 @@
+# Drag a paragraph of the 1M-character compilation by its handle: down 480 pt, back up,
+# then hold it at the bottom edge so the page autoscrolls (docs/PERFORMANCE.md, "Dragging blocks").
+resize 1280 800
+wait 900
+key cmd-j
+type 产品知识库
+wait 700
+key enter
+wait 2500
+move 450 233
+wait 400
+down 355 233
+dragby 0 3
+dragby 0 3
+wait 300
+bench 120 dragby 0 4
+bench 120 dragby 0 -4
+dragto 400 788
+bench 120 dragby 0 0
+shot held
+key escape
+up 400 788
+wait 500

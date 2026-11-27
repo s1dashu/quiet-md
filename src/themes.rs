@@ -170,6 +170,9 @@ pub static PROPS: LazyLock<Vec<Prop>> = LazyLock::new(|| {
 
 static BY_KEY: LazyLock<HashMap<&'static str, usize>> = LazyLock::new(|| PROPS.iter().enumerate().map(|(i, p)| (p.key.as_str(), i)).collect());
 
+/// `--token-*` names the app no longer reads (`scrollbar_thumb`: every scrollbar is `design::scroll`'s).
+const RETIRED: &[&str] = &["scrollbar_thumb"];
+
 /// Tokens a rule sets (the rest are listed as `--token-*` in full files).
 #[cfg(test)]
 static RULE_TOKENS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -228,6 +231,22 @@ impl Style {
     }
     /// A colour property: its own value, its token's, or `None` (inherit).
     pub fn color(&self, key: &str) -> Option<Hsla> {
+        // a link and the list markers are coloured text on the page: lifted until they read in the
+        // dark (`theme::lift`; 4.5:1 for the link, 3:1 for a marker and the checkbox edge)
+        let min = match key { "a.color" => Some(4.5), "bullet.color" | "number.color" | "task.border" => Some(3.), _ => None };
+        // the check mark sits on the checkbox's vivid fill, which keeps its lightness in the dark: it
+        // stays the colour the theme gives (white), not mirrored to near-black (the folder page cards draw it white)
+        if key == "task.check" {
+            return match self.values.get(key) {
+                Some(Val::C(c)) => Some(*c),
+                Some(Val::Inherit) => None,
+                _ => match self.def(key) { Def::Rgb(v) => Some(gpui::rgb(v).into()), _ => self.color_raw(key) },
+            };
+        }
+        let c = self.color_raw(key);
+        match min { Some(m) => c.map(|c| crate::theme::lift(c, m)), None => c }
+    }
+    fn color_raw(&self, key: &str) -> Option<Hsla> {
         match self.values.get(key) {
             Some(Val::C(c)) => Some(crate::theme::adapt(*c)),
             Some(Val::Inherit) => None,
@@ -313,7 +332,11 @@ pub fn active() -> &'static Style {
     let p = ACTIVE.load(Ordering::Relaxed);
     if p.is_null() { &PLAIN } else { unsafe { &*p } }
 }
-pub fn color(i: usize) -> Option<Hsla> { active().tokens.get(i).copied().flatten().map(crate::theme::adapt) }
+pub fn color(i: usize) -> Option<Hsla> {
+    let c = active().tokens.get(i).copied().flatten().map(crate::theme::adapt)?;
+    // a link is coloured text on the page: lifted until it reads in the dark, like `a.color`
+    Some(if TOKENS[i].starts_with("link") { crate::theme::lift(c, 4.5) } else { c })
+}
 
 /// 设置 › 文档字体: a family every piece of body text and every heading is
 /// drawn in, overriding the theme's `font-family` for them. `None` follows
@@ -348,9 +371,38 @@ static DOC_STEP: AtomicI32 = AtomicI32::new(0);
 /// The `Preferences::doc_size` choices and their step: 小 / 标准 / 大 / 特大,
 /// like 界面字号's −1 / +2 with one more step up.
 pub fn doc_step(pref: &str) -> i32 { match pref { "small" => -1, "large" => 2, "xlarge" => 4, _ => 0 } }
-pub fn set_doc_size(pref: &str) {
-    if DOC_STEP.swap(doc_step(pref), Ordering::Relaxed) != doc_step(pref) { touch(); }
+/// The presets in 外观's order (小 / 标准 / 大 / 特大) as `doc_size` stores them.
+pub const DOC_PRESETS: [&str; 4] = ["small", "", "large", "xlarge"];
+/// A custom 正文字号's range, in pt.
+pub const DOC_MIN: f32 = 12.;
+pub const DOC_MAX: f32 = 28.;
+/// 放大 / 缩小 (⌘+ / ⌘−): the 正文字号 a step up or down from `pt`, 1pt at a time up to
+/// 18pt and 2pt above, the theme's own `body` a stop too, within `DOC_MIN..=DOC_MAX`.
+pub fn doc_zoom_step(pt: f32, body: f32, up: bool) -> f32 {
+    let mut stops: Vec<f32> = (12..=18).map(|n| n as f32).chain([20., 22., 24., 26., 28.]).collect();
+    if (DOC_MIN..=DOC_MAX).contains(&body) && !stops.contains(&body) { stops.push(body); stops.sort_by(f32::total_cmp); }
+    match up {
+        true => stops.iter().copied().find(|&s| s > pt + 0.01).unwrap_or(pt.max(DOC_MAX)),
+        false => stops.iter().rev().copied().find(|&s| s < pt - 0.01).unwrap_or(pt.min(DOC_MIN)),
+    }
 }
+/// How `doc_size` stores the body size `pt`: a preset's name when one gives it (外观 lights
+/// that preset), else the size.
+pub fn doc_pref_for(pt: f32, body: f32) -> String {
+    DOC_PRESETS.iter().find(|n| doc_size_pt(n, body) == pt).map_or_else(|| format!("{pt}"), |n| n.to_string())
+}
+/// A custom 正文字号 (自定义): `doc_size` holds the size in pt ("17") where a preset holds its name.
+/// An older version reads the number as no preset, 标准, and carries on.
+pub fn custom_size(pref: &str) -> Option<f32> { pref.trim().parse::<f32>().ok().filter(|n| (DOC_MIN..=DOC_MAX).contains(n)).map(f32::round) }
+/// A custom 正文字号 in force, in pt (0: a preset, `DOC_STEP`).
+static DOC_ABS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn set_doc_size(pref: &str) {
+    let abs = custom_size(pref).unwrap_or(0.).to_bits();
+    let step = DOC_STEP.swap(doc_step(pref), Ordering::Relaxed) != doc_step(pref);
+    if step | (DOC_ABS.swap(abs, Ordering::Relaxed) != abs) { touch(); }
+}
+/// The body size `pref` gives in a theme whose own is `body`: a preset's step from it, or the custom size.
+pub fn doc_size_pt(pref: &str, body: f32) -> f32 { custom_size(pref).unwrap_or(body + doc_step(pref) as f32) }
 
 /// A type metric of the note (font size or line height) at the reader's
 /// 正文字号, for the active theme.
@@ -358,7 +410,13 @@ pub fn doc_len(n: f32) -> f32 { doc_len_in(active(), n) }
 
 /// `doc_len` for a theme that need not be the active one (外观's sample).
 // iOS: the reader's Dynamic Type size on top of it.
-pub fn doc_len_in(st: &Style, n: f32) -> f32 { crate::phone::text(scale_len(n, st.num("page.size"), DOC_STEP.load(Ordering::Relaxed))) }
+pub fn doc_len_in(st: &Style, n: f32) -> f32 {
+    let body = st.num("page.size");
+    // a custom size is absolute: its step is from this theme's body, so every theme lands on it
+    let abs = f32::from_bits(DOC_ABS.load(Ordering::Relaxed));
+    let step = if abs > 0. { (abs - body).round() as i32 } else { DOC_STEP.load(Ordering::Relaxed) };
+    crate::phone::text(scale_len(n, body, step))
+}
 
 /// Whole pixels keep baselines crisp; step 0 returns `n` untouched.
 fn scale_len(n: f32, body: f32, step: i32) -> f32 {
@@ -579,6 +637,11 @@ fn parse_with_fonts<'a>(css: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> R
     let meta = Meta { name: var("--theme-name"), name_en: var("--theme-name-en"), author: var("--theme-author"), description: var("--theme-description") };
     let mut st = Style::plain(feishu);
     let mut warn = vec![];
+    // At-rules are skipped whole; a `@media (prefers-color-scheme: dark)` block is the one people
+    // write, and it never applies: the dark look is worked out from the light colours. Say so.
+    if css.contains("@media") {
+        warn.push(format!("@media … — {}", crate::settings::tr("深色效果由浅色配色推算，主题不能单独写深色值", "the dark look is worked out from the light colours; a theme can't set its own")));
+    }
     for (n, v) in &vars {
         let v = subst(v, &vars, 0);
         for kind in ["color", "background", "callout", "highlight", "border"] {
@@ -588,6 +651,8 @@ fn parse_with_fonts<'a>(css: &str, fonts: &mut dyn FnMut() -> &'a [String]) -> R
         }
         if let Some(t) = n.strip_prefix("--token-") {
             let t = t.replace('-', "_");
+            // tokens the app no longer reads: older files that set them load without a warning
+            if RETIRED.contains(&t.as_str()) { continue }
             match (TOKENS.iter().position(|x| *x == t), parse_color(&v)) {
                 (Some(i), Some(c)) => st.tokens[i] = Some(c),
                 _ => warn.push(format!("{n}: {v}")),
@@ -898,6 +963,34 @@ const FEISHU_DESCRIPTION: &str = "飞书文档的正文样式：16 / 26，标题
 #[cfg(test)]
 mod tests {
     #[test]
+    fn doc_zoom_steps() {
+        use super::{doc_pref_for, doc_zoom_step as z};
+        assert_eq!(z(16., 16., true), 17.);
+        assert_eq!(z(18., 16., true), 20.);
+        assert_eq!(z(20., 16., false), 18.);
+        assert_eq!(z(28., 16., true), 28.);
+        assert_eq!(z(12., 16., false), 12.);
+        // a custom size between the stops goes to the next one
+        assert_eq!(z(19., 16., true), 20.);
+        // a theme whose body is no stop still lands on it
+        assert_eq!(z(15., 15.5, true), 15.5);
+        assert_eq!(doc_pref_for(16., 16.), "");
+        assert_eq!(doc_pref_for(18., 16.), "large");
+        assert_eq!(doc_pref_for(22., 16.), "22");
+    }
+
+    #[test]
+    fn doc_size_presets_and_custom() {
+        // the presets keep their names (and an older library's values); a number is a custom size
+        for (pref, pt) in [("small", 15.), ("", 16.), ("large", 18.), ("xlarge", 20.), ("17", 17.), ("12", 12.), ("24", 24.)] {
+            assert_eq!(super::doc_size_pt(pref, 16.), pt, "{pref:?}");
+        }
+        assert_eq!(super::custom_size("small"), None);
+        assert_eq!(super::custom_size("30"), None);
+        assert_eq!(super::custom_size(" 18 "), Some(18.));
+    }
+
+    #[test]
     fn document_size_scales_by_the_body_step() {
         // Empty (and anything unknown) is the theme's size, untouched.
         assert_eq!((doc_step(""), doc_step("huge")), (0, 0));
@@ -980,7 +1073,7 @@ mod tests {
     fn css_values() {
         let css = r#"
             /* comment */
-            :root { --theme-name: "T"; --accent: hsl(254, 80%, 68%); --color-red: #d44c47; --token-block-hover: rgba(0,0,0,.05); --mine: 1px; }
+            :root { --theme-name: "T"; --accent: hsl(254, 80%, 68%); --color-red: #d44c47; --token-block-hover: rgba(0,0,0,.05); --token-scrollbar-thumb: #00000038; --token-no-such: red; --mine: 1px; }
             .page, body { font-size: 16px; line-height: 1.5; font-family: "No Such", -apple-system, sans-serif; }
             h1 { font-size: 1.875em; line-height: 1.3; margin-top: 2em; font-weight: 600; }
             blockquote { border-left: 3px solid var(--accent); }
@@ -1002,7 +1095,11 @@ mod tests {
         assert_eq!((st.num("callout.pad-y"), st.num("callout.pad-x")), (16., 12.));
         assert!(st.palette("color", "red").is_some());
         assert!(st.tokens[TOKENS.iter().position(|t| *t == "block_hover").unwrap()].is_some());
-        assert_eq!(warn, vec![".made-up { color }".to_string()]);
+        // a retired token loads quietly; an unknown one is listed
+        assert_eq!(warn.len(), 3, "{warn:?}");
+        assert!(warn.iter().any(|w| w.starts_with("--token-no-such")), "{warn:?}");
+        assert!(warn.iter().any(|w| w.starts_with("@media")), "{warn:?}");
+        assert!(warn.iter().any(|w| w == ".made-up { color }"), "{warn:?}");
     }
 
     #[test]

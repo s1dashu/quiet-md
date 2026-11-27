@@ -3,7 +3,9 @@
 
 usage: python3 shared-mock/guides/build.py [--lang zh] <out_library_dir>
 
-Each src/*.xml is one document (file name order = reading order). Placeholders:
+Each file in src/ is one document (file name order = reading order): a
+DocxXML .xml, or a Markdown file, 画板 or 数据表 copied as it is (NAMED titles
+those). Placeholders in the .xml ones:
   {{doc:key}}                       @文档 link to the guide whose KEYS entry is key
   {{reminder:YYYY-MM-DD HH:MM}}     timed date reminder, notified when it is due
   {{reminder-day:YYYY-MM-DD}}       whole-day reminder, notified 09:00 that day
@@ -31,30 +33,38 @@ assert len(args) == 1, __doc__
 out = Path(args[0]).resolve()
 NS = uuid.UUID("6f7c1e9a-9d0b-4a51-8c7e-2a1d3b4c5e6f")
 # Folders in the guide library: key -> title, a folder on disk.
-FOLDERS = {"writing-guides": "写作与排版", "examples": "示例"} if zh else {"writing-guides": "Writing and formatting", "examples": "Examples"}
+FOLDERS = ({"documents": "文档", "markdown-files": "Markdown 文件", "boards-folder": "画板", "data-tables-folder": "数据表"} if zh else
+           {"documents": "Documents", "markdown-files": "Markdown files", "boards-folder": "Boards", "data-tables-folder": "Data tables"})
 # The top level, in order; every entry gets its place, so the sidebar and
 # Home's manual order (the default) read the same.
-TOP = ["welcome", "writing-guides", "examples", "organize", "data", "personalize", "practice"]
+TOP = ["welcome", "documents", "markdown-files", "boards-folder", "data-tables-folder", "organize", "data", "personalize", "practice"]
 # file stem -> (key, parent key, pinned); a parent is a key of FOLDERS
 KEYS = {
     "01-welcome": ("welcome", None, False),
-    "02-writing": ("writing", "writing-guides", False),
-    "03-blocks": ("blocks", "writing-guides", False),
-    "04-tables": ("tables", "writing-guides", False),
-    "05-code": ("code", "writing-guides", False),
-    "06-media": ("media", "writing-guides", False),
-    "06a-boards": ("boards", "writing-guides", False),
-    "07-organize": ("organize", None, False),
-    "07a-reading-list": ("reading-list", "examples", False),
-    "07b-weekly": ("weekly", "examples", False),
-    "07c-board-trip": ("board-trip", "examples", False),
-    "08-data": ("data", None, False),
-    "09-personalize": ("personalize", None, False),
-    "10-practice": ("practice", None, False),
+    "02-writing": ("writing", "documents", False),
+    "03-tables": ("tables", "documents", False),
+    "04-media": ("media", "documents", False),
+    "05-markdown": ("markdown", "markdown-files", False),
+    "05a-markdown-example": ("md-example", "markdown-files", False),
+    "06-boards": ("boards", "boards-folder", False),
+    "06a-trip": ("board-trip", "boards-folder", False),
+    "07-data-tables": ("data-tables", "data-tables-folder", False),
+    "07a-reading-list": ("reading-list", "data-tables-folder", False),
+    "08-organize": ("organize", None, False),
+    "09-data": ("data", None, False),
+    "10-personalize": ("personalize", None, False),
+    "11-practice": ("practice", None, False),
 }
+# What is not a DocxXML document (a Markdown file, a 画板, a 数据表) is titled
+# by its file name: key -> title. Its source is copied as it is.
+NAMED = ({"md-example": "Markdown 示例", "board-trip": "规划一次旅行", "reading-list": "阅读清单"} if zh else
+         {"md-example": "Markdown example", "board-trip": "Plan a trip", "reading-list": "Reading list"})
 ids = {k: str(uuid.uuid5(NS, k)) for k, _, _ in KEYS.values()}
 ids.update({k: str(uuid.uuid5(NS, k)) for k in FOLDERS})
-srcs = {KEYS[p.stem][0]: p.read_text() for p in sorted((here / "src" / ("zh" if zh else "")).glob("*.xml"))}
+files = [p for p in sorted((here / "src" / ("zh" if zh else "")).iterdir()) if p.is_file() and not p.name.startswith(".")]
+ext = {KEYS[p.stem][0]: p.suffix for p in files}
+srcs = {KEYS[p.stem][0]: p.read_bytes() if p.suffix == ".sqlite" else p.read_text() for p in files}
+assert set(NAMED) == {k for k, e in ext.items() if e != ".xml"}, "NAMED must title every file that is not .xml"
 missing = set(ids) - set(srcs) - set(FOLDERS)
 assert not missing, f"no source for {missing}"
 
@@ -62,7 +72,7 @@ def esc(s): return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&g
 def plain_title(x):
     t = re.search(r"<title[^>]*>(.*?)</title>", x, re.S).group(1)
     return re.sub(r"<[^>]+>", "", t).replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-titles = {k: plain_title(x) for k, x in srcs.items()}
+titles = {k: NAMED[k] if k in NAMED else plain_title(x) for k, x in srcs.items()}
 local = lambda s: dt.datetime.strptime(s, "%Y-%m-%d %H:%M").astimezone()
 ms = lambda d: int(d.timestamp() * 1000)
 now = int(time.time())
@@ -83,7 +93,7 @@ def rel_path(frm, to):
 paths = {}
 for k, parent, _ in KEYS.values():
     d = file_name(FOLDERS[parent]) if parent else ""
-    paths[k] = (d + "/" if d else "") + file_name(titles[k]) + ".xml"
+    paths[k] = (d + "/" if d else "") + file_name(titles[k]) + ext[k]
 assert len({p.lower() for p in paths.values()}) == len(paths), "two guides with one name"
 here_dir = ""
 
@@ -137,7 +147,9 @@ for k, title in FOLDERS.items():
     index[file_name(title) + "/"] = {"id": ids[k], "created": now - 3600, "modified": now}
 for i, (k, parent, pinned) in enumerate(order):
     here_dir = paths[k].rpartition("/")[0]
-    (out / paths[k]).write_text(fill(srcs[k]))
+    if ext[k] == ".xml": (out / paths[k]).write_text(fill(srcs[k]))
+    elif ext[k] == ".sqlite": (out / paths[k]).write_bytes(srcs[k])
+    else: (out / paths[k]).write_text(srcs[k])
     # Reading order is written out: TOP places the top level, and a folder's
     # pages are numbered in file order.
     t = now - 60 * i
@@ -158,7 +170,7 @@ for i, k in enumerate(TOP):
 (out / ".quiet" / "format.json").write_text('{\n  "format": 4\n}')
 if zh:
     # Images and covers come from the English library (see above).
-    used = {m for x in srcs.values() for m in re.findall(r'(?:src|path)="assets/guides/([^"]+)"', x)}
+    used = {m for x in srcs.values() if isinstance(x, str) for m in re.findall(r'(?:src|path)="assets/guides/([^"]+)"', x)}
     missing = {m for m in used if not (here / "assets" / m).is_file()} | (covers - {c for p in (here / "src").glob("*.xml") for c in re.findall(r'cover="covers/([^"]+)"', p.read_text())})
     assert not missing, f"not in the English guides' assets: {missing}"
     print(out)

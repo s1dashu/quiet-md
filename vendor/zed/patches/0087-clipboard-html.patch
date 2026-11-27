@@ -1,0 +1,209 @@
+ClipboardString gains an html field (with_html): the HTML flavor beside the text, as the platform stores it. Windows reads and writes "HTML Format" (CF_HTML, header included, UTF-8 and NUL-terminated); X11 and Wayland read the text/html target (UTF-8, or UTF-16 with a BOM as Firefox has offered). Quiet.md converts the page after the header to blocks (#144); macOS keeps reading public.html in the app.
+
+diff --git a/crates/gpui/src/platform.rs b/crates/gpui/src/platform.rs
+index e1e50a7b0ad0a39e55142795ac4e50fe1bbf488d..8a049d55047e8130c4d368439a9242bdb43acb48 100644
+--- a/crates/gpui/src/platform.rs
++++ b/crates/gpui/src/platform.rs
+@@ -3225,6 +3225,7 @@ impl ClipboardItem {
+             entries: vec![ClipboardEntry::String(ClipboardString {
+                 text,
+                 metadata: Some(metadata),
++                html: None,
+             })],
+         }
+     }
+@@ -3251,7 +3252,7 @@ impl ClipboardItem {
+         let mut answer = String::new();
+ 
+         for entry in self.entries.iter() {
+-            if let ClipboardEntry::String(ClipboardString { text, metadata: _ }) = entry {
++            if let ClipboardEntry::String(ClipboardString { text, .. }) = entry {
+                 answer.push_str(text);
+             }
+         }
+@@ -3592,6 +3593,10 @@ pub struct ClipboardString {
+     pub text: String,
+     /// Optional metadata associated with this clipboard string.
+     pub metadata: Option<String>,
++    /// quiet.md: the HTML flavor beside the text, as the platform stores it:
++    /// Windows' `HTML Format` (CF_HTML, header and all) or the `text/html`
++    /// target on Linux. Read there and written on Windows; None elsewhere.
++    pub html: Option<String>,
+ }
+ 
+ impl ClipboardString {
+@@ -3600,9 +3605,16 @@ impl ClipboardString {
+         Self {
+             text,
+             metadata: None,
++            html: None,
+         }
+     }
+ 
++    /// quiet.md: the same string with an HTML flavor (see [`Self::html`]).
++    pub fn with_html(mut self, html: String) -> Self {
++        self.html = Some(html);
++        self
++    }
++
+     /// Return a new clipboard item with the metadata replaced by the given metadata,
+     /// after serializing it as JSON.
+     pub fn with_json_metadata<T: Serialize>(mut self, metadata: T) -> Self {
+@@ -3644,6 +3656,7 @@ impl From<String> for ClipboardString {
+         Self {
+             text: value,
+             metadata: None,
++            html: None,
+         }
+     }
+ }
+diff --git a/crates/gpui_linux/src/linux/platform.rs b/crates/gpui_linux/src/linux/platform.rs
+index 31bbeb827dc69621b94432e869d2b904d994258a..1c087c8fc847589701bb6287eef3ff216b3d9700 100644
+--- a/crates/gpui_linux/src/linux/platform.rs
++++ b/crates/gpui_linux/src/linux/platform.rs
+@@ -1754,6 +1754,23 @@ async fn await_idle_sleep_prevention(
+     }
+ }
+ 
++/// quiet.md: a `text/html` clipboard target as text. UTF-8 normally;
++/// Firefox has offered UTF-16 with a byte-order mark.
++#[cfg(any(feature = "wayland", feature = "x11"))]
++pub(crate) fn clipboard_html(bytes: &[u8]) -> Option<String> {
++    let utf16 = |le: bool| {
++        let units: Vec<u16> = bytes[2..].chunks_exact(2).map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
++        String::from_utf16_lossy(&units)
++    };
++    let s = match bytes {
++        [0xff, 0xfe, ..] => utf16(true),
++        [0xfe, 0xff, ..] => utf16(false),
++        _ => String::from_utf8_lossy(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)).into_owned(),
++    };
++    let s = s.trim_end_matches('\0');
++    (!s.trim().is_empty()).then(|| s.to_string())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/gpui_linux/src/linux/wayland/clipboard.rs b/crates/gpui_linux/src/linux/wayland/clipboard.rs
+index 86dc7da97b97834acc32206b4b31b143b77b4967..3fa94679d4b40bcac547208eb580a6e48f8591fb 100644
+--- a/crates/gpui_linux/src/linux/wayland/clipboard.rs
++++ b/crates/gpui_linux/src/linux/wayland/clipboard.rs
+@@ -11,7 +11,7 @@ use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
+ use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
+ 
+ use crate::linux::platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
+-use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
++use gpui::{ClipboardEntry, ClipboardItem, ClipboardString, Image, ImageFormat, hash};
+ 
+ /// Text mime types that we'll offer to other programs.
+ pub(crate) const TEXT_MIME_TYPES: [&str; 3] =
+@@ -114,7 +114,11 @@ impl<T: ReceiveData> DataOffer<T> {
+         // copying from eg: firefox inserts a lot of blank
+         // lines, and that is super annoying.
+         let result = text_content.replace("\r\n", "\n");
+-        Some(ClipboardItem::new_string(result))
++        // quiet.md: the formatted version beside the text.
++        let html = self.has_mime_type("text/html").then(|| self.read_bytes(connection, "text/html")).flatten().and_then(|b| crate::linux::platform::clipboard_html(&b));
++        let mut string = ClipboardString::new(result);
++        string.html = html;
++        Some(ClipboardItem { entries: vec![ClipboardEntry::String(string)] })
+     }
+ 
+     fn read_image(&self, connection: &Connection) -> Option<ClipboardItem> {
+diff --git a/crates/gpui_linux/src/linux/x11/clipboard.rs b/crates/gpui_linux/src/linux/x11/clipboard.rs
+index ef6976e8e553ade4e72cca219e374221446e3cc7..548ed34adadd6953c1da43933db539edb492e981 100644
+--- a/crates/gpui_linux/src/linux/x11/clipboard.rs
++++ b/crates/gpui_linux/src/linux/x11/clipboard.rs
+@@ -77,7 +77,7 @@ x11rb::atom_manager! {
+         TEXT,
+         TEXT_MIME_UNKNOWN: b"text/plain",
+ 
+-        // HTML: b"text/html",
++        HTML: b"text/html",
+         // URI_LIST: b"text/uri-list",
+ 
+         PNG__MIME: ImageFormat::mime_type(ImageFormat::Png ).as_bytes(),
+@@ -1069,7 +1069,11 @@ impl Clipboard {
+         } else {
+             String::from_utf8(result.bytes).map_err(|_| Error::ConversionFailure)?
+         };
+-        Ok(ClipboardItem::new_string(text))
++        // quiet.md: the formatted version beside the text, when the owner has one.
++        let html = self.inner.read(&[self.inner.atoms.HTML], selection).ok().and_then(|d| crate::linux::platform::clipboard_html(&d.bytes));
++        let mut string = gpui::ClipboardString::new(text);
++        string.html = html;
++        Ok(ClipboardItem { entries: vec![gpui::ClipboardEntry::String(string)] })
+     }
+ 
+     pub fn is_owner(&self, selection: ClipboardKind) -> bool {
+diff --git a/crates/gpui_macos/src/pasteboard.rs b/crates/gpui_macos/src/pasteboard.rs
+index 499f60b78716fbf61015cba43e167daec643c126..b6616cdb5800fe977b7d28f7cd2b510e124a755e 100644
+--- a/crates/gpui_macos/src/pasteboard.rs
++++ b/crates/gpui_macos/src/pasteboard.rs
+@@ -163,7 +163,7 @@ impl Pasteboard {
+                 }
+             });
+ 
+-        Some(ClipboardEntry::String(ClipboardString { text, metadata }))
++        Some(ClipboardEntry::String(ClipboardString { text, metadata, html: None }))
+     }
+ 
+     fn data_for_type(&self, kind: &NSString) -> Option<Vec<u8>> {
+@@ -194,6 +194,7 @@ impl Pasteboard {
+                 let mut combined = ClipboardString {
+                     text: String::new(),
+                     metadata: None,
++                    html: None,
+                 };
+ 
+                 for entry in item.entries {
+diff --git a/crates/gpui_windows/src/clipboard.rs b/crates/gpui_windows/src/clipboard.rs
+index 096caf018dae1fb3bd443532f8b83f1e3f6dcebe..ec64c536d3ca2ec0156023437793d7b199838e0d 100644
+--- a/crates/gpui_windows/src/clipboard.rs
++++ b/crates/gpui_windows/src/clipboard.rs
+@@ -28,6 +28,9 @@ static CLIPBOARD_HASH_FORMAT: LazyLock<u32> =
+     LazyLock::new(|| register_clipboard_format(windows::core::w!("GPUI internal text hash")));
+ static CLIPBOARD_METADATA_FORMAT: LazyLock<u32> =
+     LazyLock::new(|| register_clipboard_format(windows::core::w!("GPUI internal metadata")));
++/// quiet.md: CF_HTML, what Word and browsers read and write formatted text as.
++static CLIPBOARD_HTML_FORMAT: LazyLock<u32> =
++    LazyLock::new(|| register_clipboard_format(windows::core::w!("HTML Format")));
+ static CLIPBOARD_SVG_FORMAT: LazyLock<u32> =
+     LazyLock::new(|| register_clipboard_format(windows::core::w!("image/svg+xml")));
+ static CLIPBOARD_GIF_FORMAT: LazyLock<u32> =
+@@ -284,6 +287,11 @@ fn write_string(item: &ClipboardString) -> Result<()> {
+         let wide: Vec<u16> = metadata.encode_utf16().chain(Some(0)).collect_vec();
+         set_clipboard_bytes(&wide, *CLIPBOARD_METADATA_FORMAT)?;
+     }
++    // quiet.md: the HTML flavor, UTF-8 and NUL-terminated (its header's offsets count bytes).
++    if let Some(html) = item.html.as_ref() {
++        let bytes: Vec<u8> = html.bytes().filter(|&b| b != 0).chain(Some(0)).collect();
++        set_clipboard_bytes(&bytes, *CLIPBOARD_HTML_FORMAT)?;
++    }
+     Ok(())
+ }
+ 
+@@ -325,7 +333,21 @@ fn convert_to_png(bytes: &[u8], format: ImageFormat) -> Option<Vec<u8>> {
+ fn read_string() -> Option<ClipboardEntry> {
+     let text = get_clipboard_string(CF_UNICODETEXT.0 as u32)?;
+     let metadata = read_clipboard_metadata(&text);
+-    Some(ClipboardEntry::String(ClipboardString { text, metadata }))
++    let html = read_clipboard_html();
++    Some(ClipboardEntry::String(ClipboardString { text, metadata, html }))
++}
++
++/// quiet.md: the `HTML Format` payload as text, header included, up to its
++/// NUL. Invalid UTF-8 is replaced; the app reads the page after the header,
++/// not the byte offsets, so that shifts nothing it relies on.
++fn read_clipboard_html() -> Option<String> {
++    if unsafe { IsClipboardFormatAvailable(*CLIPBOARD_HTML_FORMAT) }.is_err() {
++        return None;
++    }
++    let locked = get_clipboard_data(*CLIPBOARD_HTML_FORMAT)?;
++    let bytes = locked.as_bytes();
++    let bytes = &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())];
++    (!bytes.is_empty()).then(|| String::from_utf8_lossy(bytes).into_owned())
+ }
+ 
+ fn read_clipboard_metadata(text: &str) -> Option<String> {

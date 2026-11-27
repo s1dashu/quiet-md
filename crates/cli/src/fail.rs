@@ -19,7 +19,7 @@ impl Fail {
     /// 2 usage, 3 nothing there, 4 the library moved under us, 1 the rest.
     pub fn exit(&self) -> i32 {
         match self.code.as_ref() {
-            "usage" | "bad_args" => 2,
+            "usage" | "bad_args" | "bad_formula" => 2,
             "not_found" | "bad_ref" | "stale_ref" | "ambiguous" | "ambiguous_ref" => 3,
             "stale_rev" | "conflict" => 4,
             _ => 1,

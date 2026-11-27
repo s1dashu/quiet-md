@@ -1,0 +1,87 @@
+<title>Tables, columns, code and equations</title>
+<p>Use a table to compare several things across the same dimensions, and columns to put independent ideas side by side. Code blocks keep scripts readable with syntax highlighting and line numbers, and LaTeX equations sit naturally alongside your writing.</p>
+<h1>Tables</h1><h2>Insert a table</h2><p>Choose Table from the slash menu and select a size in the grid, up to 9 × 9. Press <code>⌘ ⌥ A</code> to insert a 3 × 3 table directly. Tables pasted from Markdown, web pages or Feishu become editable tables too.</p>
+<h2>A project at a glance</h2><p>This example combines header cells, a merged row, backgrounds, alignment, tasks and lists.</p>
+<table><colgroup><col width="130"/><col width="130"/><col width="150"/><col width="280"/></colgroup><thead><tr><th background-color="light-gray"><p>Stage</p></th><th background-color="light-gray"><p>Owner</p></th><th background-color="light-gray"><p>Status</p></th><th background-color="light-gray"><p>Deliverables</p></th></tr></thead><tbody>
+<tr><td rowspan="2" vertical-align="middle"><p><b>Design</b></p></td><td><p>Alex</p></td><td background-color="light-green"><p>Done</p></td><td><checkbox done="true">Interaction design</checkbox><checkbox done="true">Visual guidelines</checkbox></td></tr>
+<tr><td><p>Jordan</p></td><td background-color="light-yellow"><p>In progress</p></td><td><checkbox done="true">Icons</checkbox><checkbox done="false">Illustrations</checkbox></td></tr>
+<tr><td><p><b>Build</b></p></td><td><p>Sam</p></td><td background-color="light-blue"><p>Scheduled</p></td><td><ul><li>Client review: November 18</li><li>Service review: November 20</li></ul></td></tr>
+<tr><td><p><b>Release</b></p></td><td colspan="2" background-color="light-gray"><p align="center">Waiting for earlier stages</p></td><td><p>Release notes and screenshots</p></td></tr>
+</tbody></table>
+<h2>Select and arrange</h2><ul><li><b>Select cells:</b> drag from one cell to another to select a rectangular range.</li><li><b>Select a row or column:</b> click its gray handle. Hold Shift to extend the selection.</li><li><b>Insert rows or columns:</b> hover between their handles and click the plus control.</li><li><b>Reorder:</b> select a row or column, then drag it.</li><li><b>Resize:</b> drag a column boundary. The block menu can distribute column widths evenly.</li><li><b>Delete:</b> select a row or column and use the toolbar's delete control.</li></ul>
+<h2>The cell toolbar</h2><table><colgroup><col width="210"/><col width="480"/></colgroup><tbody>
+<tr><td><p>Merge and split</p></td><td><p>Merge a rectangular selection into one cell, or split a previously merged cell.</p></td></tr><tr><td><p>Background</p></td><td><p>Use cell colors to show groups or status.</p></td></tr><tr><td><p>Alignment</p></td><td><p>Align left, center or right; place content at the top, middle or bottom.</p></td></tr><tr><td><p>Text styles</p></td><td><p>Apply bold, italic, underline, strikethrough, code or text colors to the selected cells.</p></td></tr>
+</tbody></table>
+<h2>Header rows and columns</h2><p>Enable a header row in the table's block menu to style the first row and keep it visible while scrolling a long table. A header column styles the first column for comparison tables.</p>
+<table><colgroup><col width="180"/><col width="170"/><col width="170"/><col width="170"/></colgroup><thead><tr><th><p></p></th><th><p>Option A</p></th><th><p>Option B</p></th><th><p>Option C</p></th></tr></thead><tbody>
+<tr><th><p>Budget</p></th><td><p>$12,000</p></td><td background-color="light-green"><p><b>$8,000</b></p></td><td><p>$15,000</p></td></tr><tr><th><p>Timeline</p></th><td><p>6 weeks</p></td><td background-color="light-green"><p><b>4 weeks</b></p></td><td><p>8 weeks</p></td></tr><tr><th><p>Risk</p></th><td background-color="light-yellow"><p>Medium</p></td><td><p>Low</p></td><td background-color="light-red"><p>High</p></td></tr><tr><th><p>Flexibility</p></th><td><p>Good</p></td><td><p>Limited</p></td><td><p>Excellent</p></td></tr>
+</tbody></table>
+<h2>Inside a cell</h2><p>Cells can hold paragraphs, headings, lists, tasks, code and equations. Press Enter to add another paragraph within a cell.</p>
+<table><colgroup><col width="345"/><col width="345"/></colgroup><tbody><tr><td><pre lang="bash"><code>git switch -c feature/table&#10;git push -u origin HEAD</code></pre></td><td><p>Code blocks make useful command references.</p></td></tr><tr><td><p>Area: <latex>S = \pi r^2</latex></p><p>Circumference: <latex>C = 2\pi r</latex></p></td><td><p>Mix equations with text and multiple paragraphs.</p></td></tr></tbody></table>
+<callout emoji="💡" background-color="light-blue" border-color="blue"><p>Paste a Markdown table made with <code>|</code> separators to create a table. Initial column widths follow the content: short columns stay compact and longer text gets more room. You can still drag column boundaries to resize them. Markdown export writes tables in that format too.</p></callout>
+<h1>Columns</h1><p>Choose Columns from the slash menu, then choose one to five columns. Each column is an independent area that can contain other blocks.</p>
+<h2>Two columns for a comparison</h2><grid><column width-ratio="0.5"><callout emoji="👍" background-color="light-green" border-color="green"><p><b>What works well</b></p><ul><li>Local files, available offline</li><li>Documents you can back up yourself</li><li>A native writing interface</li></ul></callout></column><column width-ratio="0.5"><callout emoji="🤔" background-color="light-orange" border-color="orange"><p><b>Things to plan for</b></p><ul><li>No built-in cross-device sync</li><li>You are responsible for backups</li><li>Currently available on macOS</li></ul></callout></column></grid>
+<h2>Three columns for a workflow</h2><grid><column width-ratio="0.3333"><h3>Capture</h3><p>Press <code>⌘ ⇧ N</code> for a new note window and write down the idea.</p></column><column width-ratio="0.3333"><h3>Organize</h3><p>Group related pages and pin the essentials and useful references.</p></column><column width-ratio="0.3334"><h3>Return</h3><p>Search with <code>⌘ J</code> and follow backlinks to connected notes.</p></column></grid>
+<h2>Adjust the widths</h2><p>Drag the gap between columns. Widths gently snap near equal splits and simple proportions.</p>
+<grid><column width-ratio="0.3"><p><b>Project</b></p><p><b>Timeline</b></p><p><b>Goal</b></p></column><column width-ratio="0.7"><p>Quiet.md</p><p>October–December 2026</p><p>A calm, reliable writing tool that keeps your notes in your hands</p></column></grid>
+<h2>Add or remove columns</h2><ul><li>Hover between columns and click the plus control to add one, up to ten columns.</li><li>Remove all content from a column to remove that column. When only one remains, the layout returns to ordinary blocks.</li></ul>
+<h1>Inline code</h1><p>Use inline code for commands, filenames and function names: <code>brew install ripgrep</code> or <code>~/.zshrc</code>. Wrap text in backticks as you type, or select it and press <code>⌘ ⌃ C</code>.</p>
+<h1>Code blocks</h1><h2>Insert a block</h2><ul><li>Type three backticks at the start of a line, then Space or Enter. Add a language, as in <code>```python</code>, to select it immediately.</li><li>Choose Code block from the slash menu, or press <code>⌘ ⌥ C</code>.</li><li>Use the block menu to turn an existing paragraph into code.</li></ul>
+<p>Inside a code block, Tab inserts four spaces, Shift-Tab reduces indentation, and Enter starts a new line. Markdown formatting is disabled and pasted content is treated as plain text.</p>
+<h2>Languages and highlighting</h2><p>Hover over a code block to choose its language. The searchable picker supports more than seventy languages.</p><p>Set the language to Mermaid and Quiet.md draws the code as a diagram: flowcharts, sequence diagrams, Gantt charts and more. Hover over it and choose Hide diagram to edit the code; Show diagram brings the picture back. {{doc:markdown}} has an example.</p>
+<pre lang="python" caption="fetch_weather.py"><code>import json
+from urllib.request import urlopen
+
+def fetch_weather(city: str) -&gt; dict:
+    """Example client; replace the placeholder API before running."""
+    url = f"https://api.example.com/weather?city={city}"
+    with urlopen(url, timeout=5) as response:
+        return json.load(response)
+
+if __name__ == "__main__":
+    print(fetch_weather("London")["temp"], "°C")</code></pre>
+<pre lang="typescript" caption="useDebounce.ts"><code>import { useEffect, useState } from "react";
+
+// Update only after the input has been quiet for delay milliseconds.
+export function useDebounce&lt;T&gt;(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() =&gt; {
+    const id = setTimeout(() =&gt; setDebounced(value), delay);
+    return () =&gt; clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}</code></pre>
+<pre lang="rust" caption="word_count.rs"><code>use std::collections::HashMap;
+
+/// Count each word, ignoring capitalization.
+fn word_count(text: &amp;str) -&gt; HashMap&lt;String, usize&gt; {
+    let mut counts = HashMap::new();
+    for word in text.split_whitespace() {
+        *counts.entry(word.to_lowercase()).or_insert(0) += 1;
+    }
+    counts
+}</code></pre>
+<pre lang="sql" caption="Monthly active users"><code>SELECT date_trunc('month', visited_at) AS month,
+       COUNT(DISTINCT user_id)         AS mau
+FROM   visits
+WHERE  visited_at &gt;= '2026-01-01'
+GROUP  BY 1
+ORDER  BY 1;</code></pre>
+<pre lang="json" caption="settings.json"><code>{
+  "sidebar_width": 284,
+  "window_size": [1280, 800],
+  "quick_note_size": [640, 800]
+}</code></pre>
+<pre lang="bash" caption="Back up your documents"><code># Create a dated archive of your documents.
+cd ~/Documents
+tar -czf "Quiet-$(date +%F).tar.gz" Quiet.md</code></pre>
+<h2>Names and wrapping</h2><p>Click the caption above a code block to give it a filename or a useful description. Long lines scroll horizontally by default. Enable wrapping in the block's controls when you would rather read them without scrolling.</p>
+<pre lang="plaintext" caption="Example error log" wrap="true"><code>2026-11-01 09:42:17.381 ERROR [save] No space left on device. The document remains unsaved; free some space and save again.</code></pre>
+<h2>Copy and fold</h2><ul><li>The copy button copies the complete code block without its line numbers.</li><li>Use the triangle on the left to fold a long block.</li><li>The document theme controls line numbers. Craft, Feishu and Obsidian show them; Notion does not.</li></ul>
+<h1>Equations</h1><h2>Insert an equation</h2><p>Type LaTeX between dollar signs: <code>$a^2+b^2=c^2$</code> becomes <latex>a^2+b^2=c^2</latex> when you type the closing dollar sign. Double-dollar delimiters work too.</p><p>You can also choose Equation from the slash menu. Press Esc to finish editing. Click an existing equation to edit it again; invalid input is marked without damaging the document.</p>
+<h2>Common examples</h2><table><colgroup><col width="300"/><col width="390"/></colgroup><thead><tr><th><p>Result</p></th><th><p>LaTeX</p></th></tr></thead><tbody>
+<tr><td><p><latex>\frac{a}{b} + \sqrt{x}</latex></p></td><td><p><code>\frac{a}{b} + \sqrt{x}</code></p></td></tr><tr><td><p><latex>x_1, x_2, \ldots, x_n</latex></p></td><td><p><code>x_1, x_2, \ldots, x_n</code></p></td></tr><tr><td><p><latex>\sum_{i=1}^{n} i = \frac{n(n+1)}{2}</latex></p></td><td><p><code>\sum_{i=1}^{n} i = \frac{n(n+1)}{2}</code></p></td></tr><tr><td><p><latex>\int_0^1 x^2 \, dx = \frac{1}{3}</latex></p></td><td><p><code>\int_0^1 x^2 \, dx = \frac{1}{3}</code></p></td></tr><tr><td><p><latex>\lim_{x \to 0} \frac{\sin x}{x} = 1</latex></p></td><td><p><code>\lim_{x \to 0} \frac{\sin x}{x} = 1</code></p></td></tr><tr><td><p><latex>\alpha, \beta, \gamma, \Delta, \Omega</latex></p></td><td><p><code>\alpha, \beta, \gamma, \Delta, \Omega</code></p></td></tr><tr><td><p><latex>A = \begin{pmatrix} 1 &amp; 2 \\ 3 &amp; 4 \end{pmatrix}</latex></p></td><td><p><code>\begin{pmatrix} 1 &amp; 2 \\ 3 &amp; 4 \end{pmatrix}</code></p></td></tr><tr><td><p><latex>f(x) = \begin{cases} x &amp; x \ge 0 \\ -x &amp; x &lt; 0 \end{cases}</latex></p></td><td><p><code>\begin{cases} x &amp; x \ge 0 \\ -x &amp; x &lt; 0 \end{cases}</code></p></td></tr>
+</tbody></table>
+<h2>Math in your writing</h2><p>The quadratic equation <latex>ax^2 + bx + c = 0</latex> has solutions <latex>x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}</latex>. When <latex>\Delta = b^2 - 4ac &lt; 0</latex>, it has no real solutions.</p><p>For an equation on its own line, put it in a centered paragraph:</p><p align="center"><latex>e^{i\pi} + 1 = 0</latex></p><p align="center"><latex>\mathbb{E}[X] = \sum_x x \, P(X=x)</latex></p>
+<callout emoji="📐" background-color="light-purple" border-color="purple"><p>Markdown export preserves equations as <code>$…$</code>, ready for another editor that supports LaTeX.</p></callout>
+<hr/><p>Next: {{doc:media}}.</p>

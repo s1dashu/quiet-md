@@ -16,6 +16,19 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 /// Each version's notes: (version, [(中文, English)]). Only the running
 /// version's are shown; a version without notes shows nothing.
 const NOTES: &[(&str, &[(&str, &str)])] = &[
+    ("0.2.0", &[
+        ("侧栏按顶层文件夹分组，文件夹页就是起点；标题栏按钮重新排列", "The sidebar groups your top-level folders, each folder's page is where you start, and the header buttons are rearranged"),
+        ("数据表正式开放：从新建菜单、/ 菜单或 CSV 新建", "Data tables are here: make one from the New menu, the / menu or a CSV file"),
+        ("「…」菜单里新增专注模式、打字机模式和段落聚焦", "Focus Mode, Typewriter Mode and Paragraph Focus in the … menu"),
+        ("「显示」› 放大 / 缩小只缩放正文，正文字号可以自定义", "View › Zoom In / Out scale the note's text only; Text size takes a custom size"),
+        ("命令行工具 quiet 和设置 › 连接 Agent，让 AI Agent 读写文档库", "The quiet command-line tool and Settings › Agent Connector let AI agents work in your library"),
+        ("深色模式更清晰，可以在「显示」菜单里切换", "Clearer dark mode, switched from the View menu"),
+        ("全新的菜单、按钮、滚动条和图标", "New menus, buttons, scrollbars and icons"),
+        ("回收站可以设置几天后自动删除", "Choose how many days the Trash keeps deleted pages"),
+        ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Move pages and folders into another top-level folder; Favorites fold into Pinned"),
+        ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Pasting keeps formatting on Windows and Linux; any shortcut can be cleared"),
+        ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Mermaid diagrams, Keep Window on Top, spaces between Chinese and English"),
+    ]),
     ("0.1.14", &[
         ("查找替换支持正则表达式", "Find and replace supports regular expressions"),
         ("Obsidian 的 [[双链]] 可以点击打开对应的笔记", "Obsidian [[wikilinks]] open the note they point to"),
@@ -142,7 +155,10 @@ pub fn card(on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> 
     let moved = *MIGRATED.lock().unwrap();
     if notes.is_none() && moved.is_none() { return None }
     let title: String = if notes.is_some() { crate::localized_format!("已更新到 {}", "Updated to {}", VERSION) } else { crate::settings::tr("文档库已改为真实文件夹", "Your library now uses real folders").into() };
-    let line = |text: String| div().w_full().min_w_0().flex().gap(px(6.)).text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption())
+    // the notes are the card's body: in the dark `muted-foreground` (#a3a3a3, about 6:1 on the card)
+    // rather than the caption grey, which sank to 3.7:1 there
+    let body = if crate::theme::dark() { crate::design::color::muted_foreground() } else { Theme::text_caption() };
+    let line = |text: String| div().w_full().min_w_0().flex().gap(px(6.)).text_size(px(12.)).line_height(px(18.)).text_color(body)
         .child(div().flex_none().child("·")).child(div().flex_1().min_w_0().child(text));
     // Padding, not margin: the scroll area's extent leaves a child's margin
     // out, so scrolled to the end the last line lost its bottom 6pt.
@@ -173,7 +189,7 @@ pub fn card(on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> 
     thread_local! { static SCROLL: ScrollHandle = ScrollHandle::new(); }
     let scroll = SCROLL.with(|h| h.clone());
     let more = scroll.max_offset().y > px(0.5) && scroll.offset().y > -scroll.max_offset().y + px(0.5);
-    let face = crate::theme::raised(crate::design::color::card());
+    let face = crate::design::color::card();
     // A card; at most half the sidebar, a longer list scrolls inside it.
     Some(Card::new("changelog").flex_none().max_h(relative(0.5)).min_w_0().overflow_hidden().mx(px(crate::sidebar::SB_X - 4.)).mb(px(2.)).pl(px(12.)).pr(px(6.)).pt(px(8.)).pb(px(10.))
         .child(div().flex_none().w_full().min_w_0().flex().items_center().justify_between()
@@ -181,7 +197,7 @@ pub fn card(on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> 
             .child(Button::ghost("changelog-close").icon("x").sized(ButtonSize::Xs)
                 .on_click(move |e, w, cx| { PENDING.store(false, Ordering::Relaxed); *MIGRATED.lock().unwrap() = None; on_close(e, w, cx); })))
         .child(div().relative().flex_1().min_h_0().flex().flex_col()
-            .child(div().id("changelog-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&scroll).child(list))
+            .child(crate::design::scroll::make_room(div().id("changelog-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&scroll), "changelog-list", 0.).child(list).child(crate::design::scroll::bar("changelog-list", &scroll, 0.)))
             // A line cut by the card's bottom edge fades out instead; gone once the list is at its end.
             .when(more, |d| d.child(div().absolute().left_0().right_0().bottom_0().h(px(24.))
                 .bg(linear_gradient(180., linear_color_stop(face.opacity(0.), 0.), linear_color_stop(face, 1.))))))

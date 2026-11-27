@@ -113,7 +113,7 @@ impl Workspace {
         if !self.save_before(cx, move |w, window, cx| w.set_mode(reading, window, cx)) {
             return;
         }
-        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+        if let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) {
             e.meta.reading = reading;
         }
         let _ = self.store.update_meta(&id, |m| m.reading = reading);
@@ -126,7 +126,7 @@ impl Workspace {
 
     pub fn set_info_row(&mut self, info: crate::store::InfoRow) {
         let Some(id) = self.current.clone() else { return };
-        if let Some(e) = self.entries.iter_mut().find(|e| e.id == id) {
+        if let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) {
             e.meta.info = info;
         }
         let _ = self.store.update_meta(&id, |m| m.info = info);
@@ -147,7 +147,7 @@ impl Workspace {
         let btn = self.mode_btn_bounds.clone();
         let menu = Popover::new("doc-mode-menu")
             .menu()
-            .w(px(200.))
+            .w(px(crate::design::menu_w::MD))
             .on_mouse_down_out(cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                 // The button toggles the menu itself.
                 if btn.get().is_none_or(|b| !b.contains(&ev.position)) {
@@ -157,7 +157,8 @@ impl Workspace {
             }))
             .child(item("mode-edit", "pen-line", crate::settings::text("编辑"), crate::settings::text("可编辑文档"), !reading, false))
             .child(item("mode-read", "eye-open", crate::settings::text("阅读"), crate::settings::text("仅查看或评论文档"), reading, true));
-        Some(deferred(anchored().position(point(at.left(), at.bottom() + px(4.))).child(menu)).with_priority(2).into_any_element())
+        let (pos, corner) = crate::design::hang(at, crate::design::Align::Start, None);
+        Some(deferred(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(crate::design::menu::EDGE)).child(menu.fit(crate::design::room(pos, corner)))).with_priority(2).into_any_element())
     }
 
     /// The 快捷键 drawer to the right of the page, below the top bar: shadcn's `Sheet` (side
@@ -199,6 +200,7 @@ impl Workspace {
                         .flex_1()
                         .min_h_0()
                         .overflow_y_scroll()
+                        .track_scroll(&crate::design::scroll::handle("shortcuts-body"))
                         .pt(px(4.))
                         .px(px(16.))
                         .pb(px(24.))
@@ -215,7 +217,9 @@ impl Workspace {
                                 .text_color(crate::design::color::muted_foreground())
                                 .child(crate::settings::text("Markdown 是一种快速输入带格式文本的方式，让你书写文档时行云流水，一气呵成，例如输入#空格，即可输入一级标题。")),
                         )
-                        .children(rows(MARKDOWN)),
+                        .children(rows(MARKDOWN))
+                        // the shared scrollbar, down to the window's corner (the rows keep 16 from the side: room enough)
+                        .child(crate::design::scroll::bar_corners("shortcuts-body", &crate::design::scroll::handle("shortcuts-body"), 0., crate::design::scroll::WINDOW_R)),
                 )
                 .into_any_element(),
         )

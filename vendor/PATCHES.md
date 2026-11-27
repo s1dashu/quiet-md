@@ -1,6 +1,6 @@
 # Vendored patches
 
-Quiet.md takes GPUI from the [Zed repository](https://github.com/zed-industries/zed). The tree in `vendor/zed` combines a pinned upstream snapshot and an ordered local patch series. `vendor/zed/upstream.toml` records the commit and selected crates. Numbered patches in `vendor/zed/patches` produce `vendor/zed/crates`, which the app consumes through Cargo path dependencies. Patched sites carry a `quiet.md:` comment.
+Quiet.md takes GPUI from the [Zed repository](https://github.com/zed-industries/zed). The tree in `vendor/zed` combines a pinned upstream snapshot and an ordered local patch series. `vendor/zed/upstream.toml` records the commit and selected crates. Numbered patches in `vendor/zed/patches`, applied in number order, produce `vendor/zed/crates`, which the app consumes through Cargo path dependencies. Patched sites carry a `quiet.md:` comment.
 
 Vendoring the selected crates avoids fetching the entire Zed repository for a contributor's first build or CI run.
 
@@ -24,15 +24,30 @@ The root Cargo.toml excludes the vendored crates from workspace tests and clippy
 # Define a shell function so the same commands work in sh and zsh.
 vendor_sync() { cargo run -q --manifest-path tools/vendor-sync/Cargo.toml -- "$@"; }
 vendor_sync check                       # Compare the tree against upstream plus all patches
-vendor_sync save <name> -m "<message>"  # Append a patch containing the current edits
-vendor_sync save <existing-name>        # Regenerate a patch, retain its message, move it last
+vendor_sync save <name> -m "<message>"  # New patch with the current edits, numbered highest + 1
+vendor_sync save <name> --number 0062 -m "<message>" # New patch with a number from your range
+vendor_sync save <existing-name>        # Regenerate a patch in place, retain its number and message
 vendor_sync sync                        # Rebuild vendor/zed/crates from upstream.toml
 vendor_sync sync --rev <commit-or-main> # Update the pinned revision and report failed patches
 vendor_sync sync --rev main --keep-going # Skip failed patches and write the remaining results
 vendor_sync refresh                     # Refresh diff line numbers and context at the current snapshot
 ```
 
-The tool keeps a blob-filtered Zed clone in `~/.cache/quiet-md/zed` (override with `QUIET_MD_ZED_DIR`) and sparsely checks out the selected crates. Intermediate files go in `target/vendor-sync`. Patches apply in order via `git apply --3way`, with one commit per patch.
+The tool keeps a blob-filtered Zed clone in `~/.cache/quiet-md/zed` (override with `QUIET_MD_ZED_DIR`) and sparsely checks out the selected crates. Intermediate files go in `target/vendor-sync`. Patches apply in number order via `git apply --3way`, with one commit per patch.
+
+## Patch numbers
+
+A patch keeps its number and file name for good: `save` and `refresh` never renumber the series, so gaps are normal. Branches that add patches at the same time take numbers from separate ranges, so their patches never collide when merged:
+
+| Range | Line of work |
+|---|---|
+| 0046–0059 | Component library (design system) |
+| 0060–0079 | Sync and iOS (mobile line) |
+| 0080 and up | Performance |
+
+Patches 0001–0045 came before the ranges were handed out. A new patch takes `--number <n>` from its line's range. Without `--number` it takes the highest number in the series + 1. `save` refuses a number that is already taken and never overwrites another patch, and it refuses to renumber an existing patch.
+
+A patch numbered before others is saved so that the later patches still apply after it: `save` takes the edits relative to every other patch, then removes the later patches' changes from the diff. If the edits touch the same lines as a later patch, `save` stops and writes nothing; save them with a number after that patch, or fold them into it. After writing, `save` rebuilds the series and confirms it reproduces `vendor/zed/crates`.
 
 For a new patch, edit files under `vendor/zed/crates` (use `Cargo.toml.orig` for manifest edits), run `vendor_sync save <name> -m "<message>"`, then `vendor_sync sync` to regenerate manifests and `vendor_sync check`. Save one related change at a time: each save includes all outstanding edits in the tree.
 
@@ -58,7 +73,7 @@ Snapshot: Zed `e2f00a41ac67` (2026-11-15). Legacy numbers refer to the GPUI 0.2.
 | 0007 list-scroll-estimates | 7 | `gpui/elements/list.rs` | `ListState::estimated_scroll_metrics` and `scroll_to_estimated_offset` estimate unmeasured rows from average height for long-document scrollbars and dragging. |
 | 0008 path-prompt-extensions | 8 | `gpui/platform.rs`, `gpui_macos/platform.rs` | `PathPromptOptions.extensions` filters NSOpenPanel selection to Markdown, text and XML on import. |
 | 0009 offscreen-capture | 10 | `gpui/window.rs`, `platform.rs`, `gpui_macos/window.rs`, `gpui_apple/metal_renderer.rs` | Compile upstream `Window::render_to_image` outside `test-support`. Add `Window::render_offscreen` (run next-frame callbacks and draw offscreen without presenting) and `Window::needs_draw` for devtools capture while obscured or locked. |
-| 0010 replace-root-type | 26 | `gpui/window.rs` | Update the root type in the handle during `Window::replace_root`. After onboarding replaces the root, `downcast::<Workspace>()` can find the workspace in the same window. |
+| 0010 replace-root-type | 26 | `gpui/window.rs` | Update the root type in the handle during `Window::replace_root`. After onboarding replaced the root, `downcast::<Workspace>()` could find the workspace in the same window. No caller since the onboarding was removed (2026-11-27); can be dropped at the next upstream sync. |
 | 0011 window-min-size | 27 | `gpui/window.rs`, `platform.rs`, `gpui_macos/window.rs`, `gpui_windows/window.rs`, `events.rs` | `Window::set_window_min_size` updates minimum content size after creation via macOS setContentMinSize or Windows min_size in WM_GETMINMAXINFO. The minimum width follows sidebar visibility and width. |
 | 0012 present-in-transaction | 28 | `gpui/window.rs`, `platform.rs`, `gpui_macos/window.rs` | `Window::present_next_frame_in_transaction` routes the next frame through `PlatformWindow::draw_in_transaction`. On macOS, presentsWithTransaction presents native glass changes and drawing in the same Core Animation transaction. |
 | 0013 hollow-images | 24 | `gpui/assets.rs`, `window.rs` | `RenderImage::hollow`, `is_hollow` and `with_scale_factor` preserve ID and dimensions while releasing uploaded CPU pixels. If the atlas lacks a hollow image, `paint_image` skips it, records it for `Window::take_missing_images` and requests the next frame. See docs/MEMORY.md. |
@@ -99,6 +114,8 @@ Snapshot: Zed `e2f00a41ac67` (2026-11-15). Legacy numbers refer to the GPUI 0.2.
 | 0080 reuse-coretext-fonts | New | `gpui_apple/text_system.rs` | `layout_line` made a new CTFont for every run of every line, and CoreText fell back to new CJK faces for every line too; CoreText keeps a font's shaping tables, ASCII advances and fallback faces on the CTFont, so each line set them all up again. Each font is now made once per size, and the face CoreText fell back to for a CJK character (Han, kana, CJK and full-width punctuation) is kept per font, size and character and set on that character in later lines. It is CoreText's own face, so weight and variation stay as CoreText chose them. About a third of the time laying out new text (docs/PERFORMANCE.md, "Dragging the scrollbar"); glyphs, positions and faces are unchanged (`kept_cjk_fallbacks_shape_like_coretext`). |
 | 0081 list-set-overdraw | New | `gpui/elements/list.rs` | `ListState::set_overdraw` changes after construction how much is laid out beyond the visible area. The editor sets none while its scrollbar thumb is held, where every frame lands somewhere new and rows nobody sees were most of the frame, and puts it back when the thumb is let go. Lists that never call it (iOS included) behave as before. |
 | 0085 windows-font-family-names | New | `gpui_windows/direct_write.rs` | A DirectWrite font set matches a family by its name in the system's language only: on a Chinese Windows "Microsoft YaHei" and "SimSun" found nothing (微软雅黑 and 宋体 did), so a document font saved on a Mac or an English system, or a family named in code, quietly fell back to the default face. When a name finds nothing, `matching_fonts` tries the family's names in its other languages: the collection's `FindFamilyName`, else every family's names (`other_names`, unit-tested). Font fallback lists match the same way. Numbered 0085: 0048–0084 are taken by other branches. |
+| 0086 linux-system-ui-font | New | `gpui_linux/linux/text_system.rs`, `platform.rs`, `Cargo.toml` | On Linux `.SystemUIFont` meant Zed's bundled IBM Plex Sans, which Quiet.md does not ship, so the app named Noto Sans itself: Latin-only, and missing on many distributions. Chinese then fell to a serif face (#452). It now resolves to fontconfig's match for sans-serif in the locale's language, the face `fc-match sans-serif` reports, and to Noto Sans only when fontconfig matches nothing. The app uses `.SystemUIFont` on every desktop platform. `gpui_linux::system_ui_font_family` exposes the family for the app's Linux test in `theme.rs`. `yeslogic-fontconfig-sys` was already linked through font-kit. |
+| 0087 clipboard-html | New | `gpui/platform.rs`, `gpui_windows/clipboard.rs`, `gpui_linux/linux/x11/clipboard.rs`, `gpui_linux/linux/wayland/clipboard.rs`, `gpui_linux/linux/platform.rs`, `gpui_macos/pasteboard.rs` | `ClipboardString::html` (`with_html`): the HTML flavor beside the text, as the platform stores it. Windows reads and writes `HTML Format` (CF_HTML, header included, UTF-8); X11 and Wayland read the `text/html` target (UTF-8, or UTF-16 with a BOM). Paste from Word, browsers and Feishu keeps its formatting on Windows and Linux (#144); `fdl_core::clip_html` reads the page after the header and writes our copies' CF_HTML. macOS still reads `public.html` in the app (`src/clipboard.rs`). Numbered 0087, after the last on main: no line's range is for the clipboard. |
 
 ## Retired patches
 
@@ -160,7 +177,7 @@ Of 40 checks, 28 passed on macOS (including the macOS portion of 0028), two were
 | 0007 list-scroll-estimates | Incorrect or jumping scrollbar | scrollbar: 400 variable paragraphs, scroll then drag from y=68 down 280 pt | Both had (52,32) → (340,32) → (344,32) after scrolling and matching page content |
 | 0008 path-prompt-extensions | Import lists all files | Scripts use pick and cannot open real panels. Code passes extensions and sets allowedContentTypes. | Unverified, inspect Import in preview manually |
 | 0009 offscreen-capture | Capture fails while locked or obscured | All scenarios capture offscreen or obscured via render_offscreen | Hundreds of captures passed |
-| 0010 replace-root-type | Post-onboarding window missing for quit saves and Finder opens | first-launch with empty library, QUIET_MD_ONBOARDING, eight Enters, create/type/immediate ⌘Q. app::quit uses downcast to Workspace. | Both reached workspace and saved |
+| 0010 replace-root-type | Post-onboarding window missing for quit saves and Finder opens | first-launch with empty library, QUIET_MD_ONBOARDING, eight Enters, create/type/immediate ⌘Q. app::quit uses downcast to Workspace. Check removed with the onboarding (2026-11-27). | Both reached workspace and saved |
 | 0011 window-min-size (macOS) | Minimum width ignores sidebar changes | Accessibility returned -25205 for GPUI window size and lldb attachment required authorization. Exercised sidebar toggle path. | Partial: minimum size unmeasured |
 | 0011 window-min-size (Windows) | Same issue in WM_GETMINMAXINFO | — | Awaiting sida-windows |
 | 0012 present-in-transaction | Sidebar glass flickers one frame ahead or behind | Scripted toggles ran successfully. Offscreen capture cannot measure presentation. | Unverified, observe or record toggles and resizing on screen |
@@ -200,6 +217,10 @@ None of the platform backends are omitted. gpui_web serves the website's live no
 
 - AccessKit platform adapters are wired up. Exposing elements to screen readers requires roles such as `.id(...).role(...)` or custom `a11y_role` implementations (gpui/src/_accessibility.rs). The app did not yet annotate elements at the time of the upgrade.
 - Clean macOS arm64 builds on 2026-11-15: release build time 66.8 → 45.3 s and binary size 36.6 → 35.1 MB. Dist with LTO took 210 → 161 s and shrank from 24.97 to 24.27 MB. Scripted memory usage stayed around 95 MB.
+
+## Other vendored crates
+
+- `vendor/xim-ctext` replaces crates.io's xim-ctext 0.3.0 through `[patch.crates-io]`. GPUI's X11 input method client, zed-xim, unwraps its decoder's result, and the decoder failed on every compound text except UTF-8 and JIS. Rime through IBus sends GB2312, and Quiet.md crashed on the first committed candidate (#465). The copy decodes all of COMPOUND_TEXT and never fails. Because it is a workspace member, its tests run with the app's. See `vendor/xim-ctext/README.md`.
 
 ## Removed vendor directories
 
