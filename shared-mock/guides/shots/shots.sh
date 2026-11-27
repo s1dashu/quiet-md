@@ -41,7 +41,8 @@ if [ -n "$HM" ]; then
   for n in home write board import; do
     [ -f "$work/hm-run/readme-$n.png" ] || { echo "shots.sh: readme-$n.png missing (see $work/hm-run/log)" >&2; exit 1; }
   done
-  compose "$work/hm-run/readme-home.png" "$work/readme-home.png" --sidebar 480
+  # shot at 1344pt wide (four columns), shrunk to the 1000pt frame the others have
+  compose "$work/hm-run/readme-home.png" "$work/readme-home.png" --scale 0.7440476 --sidebar 357
   compose "$work/hm-run/readme-write.png" "$work/readme-write.png" --sidebar 480
   compose "$work/hm-run/readme-board.png" "$work/readme-board.png" --sidebar 480
   compose "$work/hm-run/readme-import.png" "$work/readme-import.png" --flat '#f2f2f1'

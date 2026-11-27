@@ -4,7 +4,8 @@ would draw grey traffic lights and a flat grey sidebar: this draws the lights an
 rebuilds the glass from the backdrop (blurred, saturated, brightened, under 55% white,
 multiplied over the sidebar), as marketing's films do.
 usage: /usr/bin/python3 compose.py shot.png out.png [--sidebar PX] [--flat #rrggbb]
-         [--canvas W H] [--at X Y]   (pixels; default 2400×1500 with the window at 200,135)
+         [--canvas W H] [--at X Y] [--scale K]   (pixels; default 2400×1500 with the window at 200,135;
+         --scale shrinks a wider window to the frame the others have, its lights and corner with it)
 Needs Pillow (the system python3 has it)."""
 import argparse, os
 from PIL import Image, ImageDraw, ImageFilter, ImageChops, ImageEnhance
@@ -13,11 +14,14 @@ ap.add_argument('shot'); ap.add_argument('out')
 ap.add_argument('--sidebar', type=int, default=0, help='sidebar width in pixels; 0: no glass')
 ap.add_argument('--flat', help='a plain backdrop colour instead of the meadow')
 ap.add_argument('--canvas', type=int, nargs=2, default=(2400, 1500)); ap.add_argument('--at', type=int, nargs=2, default=(200, 135))
+ap.add_argument('--scale', type=float, default=1, help='resize the shot by this first; --sidebar is after it')
 ap.add_argument('--no-lights', action='store_true', help='the shot has no title bar (onboarding draws none)')
 a = ap.parse_args()
 repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')
 (W, H), (X, Y), R = a.canvas, a.at, 52  # R: macOS 26's window corner, 26pt
-win = Image.open(a.shot).convert('RGB'); ww, wh = win.size
+win = Image.open(a.shot).convert('RGB'); s = a.scale
+if s != 1: win = win.resize((round(win.width * s), round(win.height * s)), Image.LANCZOS)
+ww, wh = win.size; R = round(R * s)
 if a.flat:
     canvas = Image.new('RGB', (W, H), a.flat)
 else:  # the meadow keeps its pixels: nearest-neighbour, cover, centred
@@ -36,7 +40,7 @@ if a.sidebar:
 if not a.no_lights:  # 14pt lights, 22.5pt apart, centred 23.5pt down
     d = ImageDraw.Draw(win)
     for cx, fill, edge in ((52, '#ff5f57', '#e0443e'), (97, '#febc2e', '#dea123'), (142, '#28c840', '#1aab29')):
-        d.ellipse((cx - 14, 33, cx + 14, 61), fill=edge); d.ellipse((cx - 13, 34, cx + 13, 60), fill=fill)
+        d.ellipse(tuple(v * s for v in (cx - 14, 33, cx + 14, 61)), fill=edge); d.ellipse(tuple(v * s for v in (cx - 13, 34, cx + 13, 60)), fill=fill)
 mask = Image.new('L', (ww * 4, wh * 4), 0); ImageDraw.Draw(mask).rounded_rectangle((0, 0, ww * 4 - 1, wh * 4 - 1), R * 4, fill=255)
 mask = mask.resize((ww, wh), Image.LANCZOS)
 shadow = Image.new('L', (W, H), 0)
