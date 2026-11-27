@@ -2294,26 +2294,20 @@ impl Render for Workspace {
                     w.doc_sub = None;
                     cx.stop_propagation();
                     cx.notify();
-                    return;
                 }
-                // Esc nothing else took closes the front toast.
-                if ev.keystroke.key == "escape" && crate::design::toast::dismiss_front(window, cx) { cx.stop_propagation(); }
             }))
             // Esc leaves 批量操作 (closing its menu or confirmation first), even from the editor.
             // Esc closes the document's menus first (Radix's DropdownMenu). The editor binds Esc to its
             // own action, which runs before any key listener, and spends it selecting the block: take
             // the action on its way down while a menu is open (a switch row keeps the menu open, so
             // Esc is how it goes).
-            .capture_action(cx.listener(|w, _: &crate::editor::keymap::Escape, window, cx| {
+            .capture_action(cx.listener(|w, _: &crate::editor::keymap::Escape, _, cx| {
                 if w.doc_menu || w.mode_menu {
                     w.mode_menu = false;
                     w.doc_menu = false;
                     w.doc_sub = None;
                     cx.stop_propagation();
                     cx.notify();
-                } else if w.preview.is_none() && w.history.is_none() && w.confirm.is_none() && crate::design::toast::dismiss_front(window, cx) {
-                    // then the front toast, before the editor spends Esc selecting the block
-                    cx.stop_propagation();
                 }
             }))
             .capture_key_down(cx.listener(|w, ev: &KeyDownEvent, window, cx| {

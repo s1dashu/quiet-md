@@ -5,10 +5,12 @@ panel opens alone (QUIET_MD_COMPONENTS); every screenshot stays in a temporary d
 at the end. Requires Pillow.
 
 Checks, in each look: three toasts at once stack (the two behind peek out under the front one),
-the pointer on the stack spreads them out (taller), Esc closes the front one and the next takes
-its place, a toast's 撤销 runs its action (the panel says so at its foot) and closes the toast.
+the pointer on the stack spreads them out (taller), Esc with the keyboard elsewhere leaves them
+(Radix Toast, Sonner), Esc after a click on the stack closes the front one and the next takes its
+place, a toast's 撤销 runs its action (the panel says so at its foot) and closes the toast.
 In the app (case reading): keys typed in 阅读模式 bring one 「当前为阅读模式」 toast, not one per
-key, and its 开始编辑 switches to editing (a letter typed then lands in the file).
+key; Esc in the page leaves it; its 开始编辑 switches to editing and gives the keyboard back to
+the page (a letter typed then lands in the file).
 Shots kept: the page's samples (each tone, a description, an action, a close button, a long text
 wrapped to three lines), the stack, spread out, after Esc.
 """
@@ -60,7 +62,8 @@ def extent(f, name, base):
 
 def case(look):
     steps = PAGE + LOOK[look] + PARK + "shot samples\n" + STACK + PARK + "wait 300\nshot stack\n"
-    steps += f"move {W // 2} 60\nwait 600\nshot spread\n" + PARK + "key escape\nwait 600\nshot esc\n"
+    steps += f"move {W // 2} 60\nwait 600\nshot spread\n" + PARK + "key escape\nwait 600\nshot away\n"
+    steps += f"click {W // 2 - 100} 60\n" + PARK + "wait 300\nkey escape\nwait 600\nshot esc\n"
     f = run(look, steps)
     one, three, spread, after = (extent(f, n, "samples") for n in ("samples", "stack", "spread", "esc"))
     assert one == 0, f"a toast before any was asked for; see {f}"
@@ -69,7 +72,9 @@ def case(look):
     stack, _ = img(f, "stack")
     esc, s = img(f, "esc")
     box = tuple(round(v * s) for v in AREA)
-    assert ImageChops.difference(stack.crop(box), esc.crop(box)).getbbox(), f"Esc left the front toast; see {f}"
+    away, _ = img(f, "away")
+    assert not ImageChops.difference(stack.crop(box), away.crop(box)).getbbox(), f"Esc with the keyboard elsewhere closed a toast; see {f}"
+    assert ImageChops.difference(stack.crop(box), esc.crop(box)).getbbox(), f"Esc on the stack left the front toast; see {f}"
     # the action: 撤销 runs and the toast goes
     g = run(look + "-undo", PAGE + LOOK[look] + PARK + "shot before\n" + UNDO + PARK + "wait 300\nshot shown\n"
             + f"click {W // 2 + 140} 60\n" + PARK + "wait 800\nshot done\n")
@@ -89,7 +94,8 @@ def case_reading():
     (lib / "Page.xml").write_text("<title>Page</title>\n<p>one</p>\n<p>two</p>\n")
     # 阅读模式 from the "…" menu; four keys typed; the front toast's 开始编辑 (its right end)
     steps = PARK + "row Page\nwait 800\nshot base\n" + f"click {W - 25} 24\nwait 400\nrow 阅读模式\nwait 400\nkey escape\nwait 300\n"
-    steps += "click 700 259\ntype abcd\nwait 300\n" + PARK + "shot typed\n" + f"move {W // 2 + 130} 59\nwait 400\nshot spread\nclick {W // 2 + 130} 59\nwait 600\ntype Z\nwait 1500\n"
+    # Esc in the page is the page's: the toast stays (spread out below, and its 开始编辑 clicked)
+    steps += "click 700 259\ntype abcd\nwait 300\nkey escape\nwait 300\n" + PARK + "shot typed\n" + f"move {W // 2 + 130} 59\nwait 400\nshot spread\nclick {W // 2 + 130} 59\nwait 600\ntype Z\nwait 1500\n"
     f = run("reading", steps, lib)
     # one toast, not four: spread out, the stack is that card and 已切换为阅读模式 under it
     tall = extent(f, "spread", "base")

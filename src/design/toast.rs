@@ -3,7 +3,9 @@
 //! window keeps its own stack, the newest in front: three show, the ones behind peeking out under
 //! the front one until the pointer comes onto the stack, which spreads them out and stops every
 //! clock. A toast shows 4s (6s with an action, to leave time to reach it) and fades over its last
-//! .3s; Esc closes the front one (`dismiss_front`).
+//! .3s. Esc closes the front one only while the keyboard is on the stack (Radix: "When focus is on a
+//! Toast, Escape closes it"; Sonner's Toaster): a click on it takes the focus, and it goes back to
+//! whoever had it once no toast is left. Esc elsewhere stays with the editor, the menus and so on.
 //!
 //! ```ignore
 //! toast::show(window, Toast::new(ToastTone::Success, "已删除").action("撤销", |w, cx| …), cx);
@@ -137,9 +139,27 @@ impl Clock {
 
 struct Live { id: u64, toast: Toast, clock: Clock }
 
-/// Every window's stack, the newest first, and whether the pointer is over it.
+/// A window's toasts, the newest first; whether the pointer is over them; the stack's focus and
+/// whoever had the focus before a click took it.
 #[derive(Default)]
-struct Toaster { stacks: HashMap<WindowId, (Vec<Live>, bool)>, next: u64 }
+struct Stack { live: Vec<Live>, over: bool, focus: Option<FocusHandle>, prev: Option<FocusHandle> }
+
+impl Stack {
+    /// Once no toast is left to take Esc and the keyboard is still here: where it goes back to
+    /// (`give_back`; None inside: nowhere).
+    fn release(&mut self, window: &Window) -> Option<Option<FocusHandle>> {
+        if self.live.iter().any(|l| !l.clock.closing && !l.clock.over()) { return None }
+        if !self.focus.as_ref()?.is_focused(window) { return None }
+        Some(self.prev.take())
+    }
+}
+
+fn give_back(to: Option<Option<FocusHandle>>, window: &mut Window, cx: &mut App) {
+    match to { Some(Some(p)) => window.focus(&p, cx), Some(None) => window.blur(cx), None => {} }
+}
+
+#[derive(Default)]
+struct Toaster { stacks: HashMap<WindowId, Stack>, next: u64 }
 impl Global for Toaster {}
 
 /// Up to this many wait behind the three shown (each on its own clock) before the oldest goes.
@@ -151,10 +171,11 @@ pub fn show(window: AnyWindowHandle, t: Toast, cx: &mut App) {
     toaster.next += 1;
     let id = toaster.next;
     // a window closed with its toasts up is never drawn again: let its stack go once they are over
-    toaster.stacks.retain(|_, (s, _)| s.iter().any(|l| !l.clock.over()));
-    let (stack, over) = toaster.stacks.entry(window.window_id()).or_default();
+    toaster.stacks.retain(|_, s| s.live.iter().any(|l| !l.clock.over()));
+    let s = toaster.stacks.entry(window.window_id()).or_default();
     let mut clock = Clock { life: t.life(), ran: Duration::ZERO, since: Some(Instant::now()), closing: false };
-    if *over { clock.stop(); }
+    if s.over { clock.stop(); }
+    let stack = &mut s.live;
     // The same note again (a key typed in 阅读模式) starts over in front rather than piling up.
     let id = match stack.iter().position(|l| !l.clock.closing && l.toast.same(&t)) { Some(i) => stack.remove(i).id, None => id };
     stack.insert(0, Live { id, toast: t, clock });
@@ -162,41 +183,58 @@ pub fn show(window: AnyWindowHandle, t: Toast, cx: &mut App) {
     wake(window, cx);
 }
 
-/// Closes the front toast of the window `window`; false when it has none (Esc goes on).
-pub fn dismiss_front(window: &mut Window, cx: &mut App) -> bool {
+/// Esc on the stack: closes the front toast of `window`; false when it has none (Esc goes on).
+fn dismiss_front(window: &mut Window, cx: &mut App) -> bool {
     let handle = window.window_handle();
-    let Some((stack, _)) = cx.default_global::<Toaster>().stacks.get_mut(&handle.window_id()) else { return false };
-    let Some(l) = stack.iter_mut().find(|l| !l.clock.closing && !l.clock.over()) else { return false };
+    let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&handle.window_id()) else { return false };
+    let Some(l) = s.live.iter_mut().find(|l| !l.clock.closing && !l.clock.over()) else { return false };
     l.clock.close();
+    let to = s.release(window);
+    give_back(to, window, cx);
     window.refresh();
     true
 }
 
+/// A click on the stack: the keyboard comes to it (Esc then closes the front toast).
+fn take_focus(window: &mut Window, cx: &mut App) {
+    let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_handle().window_id()) else { return };
+    let Some(f) = s.focus.clone() else { return };
+    if f.is_focused(window) { return }
+    let prev = window.focused(cx);
+    if let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_handle().window_id()) { s.prev = prev; }
+    window.focus(&f, cx);
+}
+
 /// Closes every toast of `window` that `pick` picks (a progress note once the work is done).
 pub fn dismiss_where(window: AnyWindowHandle, pick: impl Fn(ToastTone, &str) -> bool, cx: &mut App) {
-    let Some((stack, _)) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_id()) else { return };
-    for l in stack.iter_mut().filter(|l| pick(l.toast.tone, &l.toast.title)) { l.clock.close(); }
+    let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_id()) else { return };
+    for l in s.live.iter_mut().filter(|l| pick(l.toast.tone, &l.toast.title)) { l.clock.close(); }
     wake(window, cx);
 }
 
-fn close(window: AnyWindowHandle, id: u64, cx: &mut App) {
-    if let Some((stack, _)) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_id())
-        && let Some(l) = stack.iter_mut().find(|l| l.id == id) { l.clock.close(); }
-    wake(window, cx);
+/// The ✕, or the action once it has run.
+fn close(window: &mut Window, id: u64, cx: &mut App) {
+    let handle = window.window_handle();
+    if let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&handle.window_id()) {
+        if let Some(l) = s.live.iter_mut().find(|l| l.id == id) { l.clock.close(); }
+        let to = s.release(window);
+        give_back(to, window, cx);
+    }
+    wake(handle, cx);
 }
 
 /// The pointer came onto the stack or left it: spread it out and stop every clock, or go on.
 fn hover(window: AnyWindowHandle, on: bool, cx: &mut App) {
-    let Some((stack, over)) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_id()) else { return };
-    *over = on;
-    for l in stack.iter_mut().filter(|l| !l.clock.closing) { if on { l.clock.stop() } else { l.clock.go() } }
+    let Some(s) = cx.default_global::<Toaster>().stacks.get_mut(&window.window_id()) else { return };
+    s.over = on;
+    for l in s.live.iter_mut().filter(|l| !l.clock.closing) { if on { l.clock.stop() } else { l.clock.go() } }
     wake(window, cx);
 }
 
 /// Draws `window` again now and when the next fade starts (the fade's own frames carry it on).
 fn wake(window: AnyWindowHandle, cx: &mut App) {
     cx.defer(move |cx| { let _ = window.update(cx, |_, w, _| w.refresh()); });
-    let next = cx.try_global::<Toaster>().and_then(|t| t.stacks.get(&window.window_id())).and_then(|(s, _)| s.iter().filter_map(|l| l.clock.until_fade()).min());
+    let next = cx.try_global::<Toaster>().and_then(|t| t.stacks.get(&window.window_id())).and_then(|s| s.live.iter().filter_map(|l| l.clock.until_fade()).min());
     if let Some(wait) = next {
         cx.spawn(async move |cx| {
             cx.background_executor().timer(wait).await;
@@ -208,14 +246,22 @@ fn wake(window: AnyWindowHandle, cx: &mut App) {
 /// This window's stack, over everything 32pt below the top; None when it is empty.
 pub fn toaster(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
     let handle = window.window_handle();
-    let toaster = cx.default_global::<Toaster>();
-    let (stack, over) = toaster.stacks.get_mut(&handle.window_id())?;
-    stack.retain(|l| !l.clock.over());
-    if stack.is_empty() { toaster.stacks.remove(&handle.window_id()); return None; }
-    let over = *over;
-    if stack.iter().any(|l| l.clock.fading()) { window.request_animation_frame(); }
-    let shown: Vec<_> = stack.iter().take(SHOWN).map(|l| (l.id, l.toast.clone(), l.clock.opacity())).collect();
-    let closer = |id: u64| -> Run { Rc::new(move |_, cx| close(handle, id, cx)) };
+    let id = handle.window_id();
+    let s = cx.default_global::<Toaster>().stacks.get_mut(&id)?;
+    s.live.retain(|l| !l.clock.over());
+    if s.live.is_empty() {
+        // the last one ran out with the keyboard on it
+        let mut s = cx.default_global::<Toaster>().stacks.remove(&id)?;
+        let to = s.release(window);
+        window.defer(cx, move |window, cx| give_back(to, window, cx));
+        return None;
+    }
+    if s.focus.is_none() { let f = cx.focus_handle(); cx.default_global::<Toaster>().stacks.get_mut(&id)?.focus = Some(f); }
+    let s = cx.default_global::<Toaster>().stacks.get_mut(&id)?;
+    let (over, focus) = (s.over, s.focus.clone()?);
+    if s.live.iter().any(|l| l.clock.fading()) { window.request_animation_frame(); }
+    let shown: Vec<_> = s.live.iter().take(SHOWN).map(|l| (l.id, l.toast.clone(), l.clock.opacity())).collect();
+    let closer = |id: u64| -> Run { Rc::new(move |window, cx| close(window, id, cx)) };
     let stack_el = if over {
         // spread out: each whole, the newest on top
         div().flex().flex_col().gap(px(GAP)).children(shown.into_iter().map(|(id, t, op)| t.card(id, Some(closer(id)), window).opacity(op)))
@@ -233,7 +279,10 @@ pub fn toaster(window: &mut Window, cx: &mut App) -> Option<AnyElement> {
             .child(front.card(fid, Some(closer(fid)), window).opacity(fop))
     };
     let vw = window.viewport_size().width;
-    let area = div().id("toaster").occlude().on_hover(move |on, _, cx| hover(handle, *on, cx)).child(stack_el);
+    let area = div().id("toaster").track_focus(&focus).occlude().on_hover(move |on, _, cx| hover(handle, *on, cx))
+        .capture_any_mouse_down(|_, window, cx| take_focus(window, cx))
+        .on_key_down(|e, window, cx| if e.keystroke.key == "escape" && dismiss_front(window, cx) { cx.stop_propagation() })
+        .child(stack_el);
     Some(deferred(anchored().position_mode(AnchoredPositionMode::Window).position(point(px(0.), px(TOP)))
         .child(div().w(vw).flex().justify_center().child(area))).with_priority(20).into_any_element())
 }

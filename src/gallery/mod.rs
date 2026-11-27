@@ -259,9 +259,8 @@ impl Render for Gallery {
             .child(body));
         let toast = self.toast.as_ref().map(|(s, _)| div().absolute().bottom(px(24.)).left_0().right_0().flex().justify_center().child(Toast::new(ToastTone::Success, s.clone())));
         div().track_focus(&self.focus).key_context("Gallery").relative().size_full().flex().flex_col().bg(color::background()).font_family(crate::theme::ui_family()).text_color(color::foreground())
-            .on_key_down(cx.listener(|g, e: &KeyDownEvent, window, cx| if e.keystroke.key == "escape" {
-                // the front toast first, then the open menu or dialog
-                if crate::design::toast::dismiss_front(window, cx) { return; }
+            .on_key_down(cx.listener(|g, e: &KeyDownEvent, _, cx| if e.keystroke.key == "escape" {
+                // the open menu or dialog (Esc on the toasts closes the front one there)
                 g.open = None; g.dialog = None; cx.notify();
             }))
             .child(bar)
