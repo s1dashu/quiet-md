@@ -72,14 +72,14 @@ pub fn palette(name: &str) -> Palette {
     Palette { text: on(text, c(v[0])), bg: c(v[0]), hover_text: on(deeper, c(v[1])), hover_bg: c(v[1]), active_text: on(deeper, c(v[2])), active_bg: c(v[2]), disabled_bg: c(v[0]) }
 }
 
-/// The button at rest: a white-button drop (1px, soft).
+/// The button at rest: level 1 (`shadow::rest`).
 pub fn shadow_s1() -> Vec<BoxShadow> {
-    crate::editor_theme::shadow_button()
+    crate::design::shadow::rest()
 }
 
-/// The button lifted (hovered, pressed, being edited): the menu drop.
+/// The button lifted (hovered, pressed, being edited): level 2 (`shadow::toast`).
 pub fn shadow_s4() -> Vec<BoxShadow> {
-    crate::editor_theme::shadow_menu()
+    crate::design::shadow::toast()
 }
 
 /// Font size, line height and weight of the button inside a paragraph

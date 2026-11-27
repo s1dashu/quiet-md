@@ -38,7 +38,7 @@ struct FieldDrag { id: FieldId, name: String, glyph: &'static str }
 impl Render for FieldDrag {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().h(px(34.)).w(px(FIELD_ROW_W)).px(px(8.)).flex().items_center().gap(px(6.)).rounded(px(crate::design::geo().menu_row_r))
-            .bg(crate::theme::raised(Theme::bg_body())).shadow(crate::theme::shadow_menu()).opacity(0.96)
+            .bg(crate::theme::raised(Theme::bg_body())).shadow(crate::design::shadow::toast()).opacity(0.96)
             .font_family(crate::theme::ui_family()).text_size(px(text_sm())).text_color(Theme::text())
             .child(icon(self.glyph, 15., Theme::icon()))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(self.name.clone())))

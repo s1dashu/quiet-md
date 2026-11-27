@@ -1010,7 +1010,7 @@ impl Editor {
             .overflow_hidden()
             .rounded(px(crate::sidebar::ROW_R))
             .bg(crate::theme::raised(Theme::bg_body()))
-            .shadow(theme::shadow_panel())
+            .shadow(crate::design::shadow::toast())
             .child(col);
         let (id, at) = d.handle;
         Some(

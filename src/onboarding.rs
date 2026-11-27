@@ -585,7 +585,7 @@ impl Onboarding {
         div().id("onb-setup-scroll").size_full().overflow_y_scroll().track_scroll(&crate::design::scroll::handle("onb-setup-scroll")).flex().flex_col().items_center().px(px(48.)).pt(px(48.)).pb(px(88.))
             .child(div().my_auto().flex_none().w_full().flex().flex_col().items_center()
             .child(div().flex().flex_col().items_center().gap(px(12.))
-                .child(div().size(px(64.)).rounded(px(15.)).overflow_hidden().shadow(theme::shadow_card()).child(img(crate::settings::about_icon()).size_full()))
+                .child(div().size(px(64.)).rounded(px(15.)).overflow_hidden().shadow(crate::design::shadow::rest()).child(img(crate::settings::about_icon()).size_full()))
                 .child(lifted(over, 56., 64., true, false, "Quiet.md"))
                 .child(lifted(over, 15., 23., false, true, tr("一个又快又安静的本地笔记应用。", "A fast, quiet, local notes app."))))
             .child(div().w_full().max_w(px(560.)).mt(px(40.)).flex().flex_col().gap(px(12.))

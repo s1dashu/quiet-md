@@ -2,7 +2,7 @@
 //! The layout departs in one place: a sunken sidebar on the window surface
 //! and a full-bleed white note plane instead of floating panels.
 
-use gpui::{BoxShadow, Hsla, Rgba, WindowBackgroundAppearance, point, px, rgb};
+use gpui::{Hsla, Rgba, WindowBackgroundAppearance, rgb};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 // ---- dark mode
@@ -335,51 +335,6 @@ pub mod craft {
     pub const WINDOW: u32 = 0xeff0f1;
     /// The chrome between floating panels.
     pub const CHROME: u32 = 0xe6e7e8;
-}
-
-/// Shadows stay black; on the dark page they need more weight to show.
-fn shadow(a: f32, y: f32, blur: f32, spread: f32) -> BoxShadow {
-    let a = if dark() { (a * 3.).min(0.6) } else { a };
-    BoxShadow { color: rgbaf(0, 0, 0, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset: false }
-}
-
-/// Menus and dropdowns: macOS 26 menu panel, soft and wide.
-pub fn shadow_menu() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 3., 0.), shadow(0.10, 8., 24., 0.)]
-}
-
-/// Second-level panels, search popups, toasts.
-pub fn shadow_panel() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 4., 0.), shadow(0.12, 12., 32., 0.)]
-}
-
-/// Modal dialogs (the modal container shadow is a deep, soft 9-slice).
-pub fn shadow_dialog() -> Vec<BoxShadow> {
-    vec![shadow(0.06, 2., 8., 0.), shadow(0.16, 24., 64., 0.)]
-}
-
-/// Cards resting on the sidebar (更新日志): a faint lift, no border.
-pub fn shadow_card() -> Vec<BoxShadow> {
-    vec![shadow(0.04, 1., 2., 0.), shadow(0.06, 4., 14., 0.)]
-}
-
-/// A folder page's document cards: the folder card's shadow (`folder_card`), fainter,
-/// cast from the same inset box so the two line up along the bottom.
-pub fn shadow_sheet() -> Vec<BoxShadow> {
-    vec![shadow(0.035, 8., 22., -2.)]
-}
-
-/// The note plane's left edge over the sidebar: a faint shade cast leftward, so the
-/// two read as layers. The plane meets the window's other edges, where nothing shows.
-pub fn shadow_note() -> Vec<BoxShadow> {
-    let mut v = vec![shadow(0.012, 0., 1., 0.), shadow(0.014, 0., 6., 0.)];
-    v[1].offset.x = px(-1.);
-    v
-}
-
-/// Header buttons and other white pills on a white panel (back / share).
-pub fn shadow_button() -> Vec<BoxShadow> {
-    vec![shadow(0.05, 1., 1.5, 0.)]
 }
 
 /// The platform's sans: the interface's family unless 外观 › 界面字体 says

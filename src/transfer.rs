@@ -931,7 +931,7 @@ impl Workspace {
             // 导入 copies: say what went where, and that the original stayed as it was.
             let (name, place) = (crate::settings::display_title(&e.title), self.place_name(e.meta.parent.as_deref()));
             self.show_toast(&crate::localized_format!("已复制「{}」到「{}」，原文件夹未改动", "Copied “{}” into “{}”; the original folder is untouched", name, place), cx);
-        } else if self.toast.as_ref().is_some_and(|t| matches!(t.0, ToastKind::Info) && t.1.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
+        } else if self.toast.as_ref().is_some_and(|t| matches!(t.kind, ToastKind::Info) && t.msg.as_ref() == crate::settings::tr("正在导入…", "Importing…")) { self.toast = None; }
         cx.notify();
     }
 

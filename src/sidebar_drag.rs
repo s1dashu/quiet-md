@@ -779,7 +779,7 @@ impl Workspace {
                     cx.notify();
                 }))
                 .when(lift > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius)
-                    .bg(theme::raised(Theme::bg_body()).opacity(lift)).shadow(faded(theme::shadow_panel(), lift))))
+                    .bg(theme::raised(Theme::bg_body()).opacity(lift)).shadow(faded(crate::design::shadow::toast(), lift))))
                 .when(fx.glow.unit() > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius).bg(Theme::sidebar_landed().opacity(fx.glow.unit()))))
                 .when(hover > 0.005, |d| d.child(div().absolute().inset_0().rounded(radius).bg(Theme::sidebar_hover().opacity(hover))))
                 .child(self.doc_row(&r.entry, "doc", 0, r.entry.meta.folder.is_some(), cx));
@@ -855,7 +855,7 @@ impl Workspace {
             let l = d.lift.p.max(0.);
             let inside = d.excluded.len().saturating_sub(1);
             layer = layer.child(div().absolute().left(px(x - 3. * l)).top(px(y - l)).w(px(width + 6. * l)).h(px(crate::sidebar::ROW_H)).pr(px(6.)).rounded(px(crate::sidebar::ROW_R))
-                .bg(theme::raised(Theme::bg_body())).shadow(faded(theme::shadow_panel(), l.min(1.))).flex().items_center().text_color(Theme::text())
+                .bg(theme::raised(Theme::bg_body())).shadow(faded(crate::design::shadow::toast(), l.min(1.))).flex().items_center().text_color(Theme::text())
                 .child(row_face(e).flex_1().min_w_0().pl(px(6. + 3. * l)))
                 .when(inside > 0, |g| g.child(div().flex_none().h(px(18.)).min_w(px(18.)).px(px(5.)).rounded(px(9.)).flex().items_center().justify_center()
                     .bg(Theme::sidebar_drop_slot()).text_size(px(11.)).text_color(Theme::sidebar_text()).font_weight(FontWeight::MEDIUM)

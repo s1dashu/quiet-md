@@ -682,7 +682,7 @@ impl Workspace {
                 w.end_card_drag(cx);
             }))
             .child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h))
-                .shadow(theme::shadow_panel()).rounded(px(10.))
+                .shadow(crate::design::shadow::toast()).rounded(px(10.))
                 .map(|d| match face { Some(f) => d.child(f), None => d.child(lines) }));
         Some(deferred(layer).with_priority(5).into_any_element())
     }

@@ -5,6 +5,7 @@ use crate::time::civil;
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
     svg().path(SharedString::from(format!("icons/{name}.svg"))).size(px(size)).flex_none().text_color(color)
@@ -17,26 +18,53 @@ pub enum ToastKind {
     Info,
 }
 
-/// Toast: `design::Toast` 32px below the top, centred. It lasts 3s and fades over
-/// its last .3s; None once it is over.
-pub fn toast_el(kind: ToastKind, msg: &SharedString, t0: web_time::Instant, window: &mut Window) -> Option<AnyElement> {
-    let e = t0.elapsed().as_secs_f32();
-    if e >= 3. {
+/// A toast's message and clock (Sonner's, as shadcn ships it): shown 4s, fading over the last .3s;
+/// the clock stops while the pointer is over it and goes on with what is left once it leaves.
+pub struct ToastState { pub kind: ToastKind, pub msg: SharedString, ran: Duration, since: Option<web_time::Instant> }
+
+impl ToastState {
+    const LIFE: f32 = 4.;
+    const FADE: f32 = 0.3;
+    pub fn new(kind: ToastKind, msg: &str) -> Self {
+        ToastState { kind, msg: SharedString::from(msg.to_string()), ran: Duration::ZERO, since: Some(web_time::Instant::now()) }
+    }
+    fn elapsed(&self) -> f32 { (self.ran + self.since.map_or(Duration::ZERO, |t| t.elapsed())).as_secs_f32() }
+    pub fn over(&self) -> bool { self.elapsed() >= Self::LIFE }
+    /// How long until the fade starts (when its frames take over); None while paused.
+    pub fn until_fade(&self) -> Option<Duration> {
+        self.since.map(|_| Duration::from_secs_f32((Self::LIFE - Self::FADE - self.elapsed()).max(0.)))
+    }
+    /// The pointer came onto (`true`) or left the toast: stop or restart the clock.
+    pub fn hover(&mut self, on: bool) {
+        match (on, self.since) {
+            (true, Some(t)) => { self.ran += t.elapsed(); self.since = None; }
+            (false, None) => self.since = Some(web_time::Instant::now()),
+            _ => {}
+        }
+    }
+}
+
+/// Toast: `design::Toast` 32px below the top, centred; None once it is over. `on_hover` is told
+/// when the pointer comes onto it or leaves (the owner pauses the clock, `ToastState::hover`).
+pub fn toast_el(t: &ToastState, window: &mut Window, on_hover: impl Fn(bool, &mut Window, &mut App) + 'static) -> Option<AnyElement> {
+    let e = t.elapsed();
+    if e >= ToastState::LIFE {
         return None;
     }
-    let op = if e > 2.7 {
-        window.request_animation_frame();
-        (3. - e) / 0.3
+    let op = if e > ToastState::LIFE - ToastState::FADE {
+        if t.since.is_some() { window.request_animation_frame(); }
+        (ToastState::LIFE - e) / ToastState::FADE
     } else {
         1.
     };
-    let tone = match kind {
+    let tone = match t.kind {
         ToastKind::Success => crate::design::ToastTone::Success,
         ToastKind::Error => crate::design::ToastTone::Error,
         ToastKind::Info => crate::design::ToastTone::Info,
     };
     let vw = window.viewport_size().width;
-    let card = crate::design::Toast::new(tone, crate::settings::label(msg));
+    // It takes the pointer (as Sonner's does): what is under it doesn't light up or take the click.
+    let card = div().id("toast").occlude().on_hover(move |on, window, cx| on_hover(*on, window, cx)).child(crate::design::Toast::new(tone, crate::settings::label(&t.msg)));
     Some(
         deferred(
             anchored()

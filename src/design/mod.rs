@@ -320,7 +320,9 @@ pub const PAGE_INSET: f32 = (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H
 pub fn geo() -> &'static Geo { &G }
 
 /// Shadows (Tailwind's, and affectUI's for floating things), each heavier in the dark look so it
-/// still reads.
+/// still reads. One ladder of elevation (docs/design/DESIGN_SYSTEM.md, 阴影层级): 0 flat (`plane`'s
+/// edge only), 1 resting (`xs`, `sm`, `rest`, `frame`, `sheet`), 2 lifted for a moment (`toast`),
+/// 3 floating (`popover`), 4 modal (`dialog`); `sticky` apart.
 pub mod shadow {
     use super::*;
 
@@ -333,7 +335,21 @@ pub mod shadow {
     pub fn ring(c: Hsla, w: f32) -> BoxShadow { s(c, 0., 0., w) }
     /// shadow-xs: fields and outline buttons. None in the dark look, where those are translucent
     /// (`input/30`) and GPUI would paint the shadow through them.
-    pub fn xs() -> Vec<BoxShadow> { if dark() { vec![] } else { vec![drop(0.05, 1., 2., 0.)] } }
+    pub fn xs() -> Vec<BoxShadow> { if dark() { vec![] } else { rest() } }
+    /// Level 1 on an opaque face, so kept in the dark look: shadow-xs (file cards, the inline
+    /// button at rest, the app's icon).
+    pub fn rest() -> Vec<BoxShadow> { vec![drop(0.05, 1., 2., 0.)] }
+    /// Level 1, a loose sheet on a page (a folder page's document cards, a table's full pane): the
+    /// faintest lift, cast from a box inset as the folder card's shadow is; the sheet draws its own
+    /// squircle hairline, so no ring.
+    pub fn sheet() -> Vec<BoxShadow> { vec![drop(0.035, 8., 22., -2.)] }
+    /// Level 0: the note plane's left edge over the sidebar, a faint shade cast leftward so the two
+    /// read as layers (the plane meets the window's other edges, where nothing shows).
+    pub fn plane() -> Vec<BoxShadow> {
+        let mut v = vec![drop(0.012, 0., 1., 0.), drop(0.014, 0., 6., 0.)];
+        v[1].offset.x = px(-1.);
+        v
+    }
     /// shadow-sm: the picked segment of a segmented control.
     pub fn sm() -> Vec<BoxShadow> { if dark() { vec![] } else { vec![drop(0.1, 1., 3., 0.), drop(0.1, 1., 2., -1.)] } }
     /// A card's edge (a table in a page): a 10% hairline 0.5pt wide (Vega's card ring,
@@ -343,7 +359,13 @@ pub mod shadow {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.12), 0.5), s(rgbaf(0, 0, 0, 0.4), 1., 2., 0.)]; }
         vec![ring(rgbaf(0, 0, 0, 0.10), 0.5), s(rgbaf(0, 0, 0, 0.1), 1., 1., -1.), s(rgbaf(0, 0, 0, 0.05), 1., 2., 0.)]
     }
-    /// affectUI's `--aui-shadow-popover` (menus, popovers, dialogs): a 0.5pt ring and a soft drop
+    /// Level 2, lifted for a moment (a toast, a card or row being dragged, the inline button under
+    /// the pointer): the popover's ring over a drop about half as deep and wide.
+    pub fn toast() -> Vec<BoxShadow> {
+        if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.42), 4., 12., -2.), s(rgbaf(0, 0, 0, 0.25), 1., 3., 0.)]; }
+        vec![ring(rgbaf(0, 0, 0, 0.08), 0.5), s(rgbaf(0, 0, 0, 0.10), 4., 12., -2.), s(rgbaf(0, 0, 0, 0.06), 1., 3., 0.)]
+    }
+    /// Level 3, affectUI's `--aui-shadow-popover` (menus, popovers, floating panels): a 0.5pt ring and a soft drop
     /// read as one crisp edge, where Nova's `ring-foreground/10` border over shadow-md read as two.
     pub fn popover() -> Vec<BoxShadow> {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.6), 12., 32., -8.)]; }
@@ -355,7 +377,7 @@ pub mod shadow {
         let side = |a: f32, x: f32, blur: f32, spread: f32| { let mut d = drop(a, 0., blur, spread); d.offset.x = px(x); d };
         vec![side(0.1, 1., 3., 0.), side(0.1, 1., 2., -1.)]
     }
-    /// A dialog: the popover's edge over a deeper drop (it sits over a dimmed window).
+    /// Level 4, a dialog: the popover's edge over a deeper drop (it sits over a dimmed window).
     pub fn dialog() -> Vec<BoxShadow> {
         if dark() { return vec![ring(rgbaf(255, 255, 255, 0.14), 0.5), s(rgbaf(0, 0, 0, 0.6), 24., 48., -12.)]; }
         vec![ring(rgbaf(0, 0, 0, 0.08), 0.5), s(rgbaf(0, 0, 0, 0.18), 24., 48., -12.), s(rgbaf(0, 0, 0, 0.06), 4., 12., -4.)]

@@ -975,7 +975,7 @@ impl Workspace {
                     // hairline and the faintest lift; hover darkens the hairline.
                     .cursor_pointer()
                     // Inset as the folder card's shadow box is (6 a side, 10 from the top).
-                    .child(div().absolute().left(px(6.)).right(px(6.)).top(px(10.)).bottom_0().rounded(px(radius * 0.6)).shadow(theme::shadow_sheet()))
+                    .child(div().absolute().left(px(6.)).right(px(6.)).top(px(10.)).bottom_0().rounded(px(radius * 0.6)).shadow(crate::design::shadow::sheet()))
                     .on_click(cx.listener(move |w, _, window, cx| w.card_click(&id, window, cx)))
                     .when(check.is_none(), |d| d.on_mouse_down(
                         MouseButton::Right,

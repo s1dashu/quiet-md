@@ -752,7 +752,7 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
                     .when_some(tint, |d, slot| d.bg(row_tint(slot)))
                     .when(checked, |d| d.bg(sel_bg()))
                     // lifted: over the rest, a card riding the pointer
-                    .when(dragging, |d| d.bg(Theme::bg_body()).opacity(0.92).shadow(crate::design::shadow::popover()))
+                    .when(dragging, |d| d.bg(Theme::bg_body()).opacity(0.92).shadow(crate::design::shadow::toast()))
                     .child(fz).child(div().flex_1().min_w_0().h_full().overflow_hidden().child(sc))
                     .children(dragged_col.map(|c| ghost_col(cell(c).into_any_element(), ghost, Theme::bg_body())));
                 if dragging { lifted.push(row.into_any_element()); } else { body = body.child(row); }

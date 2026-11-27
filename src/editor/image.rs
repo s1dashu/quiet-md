@@ -163,7 +163,7 @@ pub struct ImageUi {
     lightbox: Option<Lightbox>,
     lb_focus: FocusHandle,
     chrome_task: Option<Task<()>>,
-    toast: Option<(ToastKind, SharedString, Instant)>,
+    toast: Option<crate::editor_ui::ToastState>,
     toast_task: Option<Task<()>>,
     remote: RefCell<HashMap<String, Remote>>,
     remote_dir: PathBuf,
@@ -1747,7 +1747,7 @@ impl Editor {
 
     /// Animations, the fit and the end of the closing fade.
     pub(super) fn tick_image_ui(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.img.toast.as_ref().is_some_and(|(_, _, t)| t.elapsed() >= Duration::from_secs(3)) {
+        if self.img.toast.as_ref().is_some_and(|t| t.over()) {
             self.img.toast = None;
         }
         if !cx.has_active_drag() {
@@ -1924,7 +1924,7 @@ impl Editor {
             .bg(theme::rgbaf(0x14, 0x15, 0x17, 0.78))
             .border_1()
             .border_color(theme::rgbaf(255, 255, 255, 0.1))
-            .shadow(theme::shadow_panel())
+            .shadow(crate::design::shadow::popover())
             .flex()
             .items_center()
             .font_family(theme::ui_family())
@@ -2049,19 +2049,31 @@ impl Editor {
     }
 
     pub(super) fn toast_kind(&mut self, kind: ToastKind, msg: &str, cx: &mut Context<Self>) {
-        self.img.toast = Some((kind, SharedString::from(msg.to_string()), Instant::now()));
+        self.img.toast = Some(crate::editor_ui::ToastState::new(kind, msg));
         // One toast at a time: this one replaces the workspace's.
         cx.emit(super::view::EditorEvent::Toast);
-        self.img.toast_task = Some(cx.spawn(async |this, cx| {
-            cx.background_executor().timer(Duration::from_millis(2700)).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        }));
+        self.wake_for_toast_fade(cx);
         cx.notify();
     }
 
-    pub(super) fn toast_el(&self, window: &mut Window) -> Option<AnyElement> {
-        let (kind, msg, t0) = self.img.toast.as_ref()?;
-        crate::editor_ui::toast_el(*kind, msg, *t0, window)
+    /// A frame when the toast's fade starts (its own frames carry it from there); none while paused.
+    fn wake_for_toast_fade(&mut self, cx: &mut Context<Self>) {
+        let Some(wait) = self.img.toast.as_ref().and_then(|t| t.until_fade()) else { self.img.toast_task = None; return };
+        self.img.toast_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }));
+    }
+
+    pub(super) fn toast_el(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let this = cx.entity().downgrade();
+        crate::editor_ui::toast_el(self.img.toast.as_ref()?, window, move |on, _, cx| {
+            let _ = this.update(cx, |e, cx| {
+                if let Some(t) = &mut e.img.toast { t.hover(on); }
+                e.wake_for_toast_fade(cx);
+                cx.notify();
+            });
+        })
     }
 
     // ---- inserting

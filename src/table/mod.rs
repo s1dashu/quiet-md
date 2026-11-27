@@ -690,8 +690,8 @@ impl Render for TableView {
             // its buttons (8pt): below them on top, so the sheet starts at the header's foot
             const GAP: f32 = crate::design::PAGE_INSET;
             const RADIUS: f32 = SHEET_R;
-            // A folder page's document cards' shadow (`theme::shadow_sheet`), not cast down but all round
-            let around: Vec<BoxShadow> = crate::theme::shadow_sheet().into_iter().map(|mut s| { s.offset = point(px(0.), px(0.)); s }).collect();
+            // A folder page's document cards' shadow (`design::shadow::sheet`), not cast down but all round
+            let around: Vec<BoxShadow> = crate::design::shadow::sheet().into_iter().map(|mut s| { s.offset = point(px(0.), px(0.)); s }).collect();
             root.px(px(GAP)).pb(px(GAP)).child(div().relative().flex_1().min_h_0()
                 .child(div().absolute().inset_0().rounded(px(RADIUS)).shadow(around))
                 .child(crate::ui::squircle_surface(RADIUS, Theme::bg_body()).absolute().inset_0())

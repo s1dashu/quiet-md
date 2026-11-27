@@ -83,31 +83,6 @@ pub mod ud {
     }
 }
 
-fn shadow(a: f32, y: f32, blur: f32, spread: f32) -> BoxShadow {
-    let a = if crate::theme::dark() { (a * 3.).min(0.6) } else { a };
-    BoxShadow { color: rgbaf(31, 35, 41, a), offset: point(px(0.), px(y)), blur_radius: px(blur), spread_radius: px(spread), inset: false }
-}
-
-/// Dropdowns and the slash / block menus (`shadow.popover`: 0 4 8).
-pub fn shadow_menu() -> Vec<BoxShadow> {
-    vec![shadow(0.1, 4., 8., 0.)]
-}
-
-/// Second-level panels, search popups, toasts (0 6 24).
-pub fn shadow_panel() -> Vec<BoxShadow> {
-    vec![shadow(0.1, 6., 24., 0.)]
-}
-
-/// Modal dialogs (0 8 24 4 at .12).
-pub fn shadow_dialog() -> Vec<BoxShadow> {
-    vec![shadow(0.12, 8., 24., 4.)]
-}
-
-/// `--shadow-s4-down`: the 「…」 menu, folder page menus, the icon picker.
-pub fn shadow_s4_down() -> Vec<BoxShadow> {
-    vec![shadow(0.04, 8., 24., 8.), shadow(0.04, 6., 12., 0.), shadow(0.06, 4., 8., -8.)]
-}
-
 pub use crate::theme::{ui_family, DOC_UI_FONT};
 #[cfg(not(any(target_os = "linux", target_family = "wasm")))]
 pub const MONO_FONT: &str = "Menlo";
@@ -243,7 +218,7 @@ pub fn heading_metrics(level: u8) -> BlockMetrics {
 
 pub const TITLE: BlockMetrics = BlockMetrics { size: 34.0, line_height: 55.25, mt: 0.0, mb: 0.0 };
 
-pub use crate::theme::{craft, ca, mix, ta, shadow_button};
+pub use crate::theme::{craft, ca, mix, ta};
 
 impl Theme { pub fn link_hover() -> Hsla { crate::theme::lift(c(ud::old::B600), 4.5) } }
 

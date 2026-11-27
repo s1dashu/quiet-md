@@ -478,8 +478,8 @@ pub struct Workspace {
     pub trash_menu: Option<(String, Point<Pixels>, Anchor)>,
     /// 回收站's 自动删除 dropdown is open.
     pub trash_days_menu: bool,
-    /// The toast and when it appeared.
-    pub toast: Option<(ToastKind, SharedString, Instant)>,
+    /// The toast and its clock.
+    pub toast: Option<crate::ui::ToastState>,
     toast_task: Option<Task<()>>,
     /// Folded sidebar sections: 置顶, then two unused (我的文档 never folds, #421; 本机文件 is gone).
     pub folded: [bool; 3],
@@ -1337,20 +1337,32 @@ impl Workspace {
     }
 
     pub fn show_toast_kind(&mut self, kind: ToastKind, msg: &str, cx: &mut Context<Self>) {
-        self.toast = Some((kind, SharedString::from(msg.to_string()), Instant::now()));
+        self.toast = Some(crate::ui::ToastState::new(kind, msg));
         if let Some(ed) = &self.editor {
             ed.update(cx, |e, cx| e.clear_toast(cx));
         }
-        self.toast_task = Some(cx.spawn(async |this, cx| {
-            cx.background_executor().timer(Duration::from_millis(2700)).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        }));
+        self.wake_for_toast_fade(cx);
         cx.notify();
     }
 
-    fn render_toast(&self, window: &mut Window) -> Option<AnyElement> {
-        let (kind, msg, t0) = self.toast.as_ref()?;
-        crate::ui::toast_el(*kind, msg, *t0, window)
+    /// A frame when the toast's fade starts (its own frames carry it from there); none while paused.
+    fn wake_for_toast_fade(&mut self, cx: &mut Context<Self>) {
+        let Some(wait) = self.toast.as_ref().and_then(|t| t.until_fade()) else { self.toast_task = None; return };
+        self.toast_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }));
+    }
+
+    fn render_toast(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let this = cx.entity().downgrade();
+        crate::ui::toast_el(self.toast.as_ref()?, window, move |on, _, cx| {
+            let _ = this.update(cx, |w, cx| {
+                if let Some(t) = &mut w.toast { t.hover(on); }
+                w.wake_for_toast_fade(cx);
+                cx.notify();
+            });
+        })
     }
 
     /// 重命名: the row's title turns into an input; Enter or clicking away saves, Esc cancels.
@@ -2141,7 +2153,7 @@ impl Render for Workspace {
         let lang_menu = self.render_lang_menu(cx);
         let pref_menu = self.render_pref_menu(cx);
         let font_menu = self.render_font_menu(cx);
-        let toast = self.render_toast(window);
+        let toast = self.render_toast(window, cx);
         let forced_update = crate::update::prompt(window, cx);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -2195,7 +2207,7 @@ impl Render for Workspace {
             crate::loading::note_layer(load, cover, crate::loading::t(cx), counts)
                 .on_drop(cx.listener(|w, paths: &ExternalPaths, window, cx| w.file_drop_paths(paths.paths().to_vec(), window, cx)))
         });
-        let note = div().id("note").relative().flex_1().min_w_0().h_full().pt(px(inset_top)).flex().bg(page).shadow(theme::shadow_note()).child(main)
+        let note = div().id("note").relative().flex_1().min_w_0().h_full().pt(px(inset_top)).flex().bg(page).shadow(crate::design::shadow::plane()).child(main)
             // Files from the Finder dropped on a folder's page are imported there.
             .when(matches!(self.view, View::Default | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))

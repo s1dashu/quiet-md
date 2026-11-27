@@ -63,7 +63,6 @@ pub fn bg_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu(
 pub fn callout_bg(name: &str) -> Option<gpui::Hsla> { style().palette("callout", name).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_bg(name) } else { crate::theme::callout_bg(name) }) }
 pub fn callout_border(name: &str) -> Option<gpui::Hsla> { style().palette("border", hue(name)).or_else(|| if crate::settings::feishu() { crate::feishu_theme::callout_border(name) } else { crate::theme::callout_border(name) }) }
 pub fn callout_border_swatch(name: &str) -> Option<gpui::Hsla> { if crate::settings::feishu() { crate::feishu_theme::callout_border_swatch(name) } else { crate::theme::callout_border_swatch(name) } }
-pub use crate::theme::{shadow_button, shadow_menu, shadow_panel, shadow_dialog};
 
 pub fn mono_font() -> &'static str { style().font("pre.font") }
 
