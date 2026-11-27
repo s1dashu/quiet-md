@@ -47,6 +47,19 @@ impl Store {
         Ok(id)
     }
 
+    /// The folder at `path` (names, outermost first) inside `parent` (`None`: the
+    /// top), each one made where it is missing; `parent` itself for an empty path.
+    /// Where a name is taken twice, the older folder.
+    pub fn folder_at(&mut self, parent: Option<&str>, path: &[&str]) -> Result<Option<String>> {
+        let mut at = parent.map(str::to_string);
+        for name in path {
+            let found = self.index.iter().filter(|(_, m)| !m.local() && m.parent == at && m.folder.as_deref().is_some_and(|f| f == *name || f == file_name_for(name)))
+                .min_by_key(|(k, m)| (m.created, k.as_str())).map(|(k, _)| k.clone());
+            at = Some(match found { Some(id) => id, None => self.create_folder(name, at.as_deref())? });
+        }
+        Ok(at)
+    }
+
     /// 创建副本 of `id`, named `title`, beside it: a document of any kind, or a
     /// folder with everything in it (its 正文 named after the copy, so it stays
     /// its 正文). A 正文 alone goes beside its folder, not into it as a child

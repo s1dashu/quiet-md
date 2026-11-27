@@ -238,10 +238,7 @@ pub fn bind_keys(cx: &mut App) {
         if let Some(handle) = cx.active_window().and_then(|w| w.downcast::<Workspace>()) {
             // Key dispatch already borrows this window; close after it returns.
             cx.defer(move |cx| {
-                if let Err(e) = handle.update(cx, |ws, window, cx| {
-                    crate::quick_note::persist(cx);
-                    if ws.save_before(cx, |_, window, _| window.remove_window()) { window.remove_window(); }
-                }) { eprintln!("无法关闭笔记窗口：{e}"); }
+                if let Err(e) = handle.update(cx, |ws, window, cx| ws.close_window(window, cx)) { eprintln!("无法关闭笔记窗口：{e}"); }
             });
         }
     });
@@ -362,6 +359,9 @@ pub struct Rename {
 
 pub struct Workspace {
     pub quick_note: bool,
+    /// The note this 快速笔记 window made, and the title it was given: closed
+    /// as it was made, it goes to the 回收站 (设置 › 关闭时删除空白笔记).
+    quick_made: Option<(String, String)>,
     pub shortcut_recording: Option<String>,
     pub shortcut_strokes: Vec<String>,
     /// The failed change: (action, message); an empty action is page-wide.
@@ -388,6 +388,9 @@ pub struct Workspace {
     pub font_anchors: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<&'static str, Bounds<Pixels>>>>,
     /// 快捷键's filter field.
     pub settings_filter: Entity<TextField>,
+    /// 设置 › 快速笔记's 子文件夹 and 名称格式, saved as they are typed.
+    pub quick_path_field: Entity<TextField>,
+    pub quick_name_field: Entity<TextField>,
     native_sidebar: crate::native_header::NativeSidebar,
     pub store: SharedStore,
     /// Changed only through `set` / `edit` / `take`, which move its `generation` (entries.rs).
@@ -581,8 +584,18 @@ impl Workspace {
             f.placeholder_color = Theme::text_disabled();
             f
         });
+        let quick_field = |placeholder: &'static str, text: &str, cx: &mut Context<Self>| cx.new(|cx| {
+            let mut f = TextField::new(placeholder, cx);
+            f.placeholder_color = Theme::text_disabled();
+            f.set_text(text, cx);
+            f
+        });
+        let p = crate::settings::prefs();
+        let (quick_path_field, quick_name_field) = (quick_field("YYYY/MM", &p.quick_note_path, cx), quick_field("YYYYMMDD", &p.quick_note_name, cx));
         let subs = vec![
             cx.subscribe(&settings_filter, |_, _, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { cx.notify(); }),
+            cx.subscribe(&quick_path_field, |w, f, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { let t = f.read(cx).text.clone(); w.set_pref(|p| p.quick_note_path = t, cx); }),
+            cx.subscribe(&quick_name_field, |w, f, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { let t = f.read(cx).text.clone(); w.set_pref(|p| p.quick_note_name = t, cx); }),
             cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.quick_note, cx)),
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
@@ -635,7 +648,12 @@ impl Workspace {
         let this = cx.weak_entity();
         window.on_window_should_close(cx, move |_, cx| {
             crate::quick_note::persist(cx);
-            this.update(cx, |w, cx| { w.cancel_shortcut_recording(cx); w.flush_view_state(); w.save_before(cx, |_, window, _| window.remove_window()) }).unwrap_or(true)
+            this.update(cx, |w, cx| {
+                w.cancel_shortcut_recording(cx); w.flush_view_state();
+                let saved = w.save_before(cx, |w, window, cx| { w.drop_blank_quick_note(cx); window.remove_window() });
+                if saved { w.drop_blank_quick_note(cx); }
+                saved
+            }).unwrap_or(true)
         });
         if !quick { crate::settings::watch_themes(cx); }
         // A file written into the library from outside (a model writing a
@@ -699,6 +717,7 @@ impl Workspace {
         let history_limit = store.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
+            quick_made: None,
             shortcut_recording: None,
             shortcut_strokes: vec![],
             shortcut_error: None,
@@ -714,6 +733,8 @@ impl Workspace {
             font_menu: None,
             font_anchors: Default::default(),
             settings_filter,
+            quick_path_field,
+            quick_name_field,
             store,
             entries: entries.into(),
             current: None,
@@ -1133,11 +1154,43 @@ impl Workspace {
         self.create_doc(crate::settings::quick_new_markdown(), parent, window, cx);
     }
 
-    /// A 快速笔记 window's own note: at the top of the top-level folder Settings › 文档库
-    /// picks (2.8), else the first open top-level folder.
+    /// A 快速笔记 window's own note: in the top-level folder Settings › 文档库 picks (2.8),
+    /// else the first open top-level folder; there in its 子文件夹, named by the 名称格式.
     fn new_quick_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let parent = self.store.quick_note_folder().map(|k| crate::shared_store::top_row(&k));
-        self.create_doc(crate::settings::quick_new_markdown(), parent, window, cx);
+        let p = crate::settings::prefs();
+        let now = crate::time::now();
+        let top = self.store.quick_note_folder().map(|k| crate::shared_store::top_row(&k));
+        let path: Vec<String> = p.quick_note_path.split(['/', '\\']).map(str::trim).filter(|s| !matches!(*s, "" | "." | "..")).map(|s| crate::time::expand_date(s, now)).collect();
+        let parent = if path.is_empty() { top } else {
+            self.store.folder_at(top.as_deref(), &path.iter().map(String::as_str).collect::<Vec<_>>()).unwrap_or_else(|e| {
+                crate::logging::write(&format!("Could not make the quick note folder {}: {e:#}", p.quick_note_path));
+                top
+            })
+        };
+        let title = crate::time::expand_date(p.quick_note_name.trim(), now);
+        self.create_titled(crate::settings::quick_new_markdown(), parent, title.clone(), window, cx);
+        self.quick_made = self.current.clone().map(|id| (id, title));
+    }
+
+    /// ⌘W: the window goes once its note is saved (an empty 快速笔记 to the 回收站 first).
+    pub(crate) fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::quick_note::persist(cx);
+        if self.save_before(cx, |w, window, cx| { w.drop_blank_quick_note(cx); window.remove_window() }) { self.drop_blank_quick_note(cx); window.remove_window(); }
+    }
+
+    /// The note this 快速笔记 window made, still as it was made, to the 回收站 (when
+    /// that is set): the window is closing.
+    fn drop_blank_quick_note(&mut self, cx: &mut Context<Self>) {
+        if !crate::settings::prefs().quick_note_drop_empty { return }
+        let Some((id, title)) = self.quick_made.take() else { return };
+        let Some(ed) = self.editor.clone().filter(|_| self.current.as_ref() == Some(&id)) else { return };
+        let mut doc = ed.read(cx).core.doc.clone();
+        if doc.title.text == title { doc.title = Default::default(); }
+        if !doc.is_blank() { return }
+        match self.store.delete(&id) {
+            Ok(()) => { self.editor = None; self.current = None; }
+            Err(e) => crate::logging::write(&format!("Could not remove the empty quick note: {e:#}")),
+        }
     }
 
     /// Ask before 删除: a confirmation, then the 回收站.
@@ -2201,10 +2254,7 @@ impl Render for Workspace {
             // whichever window macOS considers active.
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, window, cx| w.track_sidebar_press(ev, window, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|w, _, window, cx| w.finish_sidebar_click(window, cx)))
-            .on_action(cx.listener(|w, _: &CloseWindow, window, cx| {
-                crate::quick_note::persist(cx);
-                if w.save_before(cx, |_, window, _| window.remove_window()) { window.remove_window(); }
-            }))
+            .on_action(cx.listener(|w, _: &CloseWindow, window, cx| w.close_window(window, cx)))
             .on_action(|_: &Minimize, window, _| window.minimize_window())
             .on_action(|_: &Zoom, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())

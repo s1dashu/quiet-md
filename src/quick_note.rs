@@ -149,10 +149,10 @@ mod hotkey {
     }
 }
 
-pub fn install(cx: &mut App) -> bool {
+pub fn install(cx: &mut App, hotkey: bool) -> bool {
     cx.on_action(|_: &QuickNew, cx| open(cx));
     // Settings › 快捷键 shows a failure under its row; no alert on every launch.
-    register(cx)
+    hotkey && register(cx)
 }
 
 /// Why each global hotkey (快速笔记, 打开上次的文档) isn't registered, if it failed.

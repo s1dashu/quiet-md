@@ -345,6 +345,13 @@ impl SharedStore {
     pub fn save_version_now(&self, id: &str) -> Result<bool> { self.on_res(id, |s| s.save_version_now(id)) }
     pub fn touch(&mut self, id: &str) -> Option<Meta> { self.on(id, |s| s.touch(id)).flatten().map(|m| self.as_row(id, m)) }
     pub fn create_folder(&mut self, title: &str, parent: Option<&str>) -> Result<String> { self.put(parent, |s, parent| s.create_folder(title, parent)) }
+    /// `Store::folder_at` in `parent`'s top-level folder; `parent` itself for an empty path.
+    pub fn folder_at(&mut self, parent: Option<&str>, path: &[&str]) -> Result<Option<String>> {
+        let here = parent.map(str::to_string);
+        self.put(parent, |s, parent| s.folder_at(parent, path)).map(|f| f.or(here))
+    }
+    /// One page to the 回收站, nothing asked (an empty 快速笔记 closed).
+    pub fn delete(&self, id: &str) -> Result<()> { self.on_res(id, |s| s.delete(id, None)) }
     pub fn accept_file_title(&self, id: &str, title: &str) -> Result<()> { self.on_res(id, |s| s.accept_file_title(id, title)) }
     /// True when some top-level folder numbered something.
     pub fn initialize_manual_order(&mut self) -> Result<bool> {

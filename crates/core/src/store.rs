@@ -3936,6 +3936,26 @@ mod tests {
         d
     }
 
+    /// A quick note's subfolder: the folders along the path are found by name, made where missing.
+    #[test]
+    fn folder_at_finds_or_makes_the_path() {
+        let lib = Lib::new("folder-at");
+        let mut s = lib.open();
+        assert_eq!(s.folder_at(None, &[]).unwrap(), None);
+        let inbox = s.create_folder("Inbox", None).unwrap();
+        let quick = s.folder_at(None, &["Inbox", "Quick"]).unwrap().unwrap();
+        assert_eq!(s.index[&quick].parent.as_deref(), Some(inbox.as_str()));
+        assert!(lib.0.join("Inbox/Quick").is_dir());
+        // The second time nothing new is made.
+        let folders = s.index.values().filter(|m| m.folder.is_some()).count();
+        assert_eq!(s.folder_at(None, &["Inbox", "Quick"]).unwrap().as_deref(), Some(quick.as_str()));
+        assert_eq!(s.folder_at(Some(&inbox), &["Quick"]).unwrap().as_deref(), Some(quick.as_str()));
+        assert_eq!(s.index.values().filter(|m| m.folder.is_some()).count(), folders);
+        // A name a file cannot hold is found again under its file name.
+        let odd = s.folder_at(None, &["a:b"]).unwrap();
+        assert_eq!(s.folder_at(None, &["a:b"]).unwrap(), odd);
+    }
+
     /// 自动排序's new pages leave the hand order alone: switching back to
     /// 手动排序 shows what the user arranged, not what sorting touched.
     #[test]

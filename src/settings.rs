@@ -175,6 +175,15 @@ pub struct Preferences {
     /// or a top-level folder that is gone, is the first open top-level folder (2.8).
     #[serde(default, alias = "quick_note_root")]
     pub quick_note_folder: String,
+    /// 文档库 › 快速笔记 › 子文件夹: folders inside that one, `/`-separated, made when missing; empty: its top.
+    #[serde(default)]
+    pub quick_note_path: String,
+    /// 快速笔记 › 名称格式: the title a new quick note gets (`time::expand_date`); empty: untitled.
+    #[serde(default)]
+    pub quick_note_name: String,
+    /// 快速笔记 › 关闭时删除空白笔记: a quick note closed as it was made goes to the 回收站.
+    #[serde(default)]
+    pub quick_note_drop_empty: bool,
     /// 打字机模式 (typewriter.rs): the caret's line stays in the middle of the page.
     pub typewriter: bool,
     /// 段落聚焦 (typewriter.rs): the paragraph being written stays clear, the others fade.
@@ -217,7 +226,7 @@ fn system_lang() -> Lang {
 impl Default for Preferences {
     fn default() -> Self {
         let lang = system_lang();
-        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, usage_stats: None, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_folder: false, browser: String::new(), opaque_window: false, hide_outline: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new(), typewriter: false, paragraph_focus: false }
+        Preferences { theme: String::new(), feishu: true, english: lang != Lang::Zh, language: lang.code().into(), remote_images: true, quick_hotkey: true, auto_update: true, usage_stats: None, appearance: String::new(), seen_version: String::new(), motion: String::new(), new_default: String::new(), last_new: String::new(), search_engine: String::new(), start_folder: false, browser: String::new(), opaque_window: false, hide_outline: false, ui_font: String::new(), ui_family: String::new(), doc_family: String::new(), doc_size: String::new(), migrate_later: 0, find_regex: false, backspace_to_title: true, cjk_spacing: false, font_favorites: vec![], recent_doc_fonts: vec![], recent_ui_fonts: vec![], quick_note_folder: String::new(), quick_note_path: String::new(), quick_note_name: String::new(), quick_note_drop_empty: false, typewriter: false, paragraph_focus: false }
     }
 }
 
@@ -1776,8 +1785,19 @@ impl Workspace {
         // A new folder is made in the system's own open panel (its 新建文件夹 button), not here.
         folders.push(row(tr("添加文件夹", "Add a folder"), Some(tr("电脑上的文件夹原位使用，显示在侧栏里；要新的文件夹，在选择窗口里新建。", "A folder on your computer is used in place and shows in the sidebar; for a new one, make it in the picker.").into()),
             button("open-folder", tr("添加…", "Add…")).on_click(cx.listener(|w, _, window, cx| w.open_folder_dialog(window, cx)))).into_any_element());
+        let field = |id: &'static str, f: &Entity<TextField>| Field::new(id).sized(FieldSize::Sm).w(px(200.)).child(div().flex_1().min_w_0().child(f.clone()));
+        let drop_empty = prefs().quick_note_drop_empty;
+        let quick = vec![
+            row(tr("子文件夹", "Subfolder"), desc(tr("放在快速笔记文件夹里的哪个文件夹，用 / 分隔，没有就新建。也可以用下面的日期代码。", "Where in the quick notes folder they go, separated by /; missing folders are made. The date codes below work here too.")),
+                field("quick-note-path", &self.quick_path_field)).into_any_element(),
+            row(tr("名称格式", "Name format"), desc(tr("新快速笔记的标题：YYYY 年、MM 月、DD 日、HH 时、mm 分、ss 秒，方括号里的文字原样保留。留空则不命名。", "The title a new quick note gets: YYYY year, MM month, DD day, HH hour, mm minute, ss second; text in [brackets] stays as written. Empty: untitled.")),
+                field("quick-note-name", &self.quick_name_field)).into_any_element(),
+            row(tr("关闭时删除空白笔记", "Remove empty notes on close"), desc(tr("什么都没写就关掉的快速笔记移到回收站。", "A quick note closed with nothing written in it goes to the Trash.")),
+                switch("pref-quick-drop-empty", drop_empty).on_click(cx.listener(|w, _, _, cx| w.set_pref(|p| p.quick_note_drop_empty = !p.quick_note_drop_empty, cx)))).into_any_element(),
+        ];
         div().w_full().flex().flex_col().gap(px(crate::design::geo().section_gap))
             .child(group("group-folders", Some(tr("文件夹", "Folders")), folders))
+            .child(group("group-quick-notes", Some(tr("快速笔记", "Quick notes")), quick))
             .child(group("group-library", None, vec![
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", self.store.trash_days()).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),

@@ -7,23 +7,28 @@ impl Workspace {
     /// 新建文档/Markdown under `parent` (None = top level), opened and focused.
     /// `markdown` picks the on-disk format; the choice is remembered for ⌘N.
     pub(crate) fn create_doc(&mut self, markdown: bool, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        self.create_titled(markdown, parent, String::new(), window, cx);
+    }
+
+    /// `create_doc` with `title` already written in (a 快速笔记's 名称格式).
+    pub(crate) fn create_titled(&mut self, markdown: bool, parent: Option<String>, title: String, window: &mut Window, cx: &mut Context<Self>) {
         self.create_menu = None;
         // A 快速笔记 window's own note is written as always; it needs no list.
         if !self.quick_note && self.still_loading(cx) { return }
-        let (m, p) = (markdown, parent.clone());
-        if !self.save_before(cx, move |w, window, cx| w.create_doc(m, p.clone(), window, cx)) { return; }
+        let (m, p, t) = (markdown, parent.clone(), title.clone());
+        if !self.save_before(cx, move |w, window, cx| w.create_titled(m, p.clone(), t.clone(), window, cx)) { return; }
         let file_before = self.store.track_file_changes();
+        let doc = crate::model::Document { title: crate::model::RichText::plain(title), ..Default::default() };
         let made = if parent.is_some() {
             // In a folder: written into that folder's top-level folder at once.
-            let doc = crate::model::Document::default();
             if markdown { self.store.create_markdown_in(&doc, "", parent.as_deref()) } else { self.store.create_from_in(&doc, parent.as_deref()) }
         } else if markdown {
-            self.store.create_markdown(&crate::model::Document::default(), "").and_then(|id| {
+            self.store.create_markdown(&doc, "").and_then(|id| {
                 if let Some(p) = &parent { self.store.set_parent(&id, Some(p))?; }
                 Ok(id)
             })
         } else {
-            self.store.create().and_then(|(id, _)| {
+            self.store.create_from(&doc).and_then(|id| {
                 if let Some(p) = &parent { self.store.set_parent(&id, Some(p))?; }
                 Ok(id)
             })
