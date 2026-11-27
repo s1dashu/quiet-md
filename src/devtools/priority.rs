@@ -43,7 +43,7 @@ pub(super) fn step(phase: &str, ws: &mut Workspace, window: &mut Window, cx: &mu
             let id = ws.current.clone().unwrap();
             cx.defer(move |cx| {
                 cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
-                    cx.new(|cx| Workspace::new_document_window(Some(id), window, cx))
+                    cx.new(|cx| Workspace::new_document_window(Some(id), None, window, cx))
                 }).unwrap();
             });
         }

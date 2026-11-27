@@ -364,6 +364,8 @@ pub struct Rename {
 
 pub struct Workspace {
     pub quick_note: bool,
+    /// Whose size this window's frame is written down as.
+    pub frame: crate::quick_note::Frame,
     pub shortcut_recording: Option<String>,
     pub shortcut_strokes: Vec<String>,
     /// The failed change: (action, message); an empty action is page-wide.
@@ -549,14 +551,17 @@ impl Workspace {
     }
 
     pub fn new_window(quick: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(quick, None, window, cx)
+        Self::build_window(quick, None, None, window, cx)
     }
 
-    pub fn new_document_window(document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(true, document, window, cx)
+    /// A window of its own for `document` (`None`: a new quick note); its sidebar as `opener`'s.
+    pub fn new_document_window(document: Option<String>, opener: Option<crate::quick_note::Opener>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build_window(true, document, opener, window, cx)
     }
 
-    fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn build_window(quick: bool, document: Option<String>, opener: Option<crate::quick_note::Opener>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        use crate::quick_note::Frame;
+        let frame = if !quick { Frame::Main } else if document.is_some() { Frame::Document } else { Frame::Quick };
         crate::settings::load();
         crate::settings::check_fonts(cx);
         // 文档字体's download list shows progress and what arrived.
@@ -580,7 +585,7 @@ impl Workspace {
         });
         let subs = vec![
             cx.subscribe(&settings_filter, |_, _, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { cx.notify(); }),
-            cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.quick_note, cx)),
+            cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.frame, cx)),
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -692,10 +697,11 @@ impl Workspace {
         })
         .detach();
         let settings = store.settings();
-        let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
+        let (sidebar_open, sidebar_width) = if quick { crate::quick_note::new_window_sidebar(opener, settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH)) } else { (true, settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH)) };
         let history_limit = store.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
+            frame,
             shortcut_recording: None,
             shortcut_strokes: vec![],
             shortcut_error: None,
@@ -717,9 +723,10 @@ impl Workspace {
             editor: None,
             search,
             search_sel: None,
-            sidebar_open: !quick,
+            sidebar_open,
             sidebar_width,
-            sidebar_was_open: false,
+            // a sidebar taken from the main window is already there: too narrow, it hides rather than widening the window (`render`)
+            sidebar_was_open: quick && sidebar_open,
             widen_from: None,
             keyboard_inset: 0.,
             sidebar_auto_hidden: false,
@@ -1053,7 +1060,7 @@ impl Workspace {
                 this.search_sel = this.default_search_sel(cx);
             }
             EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
-            EditorEvent::OpenFile(path) => this.open_in_own_window(path, cx),
+            EditorEvent::OpenFile(path) => this.open_in_own_window(path, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -2414,7 +2421,7 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
             let id = store.create_from(&doc(name)).unwrap();
             let open_id = id.clone();
             let handle = cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
-                cx.new(|cx| Workspace::new_document_window(Some(open_id), window, cx))
+                cx.new(|cx| Workspace::new_document_window(Some(open_id), None, window, cx))
             }).unwrap();
             handle.update(cx, |ws, _, cx| {
                 ws.editor.as_ref().unwrap().update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc(&format!("local-{name}"))), cx));

@@ -70,7 +70,8 @@ impl Workspace {
         if let Some(id) = last {
             if self.entries.iter().any(|e| e.id == id && e.meta.local()) {
                 // This window is being updated: the others are looked through once it is done.
-                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+                let opener = self.opener(window);
+                cx.defer(move |cx| crate::quick_note::show_document(id, opener, cx));
             } else { self.open(&id, window, cx); }
         }
         cx.notify();
@@ -78,13 +79,14 @@ impl Workspace {
 
     /// An attachment Quiet.md edits (`opens_here`): opened where it is like
     /// 打开文件…, in a window of its own, or the window already showing it.
-    pub(crate) fn open_in_own_window(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+    pub(crate) fn open_in_own_window(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         match self.store.open_local(path) {
             Ok(id) => {
                 self.entries.set(self.store.list());
                 self.sort();
                 // This window is being updated: the others are looked through once it is done.
-                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+                let opener = self.opener(window);
+                cx.defer(move |cx| crate::quick_note::show_document(id, opener, cx));
             }
             Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("打开文件失败", "Opening the file failed")).description(crate::settings::diagnostic(&e.to_string())), cx),
         }

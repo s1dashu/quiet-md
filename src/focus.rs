@@ -53,6 +53,8 @@ impl Default for Focus {
 }
 impl Focus {
     pub fn on(&self) -> bool { self.saved.is_some() }
+    /// In 专注模式: whether the sidebar was there before (or only away while the window was narrow).
+    pub fn sidebar_before(&self) -> Option<bool> { self.saved.as_ref().map(|s| s.sidebar_open || s.sidebar_auto_hidden) }
     /// What the 「…」 menu's switch shows: on, or sliding there.
     pub fn switch(&self) -> bool { self.on() || self.pending }
     /// The strip's controls, 0 (gone) to 1. 动画 › 丰富 fades them; 克制 shows and hides at once.

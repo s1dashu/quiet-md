@@ -18,6 +18,7 @@
 //!   windows <n> (that many windows are open; else the run ends with exit code 3) |
 //!   caret (logs `caret <y> of <height> at <top>`: the caret line's middle on the page, the page's top in the window) |
 //!   showing <title> (the document or folder page in front has that title; else the run ends with exit code 3) |
+//!   frame (logs `frame <w> <h> sidebar <open> <width>`: the window's size and its sidebar) |
 //!   url <quietmd://…> | url @<file> (a link handed over as `quiet open` hands one, or the one in that file; logs the block selected after it) |
 //!   origin board | origin window (the points of the mouse and file steps after it count from the open
 //!   画板's top-left corner, or again from the window's; no board open ends the run with exit code 3)
@@ -278,6 +279,17 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     if shown.as_deref() == Some(want) { eprintln!("devtools: showing {want:?}"); continue }
                     eprintln!("devtools: showing: wanted {want:?}, in front: {shown:?}");
                     std::process::exit(3);
+                }
+                // `frame`: logs the window's size and its sidebar (`frame <w> <h> sidebar <open> <width>`).
+                "frame" => {
+                    let at = handle.update(cx, |root, window, cx| {
+                        let ws = root.downcast::<crate::app::Workspace>().ok()?;
+                        let w = ws.read(cx);
+                        let s = window.window_bounds().get_bounds().size;
+                        Some(format!("{} {} sidebar {} {}", f32::from(s.width).round(), f32::from(s.height).round(), w.sidebar_open, w.sidebar_w(window).round()))
+                    }).ok().flatten();
+                    eprintln!("devtools: frame {}", at.as_deref().unwrap_or("none"));
+                    continue
                 }
                 // `caret`: logs where the caret's line sits on the page (`caret <y> of <height>`).
                 "caret" => {
