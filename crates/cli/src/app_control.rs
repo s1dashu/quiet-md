@@ -62,10 +62,9 @@ pub fn folders(a: &Args, out: &mut String) -> R<()> {
                 Ok(_) => {}
                 Err(AddError::Open(k)) => return Err(fail("already_open", format!("{} is already open", name(&tops, &k))).hint("`quiet folders` lists what is open")),
                 Err(AddError::TooBroad) => return Err(fail("too_broad", format!("{} is a disk's top or the home folder", dir.display())).hint("add Documents, Desktop and other folders one at a time")),
+                // The same check as 添加文件夹 in the app.
+                Err(AddError::System) => return Err(fail("too_broad", format!("{} is a system folder", dir.display())).hint("add the folder your notes are in, e.g. ~/Documents/Notes")),
                 Err(AddError::Other(e)) => return Err(fail("io", e)),
-            }
-            if fdl_core::top_folders::too_broad(&dir) {
-                return Err(fail("too_broad", format!("{} is a system folder", dir.display())).hint("add the folder your notes are in, e.g. ~/Documents/Notes"));
             }
             // As 添加文件夹 asks first about a code project or a very big folder: here --force says yes.
             if !dir.join(INTERNAL).exists() && !a.has("force") {

@@ -90,7 +90,7 @@
 
 **`quiet folders`**（`app_control.rs`）
 - 不带参数列出顶层文件夹：名字、磁盘路径、key，新建默认落到的那个标 `default`，打不开的写原因。
-- `add PATH`：等同侧栏的「添加文件夹」，用 core 同一份 `TopFolders::check` / `TopFolders::add` 写 `folders.json`：原位打开、不复制，在里面建 `.quiet/`。已经打开的报 `already_open`；磁盘根和主目录和应用一样拒绝（错误码 `too_broad`，提示分别添加文稿、桌面等文件夹）。在已打开的文件夹里面、或包含已打开的文件夹都可以添加（嵌套，见 workspaces.md 2.6）。应用遇到代码项目或文件很多的文件夹会先问（`shown::survey`），CLI 报 `confirm`，加 `--force` 才添加。CLI 另外拒绝系统文件夹（`top_folders::too_broad`，同样报 `too_broad`）。
+- `add PATH`：等同侧栏的「添加文件夹」，用 core 同一份 `TopFolders::check` / `TopFolders::add` 写 `folders.json`：原位打开、不复制，在里面建 `.quiet/`。已经打开的报 `already_open`；磁盘根和主目录和应用一样拒绝（错误码 `too_broad`，提示分别添加文稿、桌面等文件夹）。在已打开的文件夹里面、或包含已打开的文件夹都可以添加（嵌套，见 workspaces.md 2.6）。应用遇到代码项目或文件很多的文件夹会先问（`shown::survey`），CLI 报 `confirm`，加 `--force` 才添加。系统文件夹（/System、/Library、/usr 等）也和应用一样拒绝（`AddError::System`，同样报 `too_broad`，提示添加存放笔记的文件夹）。
 - `remove NAME|PATH|KEY`：等同「从侧栏移除」，只改列表，磁盘上的文件和 `.quiet/` 原样保留。
 - 两者都支持 `--dry-run`。设了 `QUIET_MD_HOME`（列表固定）时报 `fixed`。
 - **应用跟着变：** `local_folders::follow_folder_list` 每 2 秒在后台读一次 `folders.json`，和内存里的列表按 key 比较（`TopFolders::changed_elsewhere`）。多出来的按文件里的 key 打开（`TopFolders::adopt`，不重写列表）；少了的，每个窗口先放下里面打开的文档（未保存的先存，没存完就等下一轮），再从列表移除。新加的按「添加文件夹」同样的方式在后台列出。应用自己写的列表和内存一致，不会触发。选文件轮询而不是 URL 通知：应用没开时 CLI 照样能改，下次启动读到；应用开着时不依赖系统转发。

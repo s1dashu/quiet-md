@@ -46,9 +46,10 @@ impl Workspace {
     /// added for the first time is looked at first, off the main thread: a code
     /// project or a very big one is added only once the user says so (`Confirm::AddFolder`).
     pub(crate) fn add_folders(&mut self, dirs: &[PathBuf], window: &mut Window, cx: &mut Context<Self>) {
-        // A disk's top or the home folder is refused before it is looked through (it would be asked about as a very big one).
-        let (broad, dirs): (Vec<PathBuf>, Vec<PathBuf>) = dirs.iter().cloned().partition(|d| self.store.check_folder(d) == Err(AddError::TooBroad));
-        if !broad.is_empty() { self.add_failed(AddError::TooBroad, cx); }
+        // A disk's top, the home folder or a system folder is refused before it is looked through (it would be asked about as a very big one).
+        let mut refused = None;
+        let dirs: Vec<PathBuf> = dirs.iter().filter(|d| match self.store.check_folder(d) { Err(e @ (AddError::TooBroad | AddError::System)) => { refused = Some(e); false } _ => true }).cloned().collect();
+        if let Some(e) = refused { self.add_failed(e, cx); }
         let task = cx.background_executor().spawn(async move {
             dirs.into_iter().map(|d| { let s = if d.join(crate::store::INTERNAL).exists() { Survey::Plain } else { fdl_core::shown::survey(&d) }; (d, s) }).collect::<Vec<_>>()
         });
@@ -102,6 +103,7 @@ impl Workspace {
         match e {
             AddError::Open(key) => { self.folded_tops.remove(&key); cx.notify(); }
             AddError::TooBroad => self.show_toast_kind(ToastKind::Error, tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"), cx),
+            AddError::System => self.show_toast_kind(ToastKind::Error, tr("请添加存放笔记的文件夹", "Add the folder your notes are in"), cx),
             AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法添加文件夹：{}", "Could not add folder: {}", crate::settings::diagnostic(&e)), cx),
         }
     }
@@ -189,6 +191,34 @@ impl Workspace {
     }
 
     /// Top-level folder `key` has a new name on disk: its row says so now.
+    /// Top-level folders taken off the sidebar or put back with a folder of another (deleted
+    /// through the one holding them, 撤销): every window's rows again; one showing a page or
+    /// folder of a top-level folder no longer open leaves it.
+    pub(crate) fn tops_changed(&mut self, cx: &mut Context<Self>) {
+        self.left_tops(cx);
+        for peer in Self::other_workspaces(cx) { peer.update(cx, |w, cx| w.left_tops(cx)); }
+        cx.defer(crate::settings::top_switched);
+    }
+
+    fn left_tops(&mut self, cx: &mut Context<Self>) {
+        let gone = |w: &Self, id: &Option<String>| id.as_deref().is_some_and(|id| w.store.top_of(id).is_none_or(|k| w.store.top_path(&k).is_none()));
+        if gone(self, &self.current) { self.current = None; self.editor = None; self.editor_sub = None; self.unsaved = false; self.save_task = None; if self.view == View::Doc { self.view = View::Default; } }
+        if gone(self, &self.folder_current) { self.folder_current = None; if self.view == View::Folder { self.view = View::Default; } }
+        self.entries.set(self.store.listed_rows());
+        self.trash = self.store.list_trash();
+        self.sort();
+        cx.notify();
+    }
+
+    /// Top-level folders whose own folder was renamed or moved through the one holding them
+    /// (`SharedStore::follow`): every window shows them by their new name.
+    pub(crate) fn tops_moved(&mut self, cx: &mut Context<Self>) {
+        for k in self.store.take_moved() {
+            self.top_renamed(&k, cx);
+            for peer in Self::other_workspaces(cx) { peer.update(cx, |w, cx| w.top_renamed(&k, cx)); }
+        }
+    }
+
     fn top_renamed(&mut self, key: &str, cx: &mut Context<Self>) {
         let row = crate::shared_store::top_row(key);
         if let Some(name) = self.store.top_folders().into_iter().find(|r| r.0 == key).map(|r| r.1) && let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == row) {

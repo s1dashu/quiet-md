@@ -56,12 +56,14 @@ pub enum AddError {
     Open(String),
     /// A disk's top or the home folder: everything on it would be listed.
     TooBroad,
+    /// A folder the system keeps (its programs, settings and libraries).
+    System,
     Other(String),
 }
 
 impl std::fmt::Display for AddError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self { AddError::Open(_) => write!(f, "这个文件夹已经打开"), AddError::TooBroad => write!(f, "请分别添加文稿、桌面等文件夹"), AddError::Other(e) => write!(f, "{e}") }
+        match self { AddError::Open(_) => write!(f, "这个文件夹已经打开"), AddError::TooBroad => write!(f, "请分别添加文稿、桌面等文件夹"), AddError::System => write!(f, "请添加存放笔记的文件夹"), AddError::Other(e) => write!(f, "{e}") }
     }
 }
 
@@ -87,6 +89,8 @@ pub struct TopFolders {
     owner: HashMap<String, String>,
     /// `QUIET_MD_HOME`: one top-level folder, nothing remembered.
     fixed: bool,
+    /// Each library's paths by id and its `Store::writes` when last looked at (`follow_moves`).
+    seen: HashMap<String, (u64, HashMap<String, String>)>,
 }
 
 /// A canonical path in its ordinary form: Windows' are `\\?\C:\…`.
@@ -216,6 +220,7 @@ impl TopFolders {
     pub fn check(&self, dir: &Path) -> std::result::Result<PathBuf, AddError> {
         let dir = canonical(dir);
         if disk_or_home(&dir) { return Err(AddError::TooBroad); }
+        if system_folder(&dir) { return Err(AddError::System); }
         match self.folders.iter().find(|r| canonical(&r.path) == dir) { Some(r) => Err(AddError::Open(r.key.clone())), None => Ok(dir) }
     }
 
@@ -258,9 +263,77 @@ impl TopFolders {
         self.push(e.key, e.path, store);
     }
 
+    /// None open, and nothing remembered (folders.json): a test's or a tool's.
+    pub fn transient() -> Self { TopFolders { fixed: true, ..Default::default() } }
+
+    /// Whether one open top-level folder is inside another.
+    pub fn nests(&self) -> bool {
+        let open: Vec<&Path> = self.folders.iter().filter(|r| r.store.is_some()).map(|r| r.path.as_path()).collect();
+        open.iter().any(|a| open.iter().any(|b| a != b && b.starts_with(a)))
+    }
+
+    /// What a library moved on disk since this was last asked (a rename or move through the
+    /// app, or one it found by inode), carried into the top-level folders nested with it
+    /// (workspaces.md 2.6): what they keep about the same files (pins, order …) goes to the new
+    /// paths (`Store::follow_paths`), and a top-level folder whose own folder moved (renamed
+    /// through the one holding it) follows to its new path. Nothing when none nest. The keys of
+    /// the top-level folders that moved.
+    pub fn follow_moves(&mut self) -> Vec<String> {
+        if !self.nests() { self.seen.clear(); return vec![]; }
+        let abs = |top: &Path, rel: &str| rel.split('/').filter(|p| !p.is_empty()).fold(top.to_path_buf(), |p, s| p.join(s));
+        let mut moves: Vec<(String, PathBuf, PathBuf)> = vec![];
+        for r in &self.folders {
+            let Some(s) = &r.store else { continue };
+            let Some((n, was)) = self.seen.get(&r.key) else { continue };
+            if *n == s.writes() { continue; }
+            let now = s.paths();
+            for (id, old) in was { if let Some(new) = now.get(id).filter(|n| *n != old) { moves.push((r.key.clone(), abs(s.top_dir(), old), abs(s.top_dir(), new))); } }
+        }
+        let mut moved = vec![];
+        if !moves.is_empty() {
+            for r in self.folders.iter_mut() {
+                let Some(to) = moves.iter().filter(|(k, _, _)| *k != r.key).find_map(|(_, a, b)| r.path.strip_prefix(a).ok().map(|rest| if rest.as_os_str().is_empty() { b.clone() } else { b.join(rest) })) else { continue };
+                if to == r.path { continue; }
+                r.path = to.clone();
+                if let Some(s) = r.store.as_mut() { s.moved_to(to); }
+                moved.push(r.key.clone());
+            }
+            for k in moved.clone() { self.retry(&k); }
+            for r in self.folders.iter_mut() {
+                let Some(s) = r.store.as_mut() else { continue };
+                let top = s.top_dir().to_path_buf();
+                let mine: Vec<(PathBuf, PathBuf)> = moves.iter().filter(|(k, a, b)| *k != r.key && (a.starts_with(&top) || b.starts_with(&top))).map(|(_, a, b)| (a.clone(), b.clone())).collect();
+                if let Err(e) = s.follow_paths(&mine) { s.warnings.push(format!("{e}")); }
+            }
+            if !moved.is_empty() { let _ = self.save(); }
+        }
+        // Looked at again only where something was written since (this runs before every call that writes).
+        for r in &self.folders {
+            let Some(s) = &r.store else { continue };
+            if self.seen.get(&r.key).is_none_or(|(n, _)| *n != s.writes()) { self.seen.insert(r.key.clone(), (s.writes(), s.paths())); }
+        }
+        moved
+    }
+
+    /// The open top-level folders at or under one of `dirs` (a folder deleted through the one
+    /// holding them), off the sidebar: the entries to put them back with (`put_back`).
+    pub fn take_within(&mut self, dirs: &[PathBuf]) -> Vec<TopFolderEntry> {
+        let within = |p: &Path| dirs.iter().any(|d| p.starts_with(d) || canonical(p).starts_with(canonical(d)));
+        let out: Vec<TopFolderEntry> = self.folders.iter().filter(|r| within(&r.path)).map(|r| TopFolderEntry { key: r.key.clone(), path: r.path.clone(), bookmark: None, added: now() }).collect();
+        for e in &out { if let Some(s) = self.store(&e.key) { let _ = s.flush_view_state(); } let _ = self.remove(&e.key); }
+        out
+    }
+
+    /// `take_within`'s top-level folders back on the sidebar (their folders are back: 撤销), under their keys.
+    pub fn put_back(&mut self, entries: Vec<TopFolderEntry>) {
+        for e in entries { self.adopt(e); }
+        let _ = self.save();
+    }
+
     /// Off the sidebar; the folder and its `.quiet/` stay as they are.
     pub fn remove(&mut self, key: &str) -> Result<()> {
         self.folders.retain(|r| r.key != key);
+        self.seen.remove(key);
         self.owner.retain(|_, k| k != key);
         self.save()
     }
@@ -407,6 +480,8 @@ impl TopFolders {
 
     /// `list`; with `parse` off, documents not read yet go by their file's name (`Store::list_with`).
     pub fn list_with(&mut self, parse: bool) -> Vec<Entry> {
+        // Moves made through one of two nested top-level folders reach the other before it looks.
+        self.follow_moves();
         let mut out = vec![];
         self.owner.clear();
         for r in &mut self.folders {
@@ -417,6 +492,8 @@ impl TopFolders {
                 out.push(e);
             }
         }
+        // And what one found moved in the Finder (by inode) reaches the other.
+        if !self.follow_moves().is_empty() { return self.list_with(parse); }
         out
     }
 
@@ -432,16 +509,18 @@ fn new_key() -> String { uuid::Uuid::new_v4().to_string() }
 /// sidebar or the command line.
 fn disk_or_home(dir: &Path) -> bool { dir.parent().is_none() || dirs::home_dir().is_some_and(|h| canonical(&h) == dir) }
 
-/// A folder too broad to open as a top-level folder from the command line: a disk's top,
-/// the home folder, or one the system keeps (its programs, settings and libraries).
-pub fn too_broad(dir: &Path) -> bool {
-    let dir = canonical(dir);
-    if disk_or_home(&dir) { return true; }
+/// A folder the system keeps (`dir` canonical): its programs, settings and libraries. Never a
+/// top-level folder, from the sidebar or the command line.
+fn system_folder(dir: &Path) -> bool {
     let system: &[&str] = if cfg!(windows) { &[r"C:\Windows", r"C:\Program Files", r"C:\Program Files (x86)", r"C:\ProgramData"] }
         else { &["/System", "/Library", "/Applications", "/usr", "/bin", "/sbin", "/etc", "/var", "/private", "/opt", "/dev", "/proc", "/sys", "/boot", "/tmp"] };
     system.iter().any(|s| { let s = canonical(Path::new(s)); dir == s })
         || dirs::home_dir().is_some_and(|h| [h.join("Library"), h.join("AppData")].iter().any(|l| dir == canonical(l)))
 }
+
+/// A folder too broad to open as a top-level folder: a disk's top, the home folder, or one the
+/// system keeps (`TopFolders::check` says which).
+pub fn too_broad(dir: &Path) -> bool { let dir = canonical(dir); disk_or_home(&dir) || system_folder(&dir) }
 
 /// Whether folder `path` is the library's location `legacy`, the default folder.
 fn follows_default(path: &Path, legacy: &Path) -> bool { path == legacy || canonical(path) == canonical(legacy) }
@@ -857,6 +936,101 @@ mod tests {
         assert!(text.contains("from o") && !text.contains("from i"));
         // A clean editor through I takes in O's save.
         assert!(tops.store(&ki).unwrap().refresh_external(&pi).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_folder_the_system_keeps_is_never_added() {
+        let tops = TopFolders { fixed: true, ..Default::default() };
+        if cfg!(unix) {
+            for d in ["/usr", "/etc/", "/private", "/Library", "/Applications"] { if Path::new(d).fs_is_dir() { assert_eq!(tops.check(Path::new(d)), Err(AddError::System), "{d}"); } }
+            if let Some(h) = dirs::home_dir().map(|h| h.join("Library")).filter(|l| l.fs_is_dir()) { assert_eq!(tops.check(&h), Err(AddError::System)); }
+        }
+        assert!(tops.check(&dir("notes")).is_ok() && tops.folders.is_empty());
+        assert_ne!(AddError::System.to_string(), AddError::TooBroad.to_string());
+    }
+
+    /// A page renamed or moved through one of two nested top-level folders keeps, in the other,
+    /// its id and what that one keeps about it (a pin); a folder renamed through the outer one
+    /// that is the inner top-level folder's own takes it along to its new path.
+    #[test]
+    fn a_rename_through_one_keeps_what_the_other_has() {
+        let (mut tops, o, ko, ki) = nested();
+        let (io, ii) = (id_at(&mut tops, &ko, "inner/note.md").unwrap(), id_at(&mut tops, &ki, "note.md").unwrap());
+        tops.store(&ki).unwrap().set_pinned(&ii, true).unwrap();
+        tops.store(&ko).unwrap().set_pinned(&io, true).unwrap();
+        tops.list();
+        // Saved through the outer one first: a new file (inode), so only the move itself tells the inner one.
+        let mut d = tops.store(&ko).unwrap().load(&io).unwrap();
+        d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("more")));
+        tops.store(&ko).unwrap().save(&io, &d).unwrap();
+        tops.store(&ko).unwrap().rename(&io, "renamed").unwrap();
+        let list = tops.list();
+        let e = list.iter().find(|e| e.id == ii).expect("the inner one keeps its id");
+        assert!(e.meta.rel.starts_with("renamed") && e.meta.pinned, "{:?}", e.meta.rel);
+        assert!(list.iter().find(|e| e.id == io).unwrap().meta.pinned);
+        assert_eq!(list.iter().filter(|e| e.top == ki).count(), 1, "no ghost of the old name");
+        // The inner one's own folder, renamed through the outer one: it follows.
+        let fo = id_at(&mut tops, &ko, "inner").unwrap();
+        tops.store(&ko).unwrap().rename(&fo, "moved").unwrap();
+        let list = tops.list();
+        assert_eq!(tops.folder(&ki).unwrap().path, o.join("moved"));
+        assert!(tops.store(&ki).is_some_and(|s| s.top_dir() == o.join("moved")));
+        assert!(list.iter().find(|e| e.id == ii).is_some_and(|e| e.meta.pinned && e.top == ki), "still listed, still pinned");
+        assert!(!o.join("inner").fs_exists(), "nothing written at the old path");
+        // And through the inner one: the outer one follows.
+        tops.store(&ki).unwrap().rename(&ii, "again").unwrap();
+        let list = tops.list();
+        assert!(list.iter().find(|e| e.id == io).is_some_and(|e| e.meta.rel.starts_with("moved/again") && e.meta.pinned));
+    }
+
+    /// Renamed in the Finder: found by its inode where it turns up, the same id and pin.
+    #[test]
+    fn a_rename_in_the_finder_keeps_what_it_had() {
+        if !cfg!(unix) { return; }
+        let (mut tops, o, ko, ki) = nested();
+        let ii = id_at(&mut tops, &ki, "note.md").unwrap();
+        let top = id_at(&mut tops, &ko, "top.md").unwrap();
+        tops.store(&ki).unwrap().set_pinned(&ii, true).unwrap();
+        tops.store(&ko).unwrap().set_pinned(&top, true).unwrap();
+        tops.list();
+        crate::vfs::rename(o.join("inner/note.md"), o.join("inner/renamed.md")).unwrap();
+        crate::vfs::rename(o.join("top.md"), o.join("inner/top.md")).unwrap();
+        let list = tops.list();
+        assert!(list.iter().find(|e| e.id == ii).is_some_and(|e| e.meta.rel == "renamed.md" && e.meta.pinned));
+        assert!(list.iter().find(|e| e.id == top).is_some_and(|e| e.meta.rel == "inner/top.md" && e.meta.pinned), "moved into a folder too");
+        assert_eq!(list.iter().filter(|e| e.top == ki).count(), 2);
+    }
+
+    /// A folder deleted through the outer one that is the inner top-level folder: off the
+    /// sidebar with it, and back under its key.
+    #[test]
+    fn a_folder_taken_within_comes_back() {
+        let (mut tops, o, ko, ki) = nested();
+        let taken = tops.take_within(&[o.join("inner")]);
+        assert_eq!(taken.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), [ki.as_str()]);
+        assert!(tops.folder(&ki).is_none() && tops.folder(&ko).is_some());
+        tops.put_back(taken);
+        assert!(tops.store(&ki).is_some());
+        assert!(id_at(&mut tops, &ki, "note.md").is_some());
+    }
+
+    /// The same page open through both, its editors showing the same text: a save through
+    /// one makes that file the other's baseline (`follow_saved`), so its next save is no conflict.
+    #[test]
+    fn a_save_through_one_is_the_others_baseline() {
+        let (mut tops, o, ko, ki) = nested();
+        let fo = id_at(&mut tops, &ko, "inner").unwrap();
+        let po = tops.store(&ko).unwrap().create_from_in(&doc("shared"), Some(&fo)).unwrap();
+        let pi = id_at(&mut tops, &ki, "shared.xml").unwrap();
+        let mut d = tops.store(&ko).unwrap().load_for_edit(&po, false).unwrap();
+        tops.store(&ki).unwrap().load_for_edit(&pi, false).unwrap();
+        d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("one")));
+        tops.store(&ko).unwrap().save_editor(&po, &d).unwrap();
+        tops.store(&ki).unwrap().follow_saved(&pi);
+        d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("two")));
+        tops.store(&ki).unwrap().save_editor(&pi, &d).unwrap();
+        let text = crate::vfs::read_to_string(o.join("inner/shared.xml")).unwrap();
+        assert!(text.contains("one") && text.contains("two"));
     }
 
     #[test]

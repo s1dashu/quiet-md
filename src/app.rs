@@ -854,7 +854,9 @@ impl Workspace {
     /// folder that is gone closes unsaved-but-nothing-lost (it can't be written where it was), and
     /// the window shows the folders still there; a folder that came back is listed again.
     pub(crate) fn check_folders(&mut self, cx: &mut Context<Self>) {
-        if self.store.file_task_busy() || self.store.loading() { return }
+        if self.store.file_task_busy() || self.store.loading() || self.tree_writes_pending() { return }
+        self.store.follow();
+        self.tops_moved(cx);
         let (lost, back) = self.store.check_presence();
         if lost.is_empty() && back.is_empty() { return }
         let in_lost = |w: &Self, id: &Option<String>| id.as_deref().and_then(|id| w.store.top_of(id)).is_some_and(|k| lost.contains(&k));
@@ -986,7 +988,9 @@ impl Workspace {
             return false;
         }
         self.downloading = None;
-        let shared = !self.document_peers(id, window, cx).is_empty();
+        // The baseline is the library's, by id: a twin through a nested top-level folder (another library) sets its own.
+        let shared = cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id()).filter_map(|w| w.downcast::<Workspace>())
+            .any(|w| w.update(cx, |ws, _, _| ws.current.as_deref() == Some(id)).unwrap_or(false));
         let doc = match self.store.load_for_edit(id, shared) {
             Ok(d) => d,
             Err(e) => {
@@ -1172,21 +1176,31 @@ impl Workspace {
         }
         let groups = all;
         let all: Vec<String> = groups.iter().map(|(d, _)| d.clone()).collect();
+        // A folder that is (or holds) a top-level folder of its own takes it off the sidebar.
+        let dirs: Vec<std::path::PathBuf> = all.iter().filter(|id| self.entries.iter().any(|e| e.id == **id && e.meta.folder.is_some())).filter_map(|id| self.store.folder_dir(Some(id))).collect();
+        let inner: Vec<String> = self.store.tops_within(&dirs).into_iter().map(|(k, _)| k).collect();
+        let going = |ws: &Workspace, id: &String| all.contains(id) || ws.store.top_of(id).is_some_and(|k| inner.contains(&k)) || all.iter().any(|a| ws.store.same_file(a, id));
         for handle in cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id()) {
             if let Some(handle) = handle.downcast::<Workspace>()
-                && handle.update(cx, |ws, _, _| ws.current.as_ref().is_some_and(|id| all.contains(id))).unwrap_or(false)
+                && handle.update(cx, |ws, _, _| ws.current.as_ref().is_some_and(|id| going(ws, id))).unwrap_or(false)
             {
                 self.show_toast_kind(ToastKind::Error, crate::settings::text("请先关闭正在编辑这些文档的其他窗口，再删除"), cx);
                 return;
             }
         }
-        if self.current.as_ref().is_some_and(|c| all.contains(c)) {
+        if self.current.as_ref().is_some_and(|c| going(self, c)) {
             let retry = ids.to_vec();
             if !self.save_before(cx, move |w, window, cx| w.delete_docs(&retry, window, cx)) {
                 return;
             }
         }
         let Some(task_guard) = self.store.begin_file_task() else { return };
+        // Off the sidebar before its folder goes (nothing is written there afterwards); back with 撤销.
+        let taken = if inner.is_empty() { vec![] } else { self.store.take_tops_within(&dirs) };
+        if !taken.is_empty() {
+            if self.current.as_ref().is_some_and(|c| self.store.top_of(c).is_none()) { self.save_task = None; self.unsaved = false; self.current = None; self.editor = None; self.editor_sub = None; }
+            self.tops_changed(cx);
+        }
         // A selection may span top-level folders: one writer, and one write, per top-level folder.
         let mut writers: Vec<(String, crate::store::Store, Vec<(String, Option<String>)>)> = vec![];
         for g in groups {
@@ -1248,7 +1262,11 @@ impl Workspace {
                         None => w.view = if view == View::Doc { View::Default } else { view },
                     }
                 }
-                w.remember_file_changes(done.changes, crate::settings::tr("删除", "Delete"));
+                let token = w.remember_file_changes(done.changes, crate::settings::tr("删除", "Delete"));
+                // One whose folder could not go stays on the sidebar.
+                let (stayed, taken): (Vec<_>, Vec<_>) = taken.into_iter().partition(|t| fdl_core::vfs::PathExt::fs_is_dir(t.path.as_path()));
+                if !stayed.is_empty() { w.store.put_back(stayed); w.tops_changed(cx); }
+                if !taken.is_empty() { w.file_change_took_tops(token, taken); }
                 w.sync_sub_pages(cx);
                 let mut errors = done.errors;
                 errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
@@ -1399,7 +1417,8 @@ impl Workspace {
         cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id())
             .filter_map(|w| w.downcast::<Workspace>())
             .filter_map(|w| w.update(cx, |ws, _, _| {
-                (ws.current.as_deref() == Some(id)).then(|| ws.editor.clone()).flatten()
+                // The same file listed through two nested top-level folders is one document (workspaces.md 2.6).
+                ws.current.as_deref().is_some_and(|c| ws.preview.is_none() && ws.store.same_file(c, id)).then(|| ws.editor.clone()).flatten()
             }).ok().flatten()).collect()
     }
 
@@ -1434,15 +1453,16 @@ impl Workspace {
         let peers = self.document_peers(&id, window, cx);
         if peers.is_empty() { return; }
         let core = editor.read(cx).core.clone();
+        let twins = self.store.twin_ids(&id);
         for peer in peers { peer.update(cx, |e, cx| e.receive_document(&core, cx)); }
         for handle in cx.windows().into_iter().filter(|w| w.window_id() != window.window_handle().window_id()).filter_map(|w| w.downcast::<Workspace>()) {
             let _ = handle.update(cx, |ws, _, cx| {
-                if let Some(entry) = ws.entries.edit().iter_mut().find(|e| e.id == id) {
+                for entry in ws.entries.edit().iter_mut().filter(|e| e.id == id || twins.contains(&e.id)) {
                     entry.title = core.doc.title.text.clone();
                     entry.icon = core.doc.icon.clone();
                 }
                 // Every remaining view can save the latest state if its sibling closes.
-                if ws.current.as_deref() == Some(&id) { ws.unsaved = true; }
+                if ws.current.as_ref().is_some_and(|c| *c == id || twins.contains(c)) { ws.unsaved = true; }
                 cx.notify();
             });
         }
@@ -1516,7 +1536,7 @@ impl Workspace {
         // A newly opened sibling can be clean while its source view still has a pending edit.
         if cx.windows().into_iter().filter(|h| Some(h.window_id()) != on_stack).filter_map(|h| h.downcast::<Workspace>()?.entity(cx).ok())
             .filter(|p| p.entity_id() != cx.entity_id())
-            .any(|p| { let w = p.read(cx); w.current.as_ref() == Some(&id) && w.unsaved }) { return true }
+            .any(|p| { let w = p.read(cx); w.unsaved && w.current.as_ref().is_some_and(|c| self.store.same_file(c, &id)) }) { return true }
         match self.store.with(Some(&id), |s| s.refresh_external(&id)) {
             Ok(Some(doc)) => { self.adopt_external(&id, doc, cx); true }
             Ok(None) => true,
@@ -1561,7 +1581,7 @@ impl Workspace {
         };
         install(self, cx);
         for peer in Self::other_workspaces(cx) {
-            if peer.read(cx).current.as_deref() == Some(id) {
+            if peer.read(cx).current.as_deref().is_some_and(|c| self.store.same_file(c, id)) {
                 peer.update(cx, install);
             }
         }
@@ -1602,12 +1622,14 @@ impl Workspace {
                     e.links = links;
                     e.meta = self.store.as_row(&id, meta.clone());
                 }
+                // The same file through a nested top-level folder: what was written is its baseline too.
+                self.store.saved(&id);
                 // A mirrored edit was saved by this window. A sibling must not
                 // later write it a second time over a newer external edit.
-                if meta.markdown {
+                if meta.markdown || self.store.nests() {
                     for peer in Self::other_workspaces(cx) {
                         let w = peer.read(cx);
-                        if w.unsaved && w.current.as_ref() == Some(&id) && w.preview.is_none()
+                        if w.unsaved && w.current.as_ref().is_some_and(|c| self.store.same_file(c, &id)) && w.preview.is_none()
                             && w.editor.as_ref().is_some_and(|e| e.read(cx).core.doc == ed.read(cx).core.doc) {
                             peer.update(cx, |w, cx| {
                                 w.unsaved = false;

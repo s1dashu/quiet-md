@@ -270,6 +270,7 @@ impl Workspace {
         let Crossed { result, lists, changes, warnings } = done;
         for warning in warnings { crate::logging::write(&warning); }
         for (key, n, writer, entries) in lists { self.entries.set(self.store.adopt_written(&key, n, writer, entries)); }
+        self.tops_moved(cx);
         self.store.moved_across();
         match result {
             Ok(()) => {
@@ -302,7 +303,7 @@ impl Workspace {
             (TreeWrite::Move(m), Ok(())) => {
                 self.tree_move_written(m, changes);
                 // Into another folder: the library takes over the writer, so paths are right from here on.
-                if let Some(entries) = entries { self.entries.set(self.store.adopt_written(key, n, writer, entries)); self.sort(); self.sync_sub_pages(cx); }
+                if let Some(entries) = entries { self.entries.set(self.store.adopt_written(key, n, writer, entries)); self.sort(); self.sync_sub_pages(cx); self.tops_moved(cx); }
             }
             (TreeWrite::Move(m), Err(e)) => {
                 self.forget_file_change(m.history);
@@ -322,7 +323,7 @@ impl Workspace {
             }
             (TreeWrite::Rename(r), result) => {
                 // The library takes over what the writer read and wrote, so paths are right from here on.
-                if let Some(entries) = entries { self.entries.set(self.store.adopt_written(key, n, writer, entries)); }
+                if let Some(entries) = entries { self.entries.set(self.store.adopt_written(key, n, writer, entries)); self.tops_moved(cx); }
                 let open = self.current.as_deref() == Some(r.id.as_str());
                 match (&r.gesture, result) {
                     (Some(g), Ok(())) => {

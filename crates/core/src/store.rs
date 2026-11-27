@@ -347,6 +347,10 @@ pub struct Store {
     /// `.xml` and `.sqlite` files looked inside (`shown::ours`) this session, by path:
     /// ours (`None`), or not as the file was then (its time and size).
     checked: HashMap<String, Option<(web_time::SystemTime, u64)>>,
+    /// Each listed page's and folder's file as `list` last found it (device, inode), by id: a
+    /// file renamed or moved outside this library (in the Finder, or through a top-level folder
+    /// nested in or holding this one) is known by it where it turns up, and keeps its id.
+    inodes: HashMap<String, (u64, u64)>,
     /// `writes`.
     writes: std::cell::Cell<u64>,
     top_dir: PathBuf,
@@ -844,6 +848,14 @@ fn in_assets(root: &Path, written: &str) -> Option<PathBuf> {
         if rest.is_empty() || rest.contains(&"..") { return None; }
         Some(rest.iter().fold(dir.clone(), |p, s| p.join(s))).filter(|q| q.fs_exists())
     })
+}
+
+/// A file's device and inode, where the system has them: the same file after a rename or move on its disk.
+fn inode(m: &crate::vfs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    { use std::os::unix::fs::MetadataExt; Some((m.dev(), m.ino())) }
+    #[cfg(not(unix))]
+    { let _ = m; None }
 }
 
 /// Export only files belonging to this library, including after symlink resolution.
@@ -1460,7 +1472,7 @@ impl Store {
         let trash = load_json(&base.join("trash").join("index.json"), "回收站索引", &mut warnings);
         let v5 = !flat && Self::format_at(&root) >= 5;
         let v6 = v5 && Self::format_at(&root) >= 6;
-        let mut store = Store { file_changes: vec![], top_dir: root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), writes: Default::default(), batch: Default::default(), view: Default::default(),
+        let mut store = Store { file_changes: vec![], top_dir: root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: HashMap::new(), writes: Default::default(), batch: Default::default(), view: Default::default(),
             v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
@@ -1798,7 +1810,11 @@ impl Store {
     /// The folder was renamed or moved (重命名): the same library at
     /// `root` now. Ids, the key and what is in memory stay; call between
     /// writes, after `flush_view_state`.
-    pub fn moved_to(&mut self, root: PathBuf) { self.top_dir = root; }
+    pub fn moved_to(&mut self, root: PathBuf) {
+        self.top_dir = root;
+        // A writer begun at the old path (a listing) lists a folder no longer there: not taken over.
+        self.writes.set(self.writes.get() + 1);
+    }
 
     /// A relative path in the library as a path on disk.
     fn abs(&self, rel: &str) -> PathBuf {
@@ -2534,6 +2550,41 @@ impl Store {
         }
     }
 
+    /// Whether what this library keeps about `id` is worth following to a new path: FORMAT 5's
+    /// pages found on disk and never changed here have no record, only the id their path gives,
+    /// which they get again where they are now.
+    fn kept(&self, id: &str) -> bool { !self.v5 || self.merged.borrow().items.contains_key(id) }
+
+    /// The pages and folders at `rel` (one, unless the index is damaged).
+    pub fn ids_at(&self, rel: &str) -> Vec<String> { self.index.iter().filter(|(_, m)| !m.local() && m.rel == rel).map(|(k, _)| k.clone()).collect() }
+
+    /// Every page's and folder's path in the library, by id (本机文件 left out).
+    pub fn paths(&self) -> HashMap<String, String> { self.index.iter().filter(|(_, m)| !m.local()).map(|(k, m)| (k.clone(), m.rel.clone())).collect() }
+
+    /// Files and folders moved on disk by another library (a top-level folder nested in this one,
+    /// or holding it), each (where it was, where it is): what this one keeps about them goes along
+    /// to the new path, under the same ids, as a move here writes it (FORMAT 6: a new `path`).
+    /// One moved out of this library is left to the next `list` (it is gone from here). Whether
+    /// anything changed.
+    pub fn follow_paths(&mut self, moves: &[(PathBuf, PathBuf)]) -> Result<bool> {
+        if self.flat || moves.is_empty() { return Ok(false) }
+        let _lock = self.begin_write()?;
+        let rel = |p: &Path| p.strip_prefix(&self.top_dir).ok().map(|r| r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"));
+        let by_rel: HashMap<&str, &String> = self.index.iter().filter(|(_, m)| !m.local()).map(|(k, m)| (m.rel.as_str(), k)).collect();
+        let found: Vec<(String, String)> = moves.iter().filter_map(|(a, b)| {
+            let (a, b) = (rel(a)?, rel(b)?);
+            if a.is_empty() || b.is_empty() || a == b { return None }
+            Some(((*by_rel.get(a.as_str())?).clone(), b))
+        }).filter(|(id, _)| self.kept(id)).collect();
+        if found.is_empty() { return Ok(false) }
+        for (id, b) in &found { if let Some(m) = self.index.get_mut(id) { m.rel = b.clone(); } }
+        derive_tree(&mut self.index);
+        self.parsed.clear();
+        self.save_index()?;
+        self.writes.set(self.writes.get() + 1);
+        Ok(true)
+    }
+
     /// Goes up with every write (and `list`): a `tree_writer` listing off the main
     /// thread is taken over (`adopt`) only when this did not move meanwhile.
     pub fn writes(&self) -> u64 { self.writes.get() }
@@ -2605,6 +2656,21 @@ impl Store {
         }
         let hidden = found.hider();
         if self.v6 && _lock.is_some() && self.revive(&disk, &keys) { disk = self.to_disk(); }
+        // Renamed or moved where this library did not do it (the Finder, a top-level folder nested
+        // in or holding this one): a file found at a new path that is one listed here before, by
+        // its inode, keeps its id and all it had (pins, order …). One whose inode changed since
+        // (saved meanwhile through another library: a save writes a new file) is found anew.
+        let mut renamed: Vec<(String, String)> = vec![];
+        if !found.partial && !self.inodes.is_empty() {
+            let fresh: HashMap<(u64, u64), &String> = keys.iter().filter(|k| !disk.contains_key(*k)).filter_map(|k| Some((inode(&crate::vfs::metadata(self.abs(k.trim_end_matches('/'))).ok()?)?, k))).collect();
+            if !fresh.is_empty() {
+                for (k, a) in &disk {
+                    if keys.contains(k) || hidden(k) || !self.kept(&a.id) { continue }
+                    if let Some(new) = self.inodes.get(&a.id).and_then(|i| fresh.get(i)).filter(|n| n.ends_with('/') == k.ends_with('/')) { renamed.push((k.clone(), (*new).clone())); }
+                }
+            }
+        }
+        for (old, new) in &renamed { if let Some(a) = disk.remove(old) { disk.insert(new.clone(), a); } }
         let mut left_out = HashSet::new();
         let mut gone = vec![];
         if !found.partial {
@@ -2621,7 +2687,7 @@ impl Store {
             });
         }
         let disk_left_out = !left_out.is_empty();
-        let mut dirty = disk_left_out || !gone.is_empty();
+        let mut dirty = disk_left_out || !gone.is_empty() || !renamed.is_empty();
         for key in &keys {
             if disk.contains_key(key) { continue; }
             let t = crate::vfs::metadata(self.abs(key.trim_end_matches('/'))).ok().and_then(|m| m.modified().ok())
@@ -2645,6 +2711,7 @@ impl Store {
         let shown = |k: &str| keys.contains(k) || (found.partial && !hidden(k));
         let mut out = vec![];
         let mut reparsed = false;
+        let mut inodes: HashMap<String, (u64, u64)> = HashMap::new();
         let mut ids: Vec<String> = self.index.iter().filter(|(_, m)| m.folder.is_none()).map(|(k, _)| k.clone()).collect();
         ids.sort();
         if let Some(p) = progress { p.total.fetch_add(ids.len(), std::sync::atomic::Ordering::Relaxed); }
@@ -2662,6 +2729,7 @@ impl Store {
                 continue;
             }
             let md = crate::vfs::metadata(&p).ok();
+            if !m.local() && let Some(i) = md.as_ref().and_then(inode) { inodes.insert(id.clone(), i); }
             let stamp = md.as_ref().and_then(|m| Some((m.modified().ok()?, m.len())));
             let parsed = match self.parsed.get(&id).filter(|c| stamp == Some((c.0, c.1))) {
                 Some(c) => c.2.clone(),
@@ -2689,9 +2757,11 @@ impl Store {
         let mut folders: Vec<(&String, &Meta)> = self.index.iter().filter(|(_, m)| m.folder.is_some() && shown(&format!("{}/", m.rel))).collect();
         folders.sort_by(|a, b| a.0.cmp(b.0));
         for (id, meta) in folders {
+            if let Some(i) = crate::vfs::metadata(self.abs(&meta.rel)).ok().as_ref().and_then(inode) { inodes.insert(id.clone(), i); }
             let title = meta.folder.clone().unwrap_or_default();
             out.push(Entry { id: id.clone(), meta: meta.clone(), title, icon: None, body: Default::default(), reminders: vec![], links: vec![], note: None, top: String::new() });
         }
+        self.inodes = inodes;
         subdocs::mark_notes(&self.folder_notes(), &mut out);
         let seen: HashSet<&str> = out.iter().map(|e| e.id.as_str()).collect();
         self.parsed.retain(|id, _| seen.contains(id.as_str()));
@@ -2723,6 +2793,7 @@ impl Store {
         (self.index, self.foreign, self.trash) = (take(&mut from.index), take(&mut from.foreign), take(&mut from.trash));
         for (id, c) in from.parsed.drain() { self.parsed.entry(id).or_insert(c); }
         self.checked.extend(from.checked.drain());
+        self.inodes.extend(from.inodes.drain());
         (self.seen, self.merged, self.synced, self.seen_trash, self.here) = (take(&mut from.seen), take(&mut from.merged), take(&mut from.synced), take(&mut from.seen_trash), take(&mut from.here));
         self.clock.set(self.clock.get().max(from.clock.get()));
         // A writer that began before this one (a listing, another window's move) read an older
@@ -2865,6 +2936,14 @@ impl Store {
         let doc = self.parse_doc(id, &disk)?;
         self.loaded.borrow_mut().insert(id.into(), disk);
         Ok(Some(doc))
+    }
+
+    /// `id`'s file was just saved through another library (the same file, through a top-level
+    /// folder nested with this one, whose editor shows the same document): an editor's baseline
+    /// here is that file now, so this library's next save of the same text is no conflict.
+    pub fn follow_saved(&self, id: &str) {
+        if !self.loaded.borrow().contains_key(id) { return }
+        if let Ok(t) = self.read_doc_text(id) { self.loaded.borrow_mut().insert(id.to_string(), t); }
     }
 
     /// Release a closed editor's conflict-detection baseline, after its last window saved.
@@ -6164,7 +6243,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: HashMap::new(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }

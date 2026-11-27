@@ -5,7 +5,10 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Clone)]
 struct Record { token: u64, label: &'static str, changes: Vec<FileDelta>, entries: Vec<(Option<Entry>, Option<Entry>)>,
     /// Pages this step moved into another top-level folder: undone by moving them back (`Store::move_across`).
-    across: Vec<Across> }
+    across: Vec<Across>,
+    /// Top-level folders this step took off the sidebar with their folder (deleted through the one
+    /// holding them): back on it when undone, off again when redone.
+    tops: Vec<fdl_core::top_folders::TopFolderEntry> }
 
 /// A change as the window's rows have it, at a top-level folder's top level (under its row), not as its library does.
 fn rows_only(c: &FileDelta) -> bool {
@@ -116,7 +119,7 @@ impl Workspace {
         if changes.is_empty() { return 0; }
         self.file_history.next += 1;
         let token = self.file_history.next;
-        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![] });
+        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![], tops: vec![] });
         if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
         self.file_history.redo.clear(); self.file_history.prefer_files = true;
         token
@@ -134,6 +137,11 @@ impl Workspace {
         let entries = self.file_record_entries(&merged);
         let record = self.file_history.undo.last_mut().unwrap();
         record.changes = merged; record.entries = entries;
+    }
+
+    /// Step `token` also took top-level folders `tops` off the sidebar (`delete_docs`).
+    pub(crate) fn file_change_took_tops(&mut self, token: u64, tops: Vec<fdl_core::top_folders::TopFolderEntry>) {
+        if let Some(r) = self.file_history.undo.iter_mut().find(|r| r.token == token) { r.tops = tops; }
     }
 
     pub(crate) fn forget_file_change(&mut self, token: u64) {
@@ -227,6 +235,7 @@ impl Workspace {
             let _ = this.update_in(cx, |w, window, cx| {
                 let mut entries = vec![];
                 for (key, n, writer, listed) in lists { entries = w.store.adopt_written(&key, n, writer, listed); }
+                w.tops_moved(cx);
                 if !record.across.is_empty() {
                     w.store.moved_across();
                     for a in &record.across { let (from, to) = if redo { (&a.from, &a.to) } else { (&a.to, &a.from) }; w.moved_open_document(&a.id, from, to); }
@@ -234,6 +243,13 @@ impl Workspace {
                 w.file_history.busy = false;
                 match result {
                     Ok(()) => {
+                        // Top-level folders deleted with a folder of another: back with it, or off again.
+                        if !record.tops.is_empty() {
+                            if redo { let dirs: Vec<std::path::PathBuf> = record.tops.iter().map(|t| t.path.clone()).collect(); let _ = w.store.take_tops_within(&dirs); }
+                            else { w.store.put_back(record.tops.clone()); }
+                            w.tops_changed(cx);
+                        }
+                        let entries = if record.tops.is_empty() { entries } else { w.store.list() };
                         w.entries.set(entries);
                         if redo { w.file_history.redo.pop(); w.file_history.undo.push(record.clone()); }
                         else { w.file_history.undo.pop(); w.file_history.redo.push(record.clone()); }

@@ -493,6 +493,7 @@ impl Onboarding {
         for d in others {
             match tops.add(&d) {
                 Ok(_) | Err(fdl_core::top_folders::AddError::Open(_)) => {}
+                Err(fdl_core::top_folders::AddError::System) => failed.push(format!("{}：{}", short_path(&d), tr("请添加存放笔记的文件夹", "Add the folder your notes are in"))),
                 Err(fdl_core::top_folders::AddError::TooBroad) => failed.push(format!("{}：{}", short_path(&d), tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"))),
                 Err(e) => failed.push(format!("{}：{e}", short_path(&d))),
             }

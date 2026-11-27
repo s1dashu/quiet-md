@@ -992,6 +992,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("其他语言和符号（{}）", "Otras escrituras y símbolos ({})"),
     // 工作区 (docs/design/workspaces.md)
     ("请分别添加文稿、桌面等文件夹", "Añade por separado Documentos, Escritorio u otras carpetas"),
+    ("请添加存放笔记的文件夹", "Añade la carpeta donde guardas tus notas"),
+    ("「{}」也是侧栏里的一个顶层文件夹，会一起从侧栏移除。", "«{}» también es una carpeta principal de la barra lateral y saldrá de ella."),
+    ("其中有 {} 个也是侧栏里的顶层文件夹，会一起从侧栏移除。", "{|one:Una de ellas también es una carpeta principal de la barra lateral y saldrá de ella.|other:# de ellas también son carpetas principales de la barra lateral y saldrán de ella.}"),
     ("文件夹名不能为空", "El nombre de la carpeta no puede estar vacío"),
     ("没有权限给这个文件夹改名", "No tienes permiso para cambiar el nombre de esta carpeta"),
     ("这个文件夹不能改名", "No se puede cambiar el nombre de esta carpeta"),

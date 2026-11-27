@@ -1075,6 +1075,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("其他语言和符号（{}）", "Autres écritures et symboles ({})"),
     // 工作区 (docs/design/workspaces.md)
     ("请分别添加文稿、桌面等文件夹", "Ajoutez séparément Documents, Bureau ou d’autres dossiers"),
+    ("请添加存放笔记的文件夹", "Ajoutez le dossier où se trouvent vos notes"),
+    ("「{}」也是侧栏里的一个顶层文件夹，会一起从侧栏移除。", "« {} » est aussi un dossier principal de la barre latérale et en sera retiré."),
+    ("其中有 {} 个也是侧栏里的顶层文件夹，会一起从侧栏移除。", "{|one:L’un d’eux est aussi un dossier principal de la barre latérale et en sera retiré.|other:# d’entre eux sont aussi des dossiers principaux de la barre latérale et en seront retirés.}"),
     ("文件夹名不能为空", "Le nom du dossier ne peut pas être vide"),
     ("没有权限给这个文件夹改名", "Vous n’avez pas l’autorisation de renommer ce dossier"),
     ("这个文件夹不能改名", "Ce dossier ne peut pas être renommé"),

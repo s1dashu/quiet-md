@@ -764,6 +764,7 @@ fn folders_add_list_and_remove() {
     assert!(err(&["folders", "add", base.join("nope").to_str().unwrap()]).starts_with("error[not_found]"));
     assert!(err(&["folders", "add", "/", "--dry-run"]).starts_with("error[too_broad]"));
     if let Some(home) = std::env::var_os("HOME") { assert!(err(&["folders", "add", home.to_str().unwrap(), "--dry-run"]).starts_with("error[too_broad]")); }
+    if cfg!(target_os = "macos") { assert!(err(&["folders", "add", "/usr", "--dry-run"]).starts_with("error[too_broad]")); }
     // Inside an open one, or holding one: added, a view of its own of the same files.
     let sub = notes.join("sub");
     std::fs::write(sub.join("b.md"), "# B\n").unwrap();

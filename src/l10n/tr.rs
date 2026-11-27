@@ -1044,6 +1044,9 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("其他语言和符号（{}）", "Diğer yazılar ve simgeler ({})"),
     // 工作区 (docs/design/workspaces.md)
     ("请分别添加文稿、桌面等文件夹", "Belgeler, Masaüstü gibi klasörleri ayrı ayrı ekleyin"),
+    ("请添加存放笔记的文件夹", "Notlarınızın bulunduğu klasörü ekleyin"),
+    ("「{}」也是侧栏里的一个顶层文件夹，会一起从侧栏移除。", "“{}” kenar çubuğunda bir üst düzey klasör de ve oradan da kaldırılacak."),
+    ("其中有 {} 个也是侧栏里的顶层文件夹，会一起从侧栏移除。", "{|one:Biri kenar çubuğunda bir üst düzey klasör de ve oradan da kaldırılacak.|other:# tanesi kenar çubuğunda üst düzey klasör de ve oradan da kaldırılacak.}"),
     ("文件夹名不能为空", "Klasör adı boş olamaz"),
     ("没有权限给这个文件夹改名", "Bu klasörü yeniden adlandırma izniniz yok"),
     ("这个文件夹不能改名", "Bu klasör yeniden adlandırılamaz"),

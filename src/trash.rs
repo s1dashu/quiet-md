@@ -496,8 +496,15 @@ impl Workspace {
                 {
                     // A folder goes with what is in it: say how much (备忘录's 「其中的 N 条笔记也会删除」).
                     let m = crate::tree::Tree::new(&self.entries).docs_inside(ids);
-                    if m > 0 { crate::localized_count!(m, "包括其中的 {} 篇文档。删除的内容将进入回收站，30 天后自动彻底删除", "This includes the {} document inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", "This includes the {} documents inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", m) }
-                    else { crate::settings::text("删除的内容将进入回收站，30 天后自动彻底删除").to_string() }
+                    let body = if m > 0 { crate::localized_count!(m, "包括其中的 {} 篇文档。删除的内容将进入回收站，30 天后自动彻底删除", "This includes the {} document inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", "This includes the {} documents inside. Deleted items will be moved to Trash and permanently deleted after 30 days.", m) }
+                    else { crate::settings::text("删除的内容将进入回收站，30 天后自动彻底删除").to_string() };
+                    // A folder that is (or holds) a top-level folder of its own (workspaces.md 2.6): it leaves the sidebar too.
+                    let dirs: Vec<std::path::PathBuf> = ids.iter().filter(|id| self.entries.iter().any(|e| e.id == **id && e.meta.folder.is_some())).filter_map(|id| self.store.folder_dir(Some(id))).collect();
+                    match self.store.tops_within(&dirs).as_slice() {
+                        [] => body,
+                        [(_, name)] => format!("{} {}", crate::localized_format!("「{}」也是侧栏里的一个顶层文件夹，会一起从侧栏移除。", "“{}” is also a top-level folder in the sidebar and leaves it too.", name), body),
+                        more => format!("{} {}", crate::localized_count!(more.len(), "其中有 {} 个也是侧栏里的顶层文件夹，会一起从侧栏移除。", "{} of them is also a top-level folder in the sidebar and leaves it too.", "{} of them are also top-level folders in the sidebar and leave it too.", more.len()), body),
+                    }
                 },
                 crate::settings::text("删除"),
                 true,

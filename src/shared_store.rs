@@ -27,6 +27,8 @@ struct Shared {
     listed_meanwhile: bool,
     /// `begin_relist` until `end_relist`.
     relisting: bool,
+    /// Top-level folders that moved with a folder of another (`follow`), for the windows (`take_moved`).
+    moved: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -52,7 +54,7 @@ impl gpui::Global for SharedStore {}
 impl SharedStore {
     pub fn open() -> Self { Self::with_top_folders(TopFolders::load()) }
     pub fn with_top_folders(tops: TopFolders) -> Self {
-        let s = Self(Rc::new(RefCell::new(Shared { tops, active: None, entries: vec![], trash: vec![], place_by_hand: true, loading: false, listed_meanwhile: false, relisting: false })), Arc::new(AtomicBool::new(false)));
+        let s = Self(Rc::new(RefCell::new(Shared { tops, active: None, entries: vec![], trash: vec![], place_by_hand: true, loading: false, listed_meanwhile: false, relisting: false, moved: vec![] })), Arc::new(AtomicBool::new(false)));
         if let Some(r) = s.0.borrow().tops.first() { Store::set_active_dir(&r.path); }
         s.folders_changed();
         s
@@ -166,7 +168,73 @@ impl SharedStore {
     // ---- routing
 
     /// `f` on the library `id` is in.
-    fn on<R>(&self, id: &str, f: impl FnOnce(&mut Store) -> R) -> Option<R> { self.0.borrow_mut().tops.store_of(id).map(f) }
+    fn on<R>(&self, id: &str, f: impl FnOnce(&mut Store) -> R) -> Option<R> {
+        let r = self.0.borrow_mut().tops.store_of(id).map(f);
+        self.follow();
+        r
+    }
+    /// What one of two nested top-level folders moved on disk, carried into the other before it
+    /// looks (`TopFolders::follow_moves`); a top-level folder moved along waits for the windows.
+    pub fn follow(&self) {
+        let mut sh = self.0.borrow_mut();
+        let moved = sh.tops.follow_moves();
+        if moved.is_empty() { return }
+        if let Some(p) = sh.active.clone().filter(|k| moved.contains(k)).and_then(|k| sh.tops.folder(&k).map(|r| r.path.clone())) { Store::set_active_dir(&p); }
+        for k in moved { if !sh.moved.contains(&k) { sh.moved.push(k); } }
+    }
+    /// The top-level folders that moved with a folder of another since last asked (renamed through the one holding them).
+    pub fn take_moved(&self) -> Vec<String> { std::mem::take(&mut self.0.borrow_mut().moved) }
+    /// Whether one open top-level folder is inside another.
+    pub fn nests(&self) -> bool { self.0.borrow().tops.nests() }
+    /// Whether `a` and `b` are one file: the same id, or the same file listed through two nested top-level folders.
+    pub fn same_file(&self, a: &str, b: &str) -> bool {
+        if a == b { return true }
+        let mut sh = self.0.borrow_mut();
+        if top_of_row(a).is_some() || top_of_row(b).is_some() || !sh.tops.nests() { return false }
+        let mut at = |id: &str| sh.tops.store_of(id).and_then(|s| s.file_path(id)).map(|p| fdl_core::top_folders::plain(p.fs_canonicalize().unwrap_or(p)));
+        let x = at(a);
+        x.is_some() && x == at(b)
+    }
+    /// The ids of `id`'s file in the other top-level folders nested with its own (none when none nest).
+    pub fn twin_ids(&self, id: &str) -> Vec<String> {
+        let mut sh = self.0.borrow_mut();
+        if top_of_row(id).is_some() || !sh.tops.nests() { return vec![] }
+        let Some(path) = sh.tops.store_of(id).and_then(|s| s.file_path(id)) else { return vec![] };
+        let path = fdl_core::top_folders::plain(path.fs_canonicalize().unwrap_or(path));
+        let mut out = vec![];
+        for r in sh.tops.folders.iter() {
+            let Some(s) = r.store.as_ref() else { continue };
+            let Ok(rel) = path.strip_prefix(s.top_dir()) else { continue };
+            let rel = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+            out.extend(s.ids_at(&rel).into_iter().filter(|k| k != id));
+        }
+        out
+    }
+    /// `id` was just saved: its twins' editors (`twin_ids`) show the same text, so that file is their baseline now.
+    pub fn saved(&self, id: &str) {
+        for t in self.twin_ids(id) { let _ = self.on(&t, |s| s.follow_saved(&t)); }
+    }
+    /// The open top-level folders inside folders `dirs` (deleted through the one holding them),
+    /// off the sidebar; what `put_back` takes to bring them back.
+    pub fn take_tops_within(&self, dirs: &[PathBuf]) -> Vec<fdl_core::top_folders::TopFolderEntry> {
+        let taken = self.0.borrow_mut().tops.take_within(dirs);
+        if taken.is_empty() { return taken }
+        let mut sh = self.0.borrow_mut();
+        sh.entries.retain(|(k, _)| !taken.iter().any(|e| e.key == *k));
+        if sh.active.as_ref().is_some_and(|a| taken.iter().any(|e| e.key == *a)) { sh.active = None; if let Some(r) = sh.tops.first() { Store::set_active_dir(&r.path); } }
+        drop(sh);
+        self.folders_changed();
+        taken
+    }
+    /// `take_tops_within`'s top-level folders back (their folders are back, 撤销).
+    pub fn put_back(&self, entries: Vec<fdl_core::top_folders::TopFolderEntry>) {
+        self.0.borrow_mut().tops.put_back(entries);
+        self.folders_changed();
+    }
+    /// The top-level folders at or under one of folders `dirs`: (key, name).
+    pub fn tops_within(&self, dirs: &[PathBuf]) -> Vec<(String, String)> {
+        self.0.borrow().tops.folders.iter().filter(|r| dirs.iter().any(|d| r.path.starts_with(d))).map(|r| (r.key.clone(), r.name())).collect()
+    }
     fn on_res<R>(&self, id: &str, f: impl FnOnce(&mut Store) -> Result<R>) -> Result<R> {
         self.on(id, f).unwrap_or_else(|| Err(anyhow::anyhow!("文档或文件夹不存在")))
     }
@@ -226,6 +294,7 @@ impl SharedStore {
     /// Writers to list top-level folders `keys` again off the main thread, each with
     /// its library's `Store::writes` now; `None` while another listing runs.
     pub fn begin_relist(&self, keys: &[String]) -> Option<Vec<(String, u64, Store)>> {
+        self.follow();
         let mut sh = self.0.borrow_mut();
         if sh.relisting || sh.loading { return None }
         sh.relisting = true;
@@ -388,6 +457,7 @@ impl SharedStore {
     /// `tree_writer` for a write of the tree made ahead on screen (`tree_writes.rs`), with
     /// its library's `Store::writes` now, for `adopt_written`.
     pub fn tree_writer_at(&self, id: &str) -> Option<(String, u64, Store)> {
+        self.follow();
         let key = self.top_of(id)?;
         let mut sh = self.0.borrow_mut();
         let s = sh.tops.store(&key)?;
@@ -397,7 +467,9 @@ impl SharedStore {
     /// here meanwhile, else lists itself (reading what the writer left). The window's rows.
     pub fn adopt_written(&self, key: &str, n: u64, writer: Store, entries: Vec<Entry>) -> Vec<Entry> {
         let fresh = match self.0.borrow_mut().tops.store(key) { Some(s) if s.writes() == n => { s.adopt(writer); entries } Some(s) => s.list(), None => entries };
-        self.merge_entries(key, fresh)
+        let out = self.merge_entries(key, fresh);
+        self.follow();
+        out
     }
     /// The top-level folders a move of `id` into folder `parent` (as the window's rows have
     /// it) goes from and to, when they differ. A top-level folder's own row never moves.
@@ -428,11 +500,12 @@ impl SharedStore {
     }
     /// Writers of top-level folders `keys`, each with its library's `Store::writes` now (`adopt_written`).
     pub fn writers(&self, keys: &[String]) -> Vec<(String, u64, Store)> {
+        self.follow();
         let mut sh = self.0.borrow_mut();
         keys.iter().filter_map(|k| { let s = sh.tops.store(k)?; Some((k.clone(), s.writes(), s.tree_writer())) }).collect()
     }
     /// `tree_writer` for top-level folder `key`.
-    pub fn top_writer(&self, key: &str) -> Option<Store> { self.0.borrow_mut().tops.store(key).map(|s| s.tree_writer()) }
+    pub fn top_writer(&self, key: &str) -> Option<Store> { self.follow(); self.0.borrow_mut().tops.store(key).map(|s| s.tree_writer()) }
     pub fn set_parent(&mut self, id: &str, parent: Option<&str>) -> Result<Meta> {
         self.same_top(id, parent)?;
         let parent = self.real_parent(parent);
@@ -491,4 +564,67 @@ impl SharedStore {
     pub fn top_keys_dirs(&self) -> Vec<(String, PathBuf)> { self.0.borrow().tops.folders.iter().filter(|r| r.store.is_some()).map(|r| (r.key.clone(), r.path.clone())).collect() }
     /// Every open top-level folder, for what scans them all (unused images, wiki links).
     pub fn top_dirs(&self) -> Vec<PathBuf> { self.0.borrow().tops.folders.iter().filter(|r| r.store.is_some()).map(|r| r.path.clone()).collect() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Block, BlockKind, RichText};
+
+    /// Outer holding Inner, both top-level folders, each with a page of its own and one shared (`inner/<name>`).
+    fn nested(name: &str, body: &str) -> (SharedStore, PathBuf) {
+        let o = std::env::temp_dir().join(format!("quiet-shared-{}", uuid::Uuid::new_v4()));
+        fdl_core::vfs::create_dir_all(&o).unwrap();
+        let o = o.fs_canonicalize().unwrap();
+        fdl_core::vfs::create_dir_all(o.join("inner")).unwrap();
+        fdl_core::vfs::write(o.join("inner").join(name), body).unwrap();
+        let mut tops = TopFolders::transient();
+        tops.add(&o).unwrap(); tops.add(&o.join("inner")).unwrap();
+        (SharedStore::with_top_folders(tops), o)
+    }
+
+    fn ids(s: &mut SharedStore, rel_end: &str) -> (String, String) {
+        let list = s.list();
+        let mut v: Vec<&Entry> = list.iter().filter(|e| e.meta.rel.ends_with(rel_end)).collect();
+        v.sort_by_key(|e| e.meta.rel.len());
+        assert_eq!(v.len(), 2, "{:?}", list.iter().map(|e| &e.meta.rel).collect::<Vec<_>>());
+        (v[1].id.clone(), v[0].id.clone())
+    }
+
+    /// The same page through both, edited in turn as the windows do (the editors show one
+    /// document, `sync_document`; each save then follows through `saved`): every edit on disk.
+    fn alternate(name: &str, body: &str) {
+        let (mut s, o) = nested(name, body);
+        let (outer, inner) = ids(&mut s, name);
+        assert!(s.same_file(&outer, &inner) && s.twin_ids(&outer) == [inner.clone()] && s.twin_ids(&inner) == [outer.clone()]);
+        let mut d = s.load_for_edit(&outer, false).unwrap();
+        s.load_for_edit(&inner, false).unwrap();
+        for i in 0..6 {
+            let id = if i % 2 == 0 { &outer } else { &inner };
+            d.blocks.push(Block::new(BlockKind::Text, RichText::plain(format!("typed{i}"))));
+            s.with(Some(id), |st| st.save_editor_naming_later(id, &d)).unwrap_or_else(|e| panic!("save {i}: {e}"));
+            s.saved(id);
+        }
+        let text = fdl_core::vfs::read_to_string(o.join("inner").join(name)).unwrap();
+        for i in 0..6 { assert!(text.contains(&format!("typed{i}")), "typed{i} lost: {text}"); }
+    }
+
+    #[test]
+    fn a_markdown_page_typed_into_through_both_keeps_everything() { alternate("note.md", "# Note\n\nfirst\n"); }
+
+    #[test]
+    fn a_page_typed_into_through_both_keeps_everything() { alternate("Note.xml", "<title>Note</title>\n<p>first</p>\n"); }
+
+    /// Without `saved` the second library's save of the same DocxXML text finds a file it did not load.
+    #[test]
+    fn without_following_the_save_the_other_refuses() {
+        let (mut s, _) = nested("Note.xml", "<title>Note</title>\n<p>first</p>\n");
+        let (outer, inner) = ids(&mut s, "Note.xml");
+        let mut d = s.load_for_edit(&outer, false).unwrap();
+        s.load_for_edit(&inner, false).unwrap();
+        d.blocks.push(Block::new(BlockKind::Text, RichText::plain("a")));
+        s.with(Some(&outer), |st| st.save_editor_naming_later(&outer, &d)).unwrap();
+        d.blocks.push(Block::new(BlockKind::Text, RichText::plain("b")));
+        assert!(s.with(Some(&inner), |st| st.save_editor_naming_later(&inner, &d)).is_err());
+    }
 }
