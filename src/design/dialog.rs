@@ -12,8 +12,9 @@ use gpui::prelude::FluentBuilder;
 use gpui::*;
 
 /// The veil over the window under a dialog (`black/10`; shadcn blurs what is under it as well,
-/// which GPUI cannot), filling its parent, the dialog centred.
-pub fn scrim() -> Div { div().absolute().inset_0().bg(color::overlay()).flex().items_center().justify_center() }
+/// which GPUI cannot), filling its parent, the dialog centred. It takes the pointer: nothing under it
+/// lights up or answers a click (#472: the header's 搜索 under the search dialog opened it again).
+pub fn scrim() -> Div { div().absolute().inset_0().bg(color::overlay()).flex().items_center().justify_center().occlude() }
 
 /// The dialog card (`DialogContent`: `popover`, `rounded-xl`, p-6, gap-6 between header, body and
 /// footer, `sm:max-w-md`) on the popover's edge over a deeper drop. Title (text-sm, `leading-none`)
