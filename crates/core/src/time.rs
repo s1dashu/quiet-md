@@ -130,9 +130,29 @@ pub fn local_offset() -> i64 {
     })
 }
 
+/// `format` with the local date and time of unix `secs` filled in, for the names quick notes
+/// get: `YYYY` `YY` `MM` `DD` `HH` `mm` `ss`, the longest first; text in `[…]` stays as written.
+pub fn expand_date(format: &str, secs: u64) -> String {
+    let (y, mo, d, h, mi) = civil(secs);
+    let mut out = String::new();
+    let mut rest = format;
+    while let Some(c) = rest.chars().next() {
+        if c == '[' && let Some(end) = rest.find(']') { out.push_str(&rest[1..end]); rest = &rest[end + 1..]; continue }
+        match ["YYYY", "YY", "MM", "DD", "HH", "mm", "ss"].into_iter().find(|t| rest.starts_with(t)) {
+            Some(t) => {
+                let n = match t { "YYYY" => y, "YY" => y.rem_euclid(100), "MM" => mo as i64, "DD" => d as i64, "HH" => h as i64, "mm" => mi as i64, _ => (secs % 60) as i64 };
+                out.push_str(&format!("{n:0w$}", w = t.len()));
+                rest = &rest[t.len()..];
+            }
+            None => { out.push(c); rest = &rest[c.len_utf8()..]; }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{local_to_unix, parse_date};
+    use super::{expand_date, local_to_unix, parse_date};
 
     #[test]
     fn front_matter_dates() {
@@ -162,5 +182,23 @@ mod tests {
             assert_eq!(parse_date(bad), None, "{bad}");
         }
         assert_eq!(parse_date("2024-02-29"), Some(local(2024, 2, 29, 0, 0)), "a leap day");
+    }
+
+    #[test]
+    fn quick_note_names() {
+        let t = local_to_unix(2026, 11, 7, 9, 5) as u64 + 3;
+        for (format, want) in [
+            ("YYYYMMDD", "20261107"),
+            ("YYYY-MM-DD HHmm", "2026-11-07 0905"),
+            ("YY.MM.DD HH:mm:ss", "26.11.07 09:05:03"),
+            ("Memo YYYYMMDD", "Memo 20261107"),
+            ("[Summary] DD", "Summary 07"),
+            ("Summary", "Su05ary"),
+            ("日记 YYYY年MM月DD日", "日记 2026年11月07日"),
+            ("[unclosed", "[unclosed"),
+            ("", ""),
+        ] {
+            assert_eq!(expand_date(format, t), want, "{format}");
+        }
     }
 }

@@ -190,8 +190,8 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     for r in moved { changelog::migrated(&r); }
     // The top-level folder in front brings its own look (W21).
     settings::top_switched(cx);
-    // The web build has no global shortcut to register.
-    if !scripted && !cfg!(target_family = "wasm") { quick_note::install(cx); }
+    // The web build has no global shortcut to register; a scripted run takes ⌘⇧N but registers none.
+    if !cfg!(target_family = "wasm") { quick_note::install(cx, !scripted); }
     app::set_menus(cx);
     update::init(cx);
     usage::init(cx);
