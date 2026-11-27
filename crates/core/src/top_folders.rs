@@ -545,7 +545,7 @@ mod tests {
         let mut tops = TopFolders { fixed: true, ..Default::default() };
         let ka = tops.add(&a).unwrap();
         let kb = tops.add(&b).unwrap();
-        assert!(a.join(".quiet/format.json").fs_is_file() && b.join(".quiet/format.json").fs_is_file(), "every top-level folder has its .quiet/");
+        assert!(under(&a, ".quiet/format.json").fs_is_file() && under(&b, ".quiet/format.json").fs_is_file(), "every top-level folder has its .quiet/");
         let made = tops.store(&ka).unwrap().create_from(&doc("in a")).unwrap();
         let list = tops.list();
         assert_eq!(list.iter().find(|e| e.id == made).unwrap().top, ka);
@@ -598,7 +598,7 @@ mod tests {
         crate::vfs::copy(a.join("one.xml"), b.join("one.xml")).unwrap();
         let own = format!("meta/{}", crate::store::device().id);
         crate::vfs::create_dir_all(b.join(".quiet").join(&own)).unwrap();
-        crate::vfs::copy(a.join(".quiet/format.json"), b.join(".quiet/format.json")).unwrap();
+        crate::vfs::copy(under(&a, ".quiet/format.json"), under(&b, ".quiet/format.json")).unwrap();
         for e in crate::vfs::read_dir(a.join(".quiet").join(&own)).unwrap().flatten() { crate::vfs::copy(e.path(), b.join(".quiet").join(&own).join(e.file_name())).unwrap(); }
         let mut tops = TopFolders { fixed: true, ..Default::default() };
         tops.add(&a).unwrap();
@@ -667,7 +667,7 @@ mod tests {
         let to = tops.rename(&ka, " renamed/root ").unwrap();
         assert_eq!(to.file_name().unwrap().to_str(), Some(crate::store::file_name_for("renamed/root").as_str()), "the same name rules as a document's file");
         assert_ne!(to.file_name().unwrap(), "renamed/root");
-        assert!(!a.fs_exists() && to.join(".quiet/format.json").fs_is_file(), "the folder itself moved");
+        assert!(!a.fs_exists() && under(&to, ".quiet/format.json").fs_is_file(), "the folder itself moved");
         assert_eq!(tops.folder(&ka).unwrap().path, to);
         assert_eq!(tops.store(&ka).unwrap().top_dir(), to.as_path());
         let list = tops.list();
@@ -706,7 +706,7 @@ mod tests {
         // Taken over once: the next launch neither restores nor loses anything.
         let mut tops = TopFolders::open(vec![TopFolderEntry { key: key.clone(), path: a.clone(), bookmark: None, added: 0 }], true);
         assert_eq!(tops.list().len(), 2);
-        if let Some(d) = dirs::data_local_dir() { let _ = crate::vfs::remove_dir_all(d.join("quiet-md/recovery").join(&key)); }
+        if let Some(d) = dirs::data_local_dir() { let _ = crate::vfs::remove_dir_all(under(&d, "quiet-md/recovery").join(&key)); }
     }
 
     /// A list written before the rename (`roots.json`, its `roots`) still reads.
@@ -734,7 +734,7 @@ mod tests {
         let (added, removed) = app.changed_elsewhere(&now);
         assert_eq!((added.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(), removed), (vec!["from-cli"], vec![kb.clone()]));
         for e in added { app.adopt(e); }
-        assert!(app.store("from-cli").is_some() && c.join(".quiet/format.json").fs_is_file());
+        assert!(app.store("from-cli").is_some() && under(&c, ".quiet/format.json").fs_is_file());
         app.fixed = true;
         app.remove(&kb).unwrap();
         // A test run's fixed list follows nothing.
@@ -764,7 +764,7 @@ mod tests {
         let inner = outer.join("inner");
         crate::vfs::create_dir_all(inner.join("deep")).unwrap();
         crate::vfs::write(inner.join("note.md"), "# note\n").unwrap();
-        crate::vfs::write(inner.join("deep/more.md"), "# more\n").unwrap();
+        crate::vfs::write(under(&inner, "deep/more.md"), "# more\n").unwrap();
         crate::vfs::write(outer.join("top.md"), "# top\n").unwrap();
         let mut tops = TopFolders { fixed: true, ..Default::default() };
         let ko = tops.add(&outer).unwrap();
@@ -776,7 +776,7 @@ mod tests {
         crate::vfs::write(within.join("w.md"), "# w\n").unwrap();
         let kw = tops.add(&within).unwrap();
         let ka = tops.add(&around).unwrap();
-        assert!(inner.join(".quiet/format.json").fs_is_file() && outer.join(".quiet/format.json").fs_is_file());
+        assert!(under(&inner, ".quiet/format.json").fs_is_file() && under(&outer, ".quiet/format.json").fs_is_file());
         let list = tops.list();
         let of = |k: &str| { let mut v: Vec<String> = list.iter().filter(|e| e.top == k).map(|e| e.meta.rel.clone()).collect(); v.sort(); v };
         assert_eq!(of(&ko), ["inner", "inner/deep", "inner/deep/more.md", "inner/note.md", "top.md"], "the inner .quiet/ is not content");
@@ -811,7 +811,7 @@ mod tests {
     fn nested() -> (TopFolders, PathBuf, String, String) {
         let o = canonical(&dir("o"));
         crate::vfs::create_dir_all(o.join("inner")).unwrap();
-        crate::vfs::write(o.join("inner/note.md"), "# note\n").unwrap();
+        crate::vfs::write(under(&o, "inner/note.md"), "# note\n").unwrap();
         crate::vfs::write(o.join("top.md"), "# top\n").unwrap();
         let mut tops = TopFolders { fixed: true, ..Default::default() };
         let ko = tops.add(&o).unwrap();
@@ -833,12 +833,12 @@ mod tests {
         let (a, b) = tops.pair(&ko, &ki).unwrap();
         let e = a.move_across(b, &note, None, crate::store::Place::Before(None)).unwrap_err();
         assert_eq!(e.to_string(), "已在这个文件夹里");
-        assert_eq!(crate::vfs::read_to_string(o.join("inner/note.md")).unwrap(), "# note\n");
-        assert!(!o.join("inner/note 2.md").fs_exists());
+        assert_eq!(crate::vfs::read_to_string(under(&o, "inner/note.md")).unwrap(), "# note\n");
+        assert!(!under(&o, "inner/note 2.md").fs_exists());
         let folder = id_at(&mut tops, &ko, "inner").unwrap();
         let (a, b) = tops.pair(&ko, &ki).unwrap();
         assert_eq!(a.move_across(b, &folder, None, crate::store::Place::Before(None)).unwrap_err().to_string(), "不能移动到自身或后代文件夹中");
-        assert!(o.join("inner/.quiet/format.json").fs_is_file() && !o.join("inner/inner").fs_exists());
+        assert!(under(&o, "inner/.quiet/format.json").fs_is_file() && !under(&o, "inner/inner").fs_exists());
         assert_eq!((rels(&mut tops, &ko), rels(&mut tops, &ki)), (before_o, before_i.clone()), "both as they were");
         // The other way: I's page to its own folder in O's view of it.
         let ni = id_at(&mut tops, &ki, "note.md").unwrap();
@@ -851,7 +851,7 @@ mod tests {
         let (a, b) = tops.pair(&ko, &ki).unwrap();
         a.move_across(b, &top, None, crate::store::Place::Before(None)).unwrap();
         tops.forget_owners();
-        assert!(o.join("inner/top.md").fs_is_file() && !o.join("top.md").fs_exists());
+        assert!(under(&o, "inner/top.md").fs_is_file() && !o.join("top.md").fs_exists());
         assert_eq!(rels(&mut tops, &ki), ["note.md", "top.md"]);
         assert_eq!(rels(&mut tops, &ko), ["inner", "inner/note.md", "inner/top.md"]);
         assert_eq!(tops.owner(&top).as_deref(), Some(ki.as_str()), "the moved id is I's now");
@@ -863,6 +863,9 @@ mod tests {
         assert_eq!(rels(&mut tops, &ko), ["inner", "inner/note.md", "top.md"]);
         assert_eq!(tops.list().iter().filter(|e| e.id == top).count(), 1);
     }
+
+    /// `rel` (written with `/`) under folder `dir`, as this system names it.
+    fn under(dir: &Path, rel: &str) -> PathBuf { crate::paths::resolve(rel, dir) }
 
     fn with_picture(title: &str, src: &Path) -> Document {
         let mut d = doc(title);
@@ -880,19 +883,19 @@ mod tests {
         crate::vfs::write(&png, b"png").unwrap();
         // Through I: into I's .assets/.
         let s = tops.store(&ki).unwrap();
-        let at = o.join("inner").join(s.import_attachment(&png).unwrap());
+        let at = crate::paths::resolve(&s.import_attachment(&png).unwrap(), &o.join("inner"));
         let by_i = s.create_from(&with_picture("by i", &at)).unwrap();
-        let text = crate::vfs::read_to_string(o.join("inner/by i.xml")).unwrap();
+        let text = crate::vfs::read_to_string(under(&o, "inner/by i.xml")).unwrap();
         assert!(text.contains(".assets/") && !text.contains(o.to_str().unwrap()), "written from the library's top: {text}");
         let via_o = id_at(&mut tops, &ko, "inner/by i.xml").unwrap();
         assert_eq!(pictures(&mut tops, &ko, &via_o), [at.to_string_lossy().into_owned()], "O finds it in I's .assets/");
         assert_eq!(pictures(&mut tops, &ki, &by_i), [at.to_string_lossy().into_owned()]);
         // Through O: into O's .assets/, still named from a top, found through I too.
         let s = tops.store(&ko).unwrap();
-        let at_o = o.join(s.import_attachment(&png).unwrap());
+        let at_o = crate::paths::resolve(&s.import_attachment(&png).unwrap(), &o);
         let fo = id_at(&mut tops, &ko, "inner").unwrap();
         let by_o = tops.store(&ko).unwrap().create_from_in(&with_picture("by o", &at_o), Some(&fo)).unwrap();
-        let text = crate::vfs::read_to_string(o.join("inner/by o.xml")).unwrap();
+        let text = crate::vfs::read_to_string(under(&o, "inner/by o.xml")).unwrap();
         assert!(text.contains(".assets/") && !text.contains(o.to_str().unwrap()), "{text}");
         let via_i = id_at(&mut tops, &ki, "by o.xml").unwrap();
         assert_eq!(pictures(&mut tops, &ki, &via_i), [at_o.to_string_lossy().into_owned()], "I finds it in O's .assets/");
@@ -900,7 +903,7 @@ mod tests {
         // Saved again through the other one, the file says the same.
         let d = tops.store(&ki).unwrap().load(&via_i).unwrap();
         tops.store(&ki).unwrap().save(&via_i, &d).unwrap();
-        assert_eq!(crate::vfs::read_to_string(o.join("inner/by o.xml")).unwrap(), text);
+        assert_eq!(crate::vfs::read_to_string(under(&o, "inner/by o.xml")).unwrap(), text);
         // The sweep: what a page deleted through the other one still names (in that one's 回收站) stays.
         tops.store(&ko).unwrap().delete(&via_o, None).unwrap();
         tops.store(&ki).unwrap().delete(&via_i, None).unwrap();
@@ -932,7 +935,7 @@ mod tests {
         b.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("from i")));
         tops.store(&ko).unwrap().save_editor(&po, &a).unwrap();
         assert!(tops.store(&ki).unwrap().save_editor(&pi, &b).is_err());
-        let text = crate::vfs::read_to_string(o.join("inner/shared.xml")).unwrap();
+        let text = crate::vfs::read_to_string(under(&o, "inner/shared.xml")).unwrap();
         assert!(text.contains("from o") && !text.contains("from i"));
         // A clean editor through I takes in O's save.
         assert!(tops.store(&ki).unwrap().refresh_external(&pi).unwrap().is_some());
@@ -993,8 +996,8 @@ mod tests {
         tops.store(&ki).unwrap().set_pinned(&ii, true).unwrap();
         tops.store(&ko).unwrap().set_pinned(&top, true).unwrap();
         tops.list();
-        crate::vfs::rename(o.join("inner/note.md"), o.join("inner/renamed.md")).unwrap();
-        crate::vfs::rename(o.join("top.md"), o.join("inner/top.md")).unwrap();
+        crate::vfs::rename(under(&o, "inner/note.md"), under(&o, "inner/renamed.md")).unwrap();
+        crate::vfs::rename(o.join("top.md"), under(&o, "inner/top.md")).unwrap();
         let list = tops.list();
         assert!(list.iter().find(|e| e.id == ii).is_some_and(|e| e.meta.rel == "renamed.md" && e.meta.pinned));
         assert!(list.iter().find(|e| e.id == top).is_some_and(|e| e.meta.rel == "inner/top.md" && e.meta.pinned), "moved into a folder too");
@@ -1029,7 +1032,7 @@ mod tests {
         tops.store(&ki).unwrap().follow_saved(&pi);
         d.blocks.push(crate::model::Block::new(crate::model::BlockKind::Text, RichText::plain("two")));
         tops.store(&ki).unwrap().save_editor(&pi, &d).unwrap();
-        let text = crate::vfs::read_to_string(o.join("inner/shared.xml")).unwrap();
+        let text = crate::vfs::read_to_string(under(&o, "inner/shared.xml")).unwrap();
         assert!(text.contains("one") && text.contains("two"));
     }
 

@@ -204,7 +204,9 @@ impl SharedStore {
         let mut out = vec![];
         for r in sh.tops.folders.iter() {
             let Some(s) = r.store.as_ref() else { continue };
-            let Ok(rel) = path.strip_prefix(s.top_dir()) else { continue };
+            // Both as the system names them (`\\?\` left off on Windows, links followed): a path, not text.
+            let top = fdl_core::top_folders::plain(s.top_dir().fs_canonicalize().unwrap_or_else(|_| s.top_dir().to_path_buf()));
+            let Ok(rel) = path.strip_prefix(&top) else { continue };
             let rel = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
             out.extend(s.ids_at(&rel).into_iter().filter(|k| k != id));
         }
