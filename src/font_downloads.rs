@@ -6,7 +6,8 @@
 //! it), a document font when the reader picks it.
 //!
 //! Each file is fetched with `curl`, as updates are (`update::curl_command`:
-//! HTTPS only, the system's proxy settings), from
+//! HTTPS only, the system's proxy settings; on iOS, which can't run curl, the
+//! system's NSURLSession on the same terms: `url_session`), from
 //! `https://download.quiet.md/fonts/<name>`, a name that carries the file's
 //! SHA-256, which the catalog (compiled in) holds in full: a file that
 //! differs is thrown away. tools/fonts/stage.py builds the files from their
@@ -192,7 +193,7 @@ pub fn progress(id: &str) -> f32 {
     let dir = cache_dir();
     let got: u64 = e.files.iter().map(|f| {
         std::fs::metadata(dir.join(&f.name)).map(|m| m.len()).ok().filter(|&n| n == f.size)
-            .unwrap_or_else(|| std::fs::metadata(part_path(&dir.join(&f.name))).map_or(0, |m| m.len()))
+            .unwrap_or_else(|| part_len(&part_path(&dir.join(&f.name))))
     }).sum();
     if e.size() == 0 { 0. } else { (got as f32 / e.size() as f32).clamp(0., 1.) }
 }
@@ -345,12 +346,8 @@ fn obtain(id: &str, fetch: bool) -> Result<Vec<&'static [u8]>, Option<String>> {
 /// running copies may fetch at once; the rename is atomic).
 fn download(f: &File, url: &str, path: &Path, testing: bool) -> Result<Vec<u8>, String> {
     let part = part_path(path);
-    // curl gets no path: see update::fetch_package.
-    let out = std::fs::File::create(&part).map_err(|e| e.to_string())?;
     let keep = (|| {
-        let o = crate::update::curl_command(testing).args(["--max-time", "1800", url]).stdin(std::process::Stdio::null())
-            .stdout(out).stderr(std::process::Stdio::piped()).output().map_err(|e| format!("curl: {e}"))?;
-        if !o.status.success() { return Err(String::from_utf8_lossy(&o.stderr).trim().to_string()); }
+        fetch(url, &part, testing)?;
         let b = std::fs::read(&part).map_err(|e| e.to_string())?;
         if !verified(f, &b) { return Err(format!("{url}: content does not match")); }
         std::fs::rename(&part, path).map_err(|e| e.to_string())?;
@@ -358,6 +355,37 @@ fn download(f: &File, url: &str, path: &Path, testing: bool) -> Result<Vec<u8>, 
     })();
     if keep.is_err() { let _ = std::fs::remove_file(&part); }
     keep
+}
+
+/// `url`'s bytes into the part file `part`, with curl.
+#[cfg(not(target_os = "ios"))]
+fn fetch(url: &str, part: &Path, testing: bool) -> Result<(), String> {
+    // curl gets no path: see update::fetch_package.
+    let out = std::fs::File::create(part).map_err(|e| e.to_string())?;
+    let o = crate::update::curl_command(testing).args(["--max-time", "1800", url]).stdin(std::process::Stdio::null())
+        .stdout(out).stderr(std::process::Stdio::piped()).output().map_err(|e| format!("curl: {e}"))?;
+    if !o.status.success() { return Err(String::from_utf8_lossy(&o.stderr).trim().to_string()); }
+    Ok(())
+}
+
+/// iOS has no curl to run: the system's NSURLSession, which fills the part
+/// file only at the end, so the bytes so far go to `ARRIVING` for `progress`.
+#[cfg(target_os = "ios")]
+fn fetch(url: &str, part: &Path, testing: bool) -> Result<(), String> {
+    let got = crate::url_session::download(url, part, testing, |n| { ARRIVING.lock().unwrap().insert(part.to_path_buf(), n); });
+    ARRIVING.lock().unwrap().remove(part);
+    got
+}
+
+/// What has arrived of the fetches into these part files (iOS).
+#[cfg(target_os = "ios")]
+static ARRIVING: LazyLock<Mutex<FxHashMap<PathBuf, u64>>> = LazyLock::new(Mutex::default);
+
+/// How much of a part file is here.
+fn part_len(part: &Path) -> u64 {
+    #[cfg(target_os = "ios")]
+    if let Some(&n) = ARRIVING.lock().unwrap().get(part) { return n; }
+    std::fs::metadata(part).map_or(0, |m| m.len())
 }
 
 #[cfg(test)]

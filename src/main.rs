@@ -82,6 +82,8 @@ mod themes;
 mod fonts;
 mod font_classes;
 mod font_downloads;
+#[cfg(target_os = "ios")]
+mod url_session;
 mod gallery;
 mod shortcuts;
 #[allow(dead_code, unused_imports)]
