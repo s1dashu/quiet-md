@@ -16,7 +16,8 @@ fn main() {
     embed("assets", "assets.rs", &skip);
     embed("shared-mock/library", "guides.rs", &[]);
     embed("shared-mock/library-zh", "guides_zh.rs", &[]);
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") { windows_resources(); }
+    // rc.exe comes with the MSVC toolchain; the windows-gnu target is only type-checked (CI's quick job), never shipped.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { windows_resources(); }
 }
 
 fn windows_resources() {

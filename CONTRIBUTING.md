@@ -30,6 +30,8 @@ FDL_FUZZ_SEEDS=2000 cargo test --release random_edits   # more random edits, for
 
 To run the checks on every commit: `git config core.hooksPath scripts/hooks`.
 
+CI runs the full checks (tests, packages and self-tests on macOS, Windows and Linux) on every pull request. Pushes to main run only a quick clippy job; the full set runs nightly.
+
 ## Documentation
 
 | Document | Contents |
@@ -41,7 +43,7 @@ To run the checks on every commit: `git config core.hooksPath scripts/hooks`.
 
 ## Building release packages
 
-Before a release, `scripts/check.sh` must pass and CI must be green on that commit. After packaging, verify the signatures, notarization (macOS) and the SHA-256 of the downloads. The Windows CI build does not replace installing, uninstalling and editing on a real machine.
+Before a release, `scripts/check.sh` must pass and a full CI run must be green on that commit: pushes to main run only the quick job, so start one with `gh workflow run ci.yml --ref main`. After packaging, verify the signatures, notarization (macOS) and the SHA-256 of the downloads. The Windows CI build does not replace installing, uninstalling and editing on a real machine.
 
 Packaging scripts build with `cargo build --profile dist` (Cargo.toml: fat LTO, no symbol table) into `target/dist`, about a third smaller than `--release`, which stays the quick everyday build. A full `dist` build takes about four minutes, and so does relinking after a change. Line tables go to a separate file that is kept but never published: `release.sh` writes `dSYM-quiet-md-<version>-macos-<arch>.zip`, `package-windows.ps1` writes `quiet-md-<version>-windows-x64.pdb`. A panic in the log carries `base … frames: …`; on macOS, resolve them with `atos -o <unzipped dSYM> -arch <arch> -l <base> <frames>`.
 

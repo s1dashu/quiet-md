@@ -38,6 +38,13 @@ To check every commit automatically, run `git config core.hooksPath scripts/hook
 
 Update both Cargo.toml version numbers together when releasing. Create commits only when the user explicitly requests one.
 
+## CI
+
+- A push to main runs only the quick job: clippy for Linux and for the Windows cfg. It takes a few minutes and builds no packages.
+- The full jobs (macOS tests, packages and self-test; Windows installer; Linux build and checks) run every night at 07:00 UTC, skipped when main has not moved. Pull requests still run them in full.
+- Before a release, or whenever you need it, run the full jobs by hand: `gh workflow run ci.yml --ref main` (workflow_dispatch).
+- An agent loop on the maintainer's side follows up the nightly result and prepares fixes on `fix/nightly-<date>` branches.
+
 ## Protect user data
 
 - Quiet.md runs as `quiet_md`. The default library at `~/Documents/Quiet.md` contains real user data (new installs default to `~/Documents/Quiet Notes`; an existing `Quiet.md` stays the default). Never commit, delete or modify its files. Leave other applications' processes and data alone. When terminating a process, match only a binary built from this repository.
