@@ -46,6 +46,9 @@ pub struct Graph {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     pub clusters: Vec<Cluster>,
+    /// Rank-only constraints: kept apart like edges while ranking, then
+    /// gone (no path, no pull on order or position).
+    pub ranks: Vec<Edge>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -110,12 +113,14 @@ pub fn layout(g: &Graph, sp: &Spacing) -> Out {
         p.reverse();
         p
     };
-    let valid: Vec<usize> = (0..g.edges.len()).filter(|&i| { let e = &g.edges[i]; e.from < n && e.to < n && e.from != e.to }).collect();
+    // the edges, then the rank-only ones (steps 1 and 2 only)
+    let es: Vec<&Edge> = g.edges.iter().chain(&g.ranks).collect();
+    let valid: Vec<usize> = (0..es.len()).filter(|&i| { let e = es[i]; e.from < n && e.to < n && e.from != e.to }).collect();
 
     // 1. acyclic: DFS, back edges reversed
     let mut out_edges: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for &i in &valid { out_edges[g.edges[i].from].push(i); }
-    let mut reversed = vec![false; g.edges.len()];
+    for &i in &valid { out_edges[es[i].from].push(i); }
+    let mut reversed = vec![false; es.len()];
     let mut state = vec![0u8; n];
     for root in 0..n {
         if state[root] != 0 { continue }
@@ -125,7 +130,7 @@ pub fn layout(g: &Graph, sp: &Spacing) -> Out {
             let v = top.0;
             if let Some(&e) = out_edges[v].get(top.1) {
                 top.1 += 1;
-                let w = g.edges[e].to;
+                let w = es[e].to;
                 match state[w] {
                     0 => { state[w] = 1; stack.push((w, 0)); }
                     1 => reversed[e] = true,
@@ -137,8 +142,8 @@ pub fn layout(g: &Graph, sp: &Spacing) -> Out {
             }
         }
     }
-    let ends = |i: usize| { let e = &g.edges[i]; if reversed[i] { (e.to, e.from) } else { (e.from, e.to) } };
-    let span = |i: usize| 2 * g.edges[i].minlen.clamp(1, 32);
+    let ends = |i: usize| { let e = &es[i]; if reversed[i] { (e.to, e.from) } else { (e.from, e.to) } };
+    let span = |i: usize| 2 * es[i].minlen.clamp(1, 32);
 
     // 2. ranks
     let mut ins: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -178,7 +183,7 @@ pub fn layout(g: &Graph, sp: &Spacing) -> Out {
     let mut ls: Vec<L> = (0..n).map(|v| L { w: g.nodes[v].w.max(0.), h: g.nodes[v].h.max(0.), rank: rank[v], path: path_of(g.nodes[v].cluster), dummy: false, filler: None, up: Vec::new(), down: Vec::new() }).collect();
     let mut chains: Vec<Vec<usize>> = vec![Vec::new(); g.edges.len()];
     let mut label_at: Vec<Option<usize>> = vec![None; g.edges.len()];
-    for &i in &valid {
+    for &i in valid.iter().filter(|&&i| i < g.edges.len()) {
         let (u, v) = ends(i);
         let (ru, rv) = (rank[u], rank[v]);
         let common = {
@@ -487,7 +492,7 @@ mod tests {
 
     #[test]
     fn chain_goes_down() {
-        let g = Graph { nodes: vec![node(None); 3], edges: vec![edge(0, 1), edge(1, 2)], clusters: vec![] };
+        let g = Graph { nodes: vec![node(None); 3], edges: vec![edge(0, 1), edge(1, 2)], clusters: vec![], ranks: vec![] };
         let o = layout(&g, &SP);
         assert!(o.nodes[0].1 < o.nodes[1].1 && o.nodes[1].1 < o.nodes[2].1);
         assert!((o.nodes[0].0 - o.nodes[2].0).abs() < 1.);
@@ -495,7 +500,7 @@ mod tests {
 
     #[test]
     fn cycles_and_fans() {
-        let g = Graph { nodes: vec![node(None); 5], edges: vec![edge(0, 1), edge(0, 2), edge(0, 3), edge(3, 0), edge(1, 4), edge(2, 4), edge(4, 4)], clusters: vec![] };
+        let g = Graph { nodes: vec![node(None); 5], edges: vec![edge(0, 1), edge(0, 2), edge(0, 3), edge(3, 0), edge(1, 4), edge(2, 4), edge(4, 4)], clusters: vec![], ranks: vec![] };
         let o = layout(&g, &SP);
         for a in 0..5 { for b in a + 1..5 { assert!(!overlap(rect(&o, &g, a), rect(&o, &g, b)), "{a} {b} {:?}", o.nodes); } }
         // the parent sits over its children
@@ -510,7 +515,7 @@ mod tests {
         let mut nodes = vec![node(Some(0)), node(Some(0)), node(Some(1)), node(Some(1)), node(None), node(Some(2))];
         nodes[5].w = 20.;
         let clusters = vec![Cluster { parent: None, extra: [20., 0., 0., 0.], min: (0., 0.) }, Cluster { parent: None, extra: [20., 0., 0., 0.], min: (0., 0.) }, Cluster { parent: Some(1), extra: [10., 0., 0., 0.], min: (100., 0.) }];
-        let g = Graph { nodes, edges: vec![edge(0, 1), edge(2, 3), edge(4, 0), edge(4, 3), edge(1, 2), edge(3, 5), edge(4, 5)], clusters };
+        let g = Graph { nodes, edges: vec![edge(0, 1), edge(2, 3), edge(4, 0), edge(4, 3), edge(1, 2), edge(3, 5), edge(4, 5)], clusters, ranks: vec![] };
         let o = layout(&g, &SP);
         let inside = |r: Rect, b: Rect| r.x >= b.x && r.y >= b.y && r.x + r.w <= b.x + b.w && r.y + r.h <= b.y + b.h;
         for v in 0..6 {
@@ -526,7 +531,7 @@ mod tests {
 
     #[test]
     fn labels_sit_between() {
-        let g = Graph { nodes: vec![node(None); 2], edges: vec![Edge { label: (40., 18.), ..edge(0, 1) }], clusters: vec![] };
+        let g = Graph { nodes: vec![node(None); 2], edges: vec![Edge { label: (40., 18.), ..edge(0, 1) }], clusters: vec![], ranks: vec![] };
         let o = layout(&g, &SP);
         let l = o.labels[0].expect("label");
         assert!(l.1 > o.nodes[0].1 + 15. + 9. && l.1 < o.nodes[1].1 - 15. - 9., "{l:?} {:?}", o.nodes);
@@ -544,7 +549,7 @@ mod tests {
             let n = 2 + rnd(14);
             let nodes: Vec<Node> = (0..n).map(|_| Node { w: 20. + rnd(80) as f32, h: 20. + rnd(30) as f32, cluster: if nc > 0 && rnd(3) > 0 { Some(rnd(nc)) } else { None } }).collect();
             let edges: Vec<Edge> = (0..rnd(2 * n)).map(|_| Edge { from: rnd(n), to: rnd(n), minlen: 1 + rnd(2), label: if rnd(3) == 0 { (30., 16.) } else { (0., 0.) } }).collect();
-            let g = Graph { nodes, edges, clusters };
+            let g = Graph { nodes, edges, clusters, ranks: vec![] };
             let o = layout(&g, &SP);
             let within = |v: usize, c: usize| { let mut at = g.nodes[v].cluster; let mut k = 0; while let Some(x) = at { if x == c { return true } at = g.clusters[x].parent; k += 1; if k > 10 { break } } false };
             for a in 0..n {
@@ -561,8 +566,8 @@ mod tests {
 
     #[test]
     fn junk_does_not_panic() {
-        let g = Graph { nodes: vec![node(Some(7)), node(Some(0))], edges: vec![edge(0, 9), edge(1, 1), edge(1, 0)], clusters: vec![Cluster { parent: Some(0), extra: [0.; 4], min: (0., 0.) }] };
+        let g = Graph { nodes: vec![node(Some(7)), node(Some(0))], edges: vec![edge(0, 9), edge(1, 1), edge(1, 0)], clusters: vec![Cluster { parent: Some(0), extra: [0.; 4], min: (0., 0.) }], ranks: vec![] };
         let _ = layout(&g, &SP);
-        let _ = layout(&Graph { nodes: vec![], edges: vec![], clusters: vec![] }, &SP);
+        let _ = layout(&Graph { nodes: vec![], edges: vec![], clusters: vec![], ranks: vec![] }, &SP);
     }
 }

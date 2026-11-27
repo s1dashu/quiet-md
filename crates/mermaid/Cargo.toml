@@ -1,4 +1,4 @@
-# Mermaid diagrams as SVG: flowcharts and sequence diagrams parsed, laid out
+# Mermaid diagrams as SVG: flowcharts, state and sequence diagrams parsed, laid out
 # and drawn here, with no dependencies. Text is measured by the host.
 [package]
 name = "fdl_mermaid"

@@ -1,5 +1,6 @@
 //! Mermaid diagrams drawn as SVG, written for Quiet.md instead of a port of
-//! mermaid.js: flowcharts (`graph` / `flowchart`) and sequence diagrams,
+//! mermaid.js: flowcharts (`graph` / `flowchart`), state diagrams (read into
+//! the flowchart model) and sequence diagrams,
 //! parsed here, laid out in layers (flowcharts, `layout.rs`) or in lanes
 //! (sequence diagrams) and written as plain SVG that resvg draws: no CSS, no
 //! foreignObject, no markers. Colours come from the host (`Palette`) and text
@@ -10,6 +11,7 @@
 mod flow;
 mod layout;
 mod seq;
+mod state;
 mod svg;
 mod text;
 
@@ -98,6 +100,7 @@ pub(crate) fn err<T>(line: usize, message: impl Into<String>) -> Result<T, Error
 pub enum Kind {
     Flowchart,
     Sequence,
+    State,
 }
 
 /// A source line: its 1-based number and its text, trimmed.
@@ -146,6 +149,7 @@ pub fn kind(src: &str) -> Option<Kind> {
     match word {
         "graph" | "flowchart" | "flowchart-v2" | "flowchart-elk" => Some(Kind::Flowchart),
         "sequenceDiagram" => Some(Kind::Sequence),
+        "stateDiagram" | "stateDiagram-v2" => Some(Kind::State),
         _ => None,
     }
 }
@@ -157,6 +161,7 @@ pub fn render(src: &str, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
     match kind(src) {
         Some(Kind::Flowchart) => flow::render(&lines, title, style, m),
         Some(Kind::Sequence) => seq::render(&lines, title, style, m),
+        Some(Kind::State) => state::render(&lines, title, style, m),
         None => {
             let word = first.text.split(|c: char| c.is_whitespace() || c == ';' || c == ':').next().unwrap_or("");
             err(first.no, format!("“{word}” diagrams aren't supported yet"))

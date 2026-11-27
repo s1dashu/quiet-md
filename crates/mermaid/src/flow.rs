@@ -70,13 +70,13 @@ pub struct Flow {
     pub default_link: Vec<(String, String)>,
 }
 
-fn dir_of(s: &str) -> Option<Dir> {
+pub(crate) fn dir_of(s: &str) -> Option<Dir> {
     Some(match s { "TB" | "TD" | "v" => Dir::TB, "BT" | "^" => Dir::BT, "LR" | ">" => Dir::LR, "RL" | "<" => Dir::RL, _ => return None })
 }
 
 /// `fill:#f9f,stroke:#333,stroke-width:4px` as pairs (commas inside
 /// `rgb(…)` stay).
-fn styles(s: &str) -> Vec<(String, String)> {
+pub(crate) fn styles(s: &str) -> Vec<(String, String)> {
     let mut out = Vec::new();
     let (mut depth, mut start) = (0, 0);
     let s = s.trim().trim_end_matches(';');
@@ -580,6 +580,7 @@ fn size(shape: Shape, t: &Block) -> (f32, f32) {
         Shape::Cylinder => { let ry = (w / 2.) / (2.5 + w / 50.); (w.max(48.), h + 2. * ry) }
         Shape::Circle => { let d = tw.max(th) + 2. * PAD.1 + 4.; (d, d) }
         Shape::DoubleCircle => { let d = tw.max(th) + 2. * PAD.1 + 14.; (d, d) }
+        Shape::Rhombus if t.is_empty() => (28., 28.),
         Shape::Rhombus => { let s = tw + th + 2. * PAD.1 + 8.; (s.max(h * 1.6), s.max(h * 1.6).min(s * 0.75).max(h)) }
         Shape::Hexagon => (w + h / 2., h),
         Shape::LeanR | Shape::LeanL | Shape::Trap | Shape::TrapAlt => (w + h * 0.8, h),
@@ -696,7 +697,7 @@ pub fn render(lines: &[Line], title: Option<String>, style: &Style, m: &dyn Meas
     draw(&f, title, style, m)
 }
 
-fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
+pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
     let fs = style.font_size;
     let col = &style.colors;
     let horizontal = matches!(f.dir, Dir::LR | Dir::RL);
@@ -709,13 +710,14 @@ fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Resu
         look(&sets)
     }).collect();
     let blocks: Vec<Block> = f.nodes.iter().zip(&node_look).map(|(nd, lk)| Block::new(&nd.label, WRAP, fs, lk.bold, m)).collect();
-    let sizes: Vec<(f32, f32)> = f.nodes.iter().zip(&blocks).map(|(nd, b)| size(nd.shape, b)).collect();
+    // (a fork bar lies across the flow)
+    let sizes: Vec<(f32, f32)> = f.nodes.iter().zip(&blocks).map(|(nd, b)| { let (w, h) = size(nd.shape, b); if horizontal && nd.shape == Shape::Fork { (h, w) } else { (w, h) } }).collect();
     let link_blocks: Vec<Block> = f.links.iter().map(|l| Block::new(&l.label, WRAP, fs, false, m)).collect();
     let sub_blocks: Vec<Block> = f.subs.iter().map(|s| Block::new(&s.title, 0., fs, false, m)).collect();
     let swap = |(w, h): (f32, f32)| if horizontal { (h, w) } else { (w, h) };
 
     // the layout graph: nodes, then a stand-in for each empty subgraph
-    let mut g = layout::Graph { nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new() };
+    let mut g = layout::Graph { nodes: Vec::new(), edges: Vec::new(), clusters: Vec::new(), ranks: Vec::new() };
     for (i, nd) in f.nodes.iter().enumerate() { let (w, h) = swap(sizes[i]); g.nodes.push(layout::Node { w, h, cluster: nd.sub }); }
     let title_side = match f.dir { Dir::TB => 0, Dir::BT => 2, _ => 3 };
     for (i, s) in f.subs.iter().enumerate() {
@@ -729,22 +731,28 @@ fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Resu
     // link inside it leaves (as a source), or enters (as a target), so the
     // rest of the graph ranks past the whole box
     let within = |mut c: Option<usize>, s: usize| { let mut k = 0; while let Some(x) = c { if x == s { return true } k += 1; if k > 64 { break } c = f.subs.get(x).and_then(|x| x.parent); } false };
+    // (and the rest of those ends get rank-only edges, so every region of
+    // a box ranks past what links to it)
     let mut proxy: Vec<(usize, usize)> = Vec::new();
+    let mut ends: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
     for s in 0..f.subs.len() {
         let members: Vec<usize> = (0..f.nodes.len()).filter(|&i| within(f.nodes[i].sub, s)).collect();
         if members.is_empty() {
             let i = g.nodes.len();
             g.nodes.push(layout::Node { w: 1., h: 1., cluster: Some(s) });
             proxy.push((i, i));
+            ends.push((Vec::new(), Vec::new()));
             continue;
         }
         let inner = |e: End| matches!(e, End::Node(i) if members.contains(&i));
         let has = |v: usize, out: bool| f.links.iter().any(|l| inner(l.from) && inner(l.to) && if out { l.from == End::Node(v) } else { l.to == End::Node(v) });
-        let first = members.iter().copied().find(|&v| !has(v, false)).unwrap_or(members[0]);
-        let last = members.iter().rev().copied().find(|&v| !has(v, true)).unwrap_or(members[members.len() - 1]);
-        proxy.push((last, first));
+        let firsts: Vec<usize> = members.iter().copied().filter(|&v| !has(v, false)).collect();
+        let lasts: Vec<usize> = members.iter().rev().copied().filter(|&v| !has(v, true)).collect();
+        proxy.push((lasts.first().copied().unwrap_or(members[members.len() - 1]), firsts.first().copied().unwrap_or(members[0])));
+        ends.push((lasts, firsts));
     }
     let endpoint = |e: End, out: bool| match e { End::Node(i) => Some(i), End::Sub(s) => proxy.get(s).map(|p| if out { p.0 } else { p.1 }) };
+    let mut extra: Vec<layout::Edge> = Vec::new();
     let mut edge_of: Vec<Option<usize>> = Vec::new();
     for (i, l) in f.links.iter().enumerate() {
         let (Some(a), Some(b)) = (endpoint(l.from, true), endpoint(l.to, false)) else { edge_of.push(None); continue };
@@ -754,7 +762,11 @@ fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Resu
         let label = if lb.is_empty() { (0., 0.) } else { swap((lb.w + 8., lb.h + 4.)) };
         edge_of.push(Some(g.edges.len()));
         g.edges.push(layout::Edge { from: a, to: b, minlen: l.len, label });
+        let others = |e: End, out: bool| match e { End::Sub(s) => ends.get(s).map_or(&[][..], |x| if out { &x.0[..] } else { &x.1[..] }).iter().skip(1).copied().take(16).collect(), _ => Vec::new() };
+        for x in others(l.from, true) { if x != b { extra.push(layout::Edge { from: x, to: b, minlen: l.len, label: (0., 0.) }); } }
+        for x in others(l.to, false) { if x != a { extra.push(layout::Edge { from: a, to: x, minlen: l.len, label: (0., 0.) }); } }
     }
+    g.ranks = extra;
     let sp = layout::Spacing { node: 40., rank: 64., edge: 12., pad: 14. };
     let o = layout::layout(&g, &sp);
 

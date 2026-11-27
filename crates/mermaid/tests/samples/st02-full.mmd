@@ -1,0 +1,25 @@
+stateDiagram-v2
+    direction TB
+    classDef bad fill:#f00,color:white,font-weight:bold
+    [*] --> Draft
+    Draft --> Review : submit
+    state "In review" as Review {
+        [*] --> Screening
+        Screening --> check
+        state check <<choice>>
+        check --> Approved : ok
+        check --> [*] : rejected
+    }
+    Review --> fork_state
+    state fork_state <<fork>>
+    fork_state --> Publish
+    fork_state --> Notify
+    state join_state <<join>>
+    Publish --> join_state
+    Notify --> join_state
+    join_state --> Done:::bad
+    Done --> [*]
+    note right of Draft
+        草稿可以反复修改
+    end note
+    note left of Done : 完成
