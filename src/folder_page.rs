@@ -58,7 +58,9 @@ const COLS: [Col; 3] = [Col::Modified, Col::Created, Col::Visited];
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
 /// `tables`: the 数据库 files the page shows (their rows drawn in the card), saved apart from the page.
-struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String> }
+/// `listed`: for a preview with a child-page list, the entries' generation and the card's own
+/// stamp it was built against; the same pair needs no new look at the page's siblings.
+struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String>, listed: (u64, u64) }
 type Thumb = Rc<ThumbContent>;
 
 /// The files of the 数据库 blocks in `blocks`, at any depth.
@@ -78,8 +80,23 @@ fn tables_time(srcs: &[String]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = rustc_hash::FxHasher::default();
     let root = crate::store::Store::active_dir();
-    for s in srcs { std::fs::metadata(root.join(s)).and_then(|m| m.modified()).ok().hash(&mut h); }
+    for s in srcs { modified(&root.join(s)).hash(&mut h); }
     h.finish()
+}
+
+/// When `path` last changed, asked of the disk at most every 2 s: every card is drawn each
+/// frame (a folder card's hover, a scroll), and a frame waiting on the disk drops.
+fn modified(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    thread_local! { static SEEN: std::cell::RefCell<HashMap<std::path::PathBuf, (web_time::Instant, Option<std::time::SystemTime>)>> = Default::default(); }
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        let now = web_time::Instant::now();
+        if let Some((at, t)) = seen.get(path) && now.duration_since(*at) < std::time::Duration::from_secs(2) { return *t }
+        if seen.len() > 4096 { seen.retain(|_, (at, _)| now.duration_since(*at) < std::time::Duration::from_secs(2)); }
+        let t = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        seen.insert(path.to_path_buf(), (now, t));
+        t
+    })
 }
 
 fn has_subpage_list(blocks: &[crate::model::Block]) -> bool {
@@ -110,15 +127,19 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
             }
             BlockKind::Image { src, width, height, .. } => {
                 let mut kind = b.kind.clone();
-                // Resolve missing dimensions once per cached thumbnail, not each frame.
-                let dimensions = crate::store::image_path(src).and_then(|p| image::ImageReader::open(p).ok())
+                // The file and missing dimensions found once per cached thumbnail, not each frame:
+                // finding the file asks the disk (`moved_asset`), which a frame must not wait on.
+                let path = crate::store::image_path(src);
+                let dimensions = path.as_ref().and_then(|p| image::ImageReader::open(p).ok())
                     .and_then(|r| r.with_guessed_format().ok()).and_then(|r| r.into_dimensions().ok());
                 let (iw, ih) = dimensions.map(|(w, h)| (w.max(1) as f32, h.max(1) as f32)).unwrap_or((690., 460.));
                 let w = width.unwrap_or_else(|| height.map(|h| h * iw / ih).unwrap_or(iw)).max(1.);
                 let h = height.unwrap_or(w * ih / iw).max(1.);
                 // No wider than the page: a 1536 px picture would otherwise reserve its full height below a narrower drawing.
                 let (w, h) = if w > 690. { (690., h * 690. / w) } else { (w, h) };
-                if let BlockKind::Image { width, height, .. } = &mut kind { *width = Some(w); *height = Some(h); }
+                if let BlockKind::Image { src, width, height, .. } = &mut kind {
+                    *src = path.map(|p| p.to_string_lossy().into_owned().into()).unwrap_or_default(); *width = Some(w); *height = Some(h);
+                }
                 kind
             }
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
@@ -192,7 +213,8 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
     if let Some(bg) = b.bg.as_ref().and_then(|c| theme::block_bg(&c.0)) { node = node.rounded(px(6. * s)).bg(bs::display_fill(bg)); }
     match &b.kind {
         BlockKind::Image { src, width, height, caption, .. } => {
-            let path = crate::store::image_path(src);
+            // `thumb_blocks` put the file found in `src` ("" when there is none).
+            let path = (!src.is_empty()).then(|| std::path::PathBuf::from(src.to_string()));
             let ratio = width.unwrap_or(690.).max(1.) / height.unwrap_or(460.).max(1.);
             node = match b.align { crate::model::Align::Left => node.items_start(), crate::model::Align::Center => node.items_center(), crate::model::Align::Right => node.items_end() };
             // Reserve the proportional height at the available width before loading.
@@ -631,7 +653,7 @@ impl Workspace {
         e.meta.modified.hash(&mut stamp);
         crate::settings::feishu().hash(&mut stamp);
         // a 数据库's rows live in its file, saved apart from the index: its time is the card's too
-        let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
+        let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| modified(&p))).flatten();
         file_time.hash(&mut stamp);
         // and a page's embedded tables: a row changed there redraws the card
         let cached_tables = self.folder_page.thumbs.borrow().get(&e.id).map(|(_, t, _)| tables_time(&t.tables)).unwrap_or(0);
@@ -640,8 +662,9 @@ impl Workspace {
         let base_stamp = stamp.finish();
         // If the preview contains no sibling subpages, modified + settings uniquely
         // identifies it without rebuilding the whole tree on every frame.
+        let listed = (self.entries.generation(), base_stamp);
         if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
-            && !t.has_subpages && *m == base_stamp { *used = web_time::Instant::now(); return t.clone(); }
+            && (if t.has_subpages { t.listed == listed } else { *m == base_stamp }) { *used = web_time::Instant::now(); return t.clone(); }
         // A child-page list shows the other pages in the document's folder, as in
         // the open document (`sync_sub_pages`).
         let tree = crate::tree::Tree::new(&self.entries);
@@ -657,7 +680,11 @@ impl Workspace {
         cached_tables.hash(&mut full_stamp);
         let full_stamp = full_stamp.finish();
         if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
-            && *m == full_stamp { *used = web_time::Instant::now(); return t.clone(); }
+            && *m == full_stamp {
+            *used = web_time::Instant::now();
+            if t.has_subpages && t.listed != listed { *t = Rc::new(ThumbContent { blocks: t.blocks.clone(), eqnos: t.eqnos.clone(), has_subpages: true, tables: t.tables.clone(), listed }); }
+            return t.clone();
+        }
         let _s = crate::devtools::span("thumb-miss");
         // The derived rows exist only in this preview tree and never enter the editor/store.
         fn subpages(blocks: &mut [crate::model::Block], entries: &[&Entry], budget: &mut usize) {
@@ -687,7 +714,7 @@ impl Workspace {
         // stamped with the tables just found, so the next frame finds it
         let tt = tables_time(&tables);
         let stamp = if has_subpages { tt.hash(&mut children_stamp); children_stamp.finish() } else { tt.hash(&mut page_stamp); page_stamp.finish() };
-        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables });
+        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables, listed });
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }
