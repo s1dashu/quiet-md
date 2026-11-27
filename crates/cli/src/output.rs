@@ -47,7 +47,7 @@ pub fn text(op: &str, v: &Value) -> String {
                 if let Some(n) = r.get("more_hits") { o += &format!("  … {n} more blocks match (quiet blocks DOC --grep WORD)\n"); }
             }
         }
-        "outline" | "open" => {
+        "outline" | "load" | "open" => {
             o += &format!("{}  [{}] rev {}  {} blocks, {} chars\n", s(v, "path"), s(v, "kind"), s(v, "rev"), s(v, "block_count"), size(v["chars"].as_u64().unwrap_or(0)));
             for h in list(v, "headings") {
                 let l = h["level"].as_u64().unwrap_or(1) as usize;

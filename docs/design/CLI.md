@@ -104,9 +104,20 @@
 - **链接格式和安全**（`fdl_core::app_url`）：只有 `open` 一种动作，只做导航，不写、不执行任何东西。参数只认 `top`、`doc`、`block`、`folder`、`view`，每个最多一次；`top`、`doc`、`folder` 只能是 id 字符（字母数字和 `._:-`，最长 200）；`block` 必须是 ref 格式；`view` 只认 `trash`；链接最长 2048。有任何一项不对，整条拒绝，应用提示「无法打开链接」。找不到文档或文件夹（被移走、文件夹不在侧栏）给出提示，不崩。
 - **应用端**（`local_files.rs`）：macOS 的 `on_open_urls`，Windows / Linux 的命令行参数，都进 `Incoming`；等窗口列完文件夹再处理链接（`Workspace::open_link`）。文档按 id 找（跨文件夹唯一），`try_open` 打开后用 `block_ref::locate` 找块：位置上的块指纹对得上就用它，否则用全文唯一同指纹的块（块被挪过），再找不到就打开文档并提示「找不到那个块」。找到的块滚到可见（`scroll_to_block`）并进入块选中（`select_block`），和反向链接跳转同一套。块的 ref 规则从 CLI 挪进了 core 的 `block_ref.rs`，两边共用。
 - **注册 scheme：**
-  - macOS：`scripts/release.sh` 和 `scripts/preview.sh` 生成的 Info.plist 都加了 `CFBundleURLTypes`（`quietmd`）。预览版和正式版都声明同一个 scheme，两者同时装着时由系统挑一个（一般是最近注册的）。
+  - macOS：只有 `scripts/release.sh` 生成的正式包在 Info.plist 里声明 `CFBundleURLTypes`（`quietmd`）。`scripts/preview.sh` 的预览包不声明（2026-11-27 定）：预览包和正式包同时存在时，链接只会交给正式版，`quiet open` 不会把用户带到一个开发版上。实测（LaunchServices 里注册两个按这两份 Info.plist 做的空壳包，问 `NSWorkspace URLsForApplicationsToOpenURL`）：候选只有正式包；换成改之前的预览 plist，两个都是候选。旧的预览包重新跑一次 `preview.sh` 就会被重新注册，不再认领 `quietmd`。
   - Windows：`packaging/windows/quiet-md.iss` 在 `HKA\Software\Classes\quietmd` 下注册 `URL Protocol`，命令是 `"quiet_md.exe" "%1"`，卸载时删除。验证：装好后在 PowerShell 跑 `Start-Process 'quietmd://open?view=trash'`，或 `quiet open --trash`，应用应打开回收站；`reg query HKCU\Software\Classes\quietmd\shell\open\command`（全局安装时是 HKLM）能看到命令。
   - Linux：`.desktop` 的 `MimeType` 加 `x-scheme-handler/quietmd`，`Exec` 改成 `%U`（文件以 `file://` 链接传入，`Incoming::from_args` 也接受）。验证：装好 .desktop 后 `xdg-mime query default x-scheme-handler/quietmd` 应返回 `com.s1dashu.quietmd.desktop`（没有就 `xdg-mime default com.s1dashu.quietmd.desktop x-scheme-handler/quietmd`），再 `xdg-open 'quietmd://open?view=trash'`。AppImage 要由 appimaged 之类的工具把 .desktop 装进系统才会注册。
+  - **开发时在 macOS 上手动测 URL scheme：**
+    - 只测应用怎么处理链接、不经过系统：harness 脚本里的 `url quietmd://…` 步骤（`tools/harness/README.md`），和系统转交走同一个 `Workspace::open_link`。`quiet open … --dry-run` 打印出 CLI 生成的链接。
+    - 连系统转交一起测（推荐，用测试文档库）：`QUIET_MD_HOME=<临时目录> scripts/preview.sh` 起预览包，然后临时给它加上 scheme 并注册：
+      ```sh
+      app="dist-preview/Quiet.md Preview.app"; pb=/usr/libexec/PlistBuddy; ls=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+      $pb -c 'Add :CFBundleURLTypes array' -c 'Add :CFBundleURLTypes:0 dict' -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes array' -c 'Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string quietmd' "$app/Contents/Info.plist"
+      codesign --force --sign - "$app"; $ls -f "$app"
+      quiet open --trash        # 或 open 'quietmd://open?view=trash'
+      ```
+      测完重新跑一次 `scripts/preview.sh`（重写 Info.plist 并重新注册），预览包就不再认领 `quietmd`。同一台机器上还装着正式版时，两个都声明了 `quietmd`，系统挑哪个不固定（和是否在运行无关），在没装正式版的机器上测最确定。
+    - 用正式包测：`SIGNING_IDENTITY=- scripts/release.sh` 生成一个 ad-hoc 签名、不公证的正式包（`dist-release.*/quiet.md.app`），`lsregister -f` 注册后再 `quiet open …`。注意它就是正式版：从系统启动时没有 `QUIET_MD_HOME`，打开的是默认文档库。测完 `lsregister -u` 并删掉这个目录，链接回到装好的 Quiet.md。装着正式版时同样有两个候选。
   - 应用没有单实例：Windows 和 Linux 上，应用开着时再打开链接会另起一个进程（macOS 由系统交给正在运行的那个）。做单实例转发之前，这两个平台上的 `quiet open` 会多开一个窗口。
 
 ## GUI 操作 → CLI 命令
@@ -168,7 +179,7 @@
 | 数据表 | 行、字段、视图、筛选排序分组、统计、导入导出 | 已有 `quiet table …`；缺复制记录、字段、视图（小） |
 | 画板 | 列出、加、删元素 | 已有 `quiet board`；缺对齐、图层、复制、导出 SVG（中） |
 
-`quiet call open`（返回文档信息，脚本里的 `lib.doc` 用它）和 `quiet open`（在应用里打开）同名不同义，`quiet open` 不经过 `Session::call`，脚本和 MCP 里也没有它：在应用里开窗口不该在沙箱脚本里发生。
+底层操作 `load`（`quiet call load`，返回文档的路径、标题、rev 等，脚本里的 `lib.doc` 用它把文档载入脚本）和 `quiet open`（在应用里打开）是两回事。`load` 原来叫 `open`，2026-11-27 改名，免得和 `quiet open` 混淆。旧名 `open` 作为别名保留一个版本：`quiet call open`、`lib.call("open")` 仍可用，help 里不再列出，每次调用在 stderr 提示改用 `load`，下一个版本删除。`quiet open` 不经过 `Session::call`，脚本和 MCP 里也没有它：在应用里开窗口不该在沙箱脚本里发生。
 
 ## 分发
 

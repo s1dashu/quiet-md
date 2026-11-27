@@ -478,7 +478,9 @@ impl Session {
         match op {
             "ls" => self.ls(a),
             "find" => self.find(a),
-            "open" => { let i = self.doc_arg(a)?; Ok(self.info(i)) }
+            "load" => { let i = self.doc_arg(a)?; Ok(self.info(i)) }
+            // `open` until 0.3: `quiet open` is now showing a document in the app.
+            "open" => { eprintln!("quiet: operation \"open\" is now \"load\" (open will stop working in a later version)"); self.call("load", a) }
             "outline" => self.outline(a),
             "read" => self.read(a),
             "blocks" => self.blocks(a),

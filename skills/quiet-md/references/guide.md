@@ -201,7 +201,7 @@ Top-level `await` and `return` work; a returned value is printed. `help()` and
 - `lib.mkdir(name, {folder})`
 - `lib.check()` → `{documents, issues: [{path, code, message}]}`
 - `lib.trash()` → `[{id, title, folder, deleted}]`; `lib.untrash(name)`
-- `lib.call(op, args)` → any operation, as `quiet call`
+- `lib.call(op, args)` → any operation, as `quiet call`; `load` is the one `lib.doc` uses (a document's path, title, rev… loaded into the script). It used to be called `open`, a name that still works for one more version, with a warning; `quiet open` is something else: it shows a document in the app
 - `doc.path`, `doc.title`, `doc.kind`, `doc.rev`, `doc.block_count`
 - `doc.outline()` → `{headings: [{ref, level, text, chars}], top?, chars, …}`
 - `doc.blocks({kind, grep, done, within})` → `[{ref, id, kind, text, depth, level?, done?, children?}]`

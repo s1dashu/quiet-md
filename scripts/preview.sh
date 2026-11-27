@@ -72,12 +72,10 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>LSHandlerRank</key><string>Alternate</string>
     <key>LSItemContentTypes</key><array><string>public.folder</string></array>
   </dict></array>
-  <key>CFBundleURLTypes</key><array><dict>
-    <key>CFBundleURLName</key><string>com.s1dashu.quietmd.open</string>
-    <key>CFBundleURLSchemes</key><array><string>quietmd</string></array>
-  </dict></array>
 </dict></plist>
 PLIST
+# No CFBundleURLTypes: quietmd:// links (`quiet open`) go to the installed Quiet.md only, never to
+# this preview. To try them against a build, see docs/design/CLI.md (测试 URL scheme).
 codesign --force --sign - "$app" >/dev/null 2>&1 || true
 # The Dock and Finder cache a bundle's icon by path: tell them it changed.
 touch "$app"

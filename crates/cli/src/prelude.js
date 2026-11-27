@@ -79,7 +79,7 @@ class Doc {
 globalThis.lib = {
   ls(folder, o = {}) { if (typeof folder === "object" && folder) { o = folder; folder = o.folder; } return __call("ls", { folder, recursive: o.recursive, kind: o.kind }); },
   find(query, o = {}) { return __call("find", { query, folder: o.folder ?? o.in, limit: o.limit }); },
-  doc(path, o = {}) { return new Doc(__call("open", { doc: path, rev: o.rev })); },
+  doc(path, o = {}) { return new Doc(__call("load", { doc: path, rev: o.rev })); },
   create(title, o = {}) { const r = __call("create", { title, folder: o.folder ?? o.in, md: o.md, markdown: o.markdown, kind: o.kind, csv: o.csv, fields: o.fields }); return r.key ? new Doc(r) : r; },
   mkdir(name, o = {}) { return __call("mkdir", { name, folder: o.folder ?? o.in }); },
   check() { return __call("check"); },

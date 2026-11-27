@@ -813,6 +813,23 @@ fn open_hands_over_a_link() {
     assert!(matches!(fdl_core::app_url::Target::parse(links.lines().last().unwrap()), Ok(fdl_core::app_url::Target::Doc { .. })));
 }
 
+/// `load` is the operation lib.doc uses; `open`, its old name, still works for now and says so.
+#[test]
+fn load_is_the_operation_and_open_its_old_name() {
+    let lib = library(&[("Plan", PLAN)]);
+    let run = |args: &[&str]| quiet(&lib, args);
+    let loaded = run(&["--json", "call", "load", r#"{"doc": "Plan"}"#]);
+    assert!(loaded.status.success() && loaded.stderr.is_empty(), "{}", String::from_utf8_lossy(&loaded.stderr));
+    let old = run(&["--json", "call", "open", r#"{"doc": "Plan"}"#]);
+    assert!(old.status.success());
+    assert_eq!(old.stdout, loaded.stdout);
+    assert!(String::from_utf8_lossy(&old.stderr).contains("\"load\""), "{}", String::from_utf8_lossy(&old.stderr));
+    let script = run(&["run", "-e", "return lib.doc('Plan').title"]);
+    assert!(script.status.success() && script.stderr.is_empty(), "{}", String::from_utf8_lossy(&script.stderr));
+    let help = String::from_utf8_lossy(&run(&["help", "call"]).stdout).to_string();
+    assert!(help.contains(" load ") && !help.contains(" open "), "{help}");
+}
+
 /// 置顶 and 创建副本, as the document's menu does them.
 #[test]
 fn pins_and_duplicates() {

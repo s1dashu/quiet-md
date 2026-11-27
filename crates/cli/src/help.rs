@@ -262,14 +262,16 @@ is written. Top-level await and return work; a returned value is printed.
     (&["call"], "quiet call OP [JSON|-]
 
 Any operation by its name with JSON arguments, as `lib.call` in a script.
-Operations: ls find open outline read blocks links check history trash_list
+Operations: ls find load outline read blocks links check history trash_list
 (reading); insert replace remove move set create mkdir rename mv trash
 restore untrash import table table_add table_update table_delete
 table_import table_field_add table_field_change table_field_delete
 table_views table_view_add table_view_set table_view_rename
 table_view_delete table_new table_rename table_remove board board_add
 board_remove. Arguments are the commands' options by name, the
-document as \"doc\" and a block as \"at\".
+document as \"doc\" and a block as \"at\". `load` is what lib.doc does:
+a document's path, title and rev loaded into the script (not shown in the
+app; that is `quiet open`).
 
   quiet call blocks '{\"doc\": \"周报\", \"kind\": \"todo\", \"done\": false}'"),
     (&["mcp"], "quiet mcp [--library DIR]
@@ -298,7 +300,8 @@ block selected (REF as `quiet read` takes it: #3~k7f2, #2.1 or a heading's
 text), a folder's page (a top-level folder's name opens its own), or the
 trash (after `quiet rm`, say). `quiet new … --open` opens what it made. Quiet.md
 is launched if it isn't running. It goes through a quietmd:// link, which only
-navigates: it prints the link; --dry-run prints it without opening it. With
+navigates: it prints the link; --dry-run prints it without opening it. The
+link goes to the installed Quiet.md (a development preview does not take them). With
 --library DIR, that folder must be open in Quiet.md (`quiet folders add`).
 
   quiet open 工作/周报#风险
