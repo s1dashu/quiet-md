@@ -348,9 +348,20 @@ pub fn start(window: &mut Window, cx: &mut App) {
                     // the step, then (its effects and observers through, as
                     // after a real event) the frame
                     let t0 = Instant::now();
-                    let _ = handle.update(cx, |_, window, cx| {
+                    let _ = handle.update(cx, |root, window, cx| {
                         BENCHING.store(true, std::sync::atomic::Ordering::Relaxed);
-                        run(scmd, srest, window, cx);
+                        // `switch`: the next document of the folder the one in front is in (a document switch).
+                        if scmd == "switch" && let Ok(ws) = root.downcast::<crate::app::Workspace>() {
+                            ws.update(cx, |w, cx| {
+                                let Some(cur) = w.current.clone() else { return };
+                                let parent = w.entries.iter().find(|e| e.id == cur).and_then(|e| e.meta.parent.clone());
+                                let docs: Vec<String> = w.entries.iter().filter(|e| e.meta.parent == parent && e.meta.folder.is_none() && e.meta.kind.is_doc()).map(|e| e.id.clone()).collect();
+                                let at = docs.iter().position(|d| *d == cur).map_or(0, |i| (i + 1) % docs.len());
+                                if let Some(next) = docs.get(at).cloned() { w.open(&next, window, cx); }
+                            });
+                        } else {
+                            run(scmd, srest, window, cx);
+                        }
                         BENCHING.store(false, std::sync::atomic::Ordering::Relaxed);
                     });
                     let t1 = Instant::now();

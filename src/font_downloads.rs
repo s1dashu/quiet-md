@@ -167,6 +167,10 @@ pub fn fonts(id: &str) -> Option<Vec<&'static [u8]>> {
     Some(vec![f])
 }
 
+/// Whether `fonts` would give the font, without inflating the compiled-in Xiaolai (~100 ms on
+/// a phone) for a board that only asks, before any of its text needs it.
+pub fn available(id: &str) -> bool { with(id, |s| s.fonts.is_some()) || (id == XIAOLAI && embedded_xiaolai().is_some()) }
+
 /// A one-file font's bytes (Xiaolai).
 pub fn font(id: &str) -> Option<&'static [u8]> { fonts(id).and_then(|f| f.first().copied()) }
 

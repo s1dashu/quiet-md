@@ -311,7 +311,7 @@ impl Painter {
     /// hidden, as the text being edited; 0.2: about to be erased).
     #[allow(clippy::too_many_arguments)]
     pub fn paint_scene(&mut self, scene: &Scene, files: &BTreeMap<String, FileData>, canvas: Hsla, dim: &FxHashMap<String, f32>, view: View, clip: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-        if self.xiaolai != crate::font_downloads::font(crate::font_downloads::XIAOLAI).is_some() { self.xiaolai = !self.xiaolai; self.clear(); }
+        if self.xiaolai != crate::font_downloads::available(crate::font_downloads::XIAOLAI) { self.xiaolai = !self.xiaolai; self.clear(); }
         let m = measure(window);
         let visible = { let a = view.to_scene(clip.origin); let b = view.to_scene(clip.bottom_right()); [a[0], a[1], b[0], b[1]] };
         let b = bucket(view.zoom);
