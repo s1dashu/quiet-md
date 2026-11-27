@@ -23,6 +23,7 @@ mod menus;
 mod notes;
 mod panels;
 mod record;
+pub mod still;
 
 pub use fdl_core::table::*;
 

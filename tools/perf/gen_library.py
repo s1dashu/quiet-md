@@ -6,6 +6,7 @@ compilation that the benchmark opens, types into and scrolls.
     python3 tools/perf/gen_library.py /tmp/quiet-perf/library
     python3 tools/perf/gen_library.py --tall-start /tmp/quiet-perf/tall
     python3 tools/perf/gen_library.py --vault 15000 /tmp/quiet-big/vault   # 15,000 Markdown notes
+    python3 tools/perf/gen_library.py --tables 60 /tmp/quiet-perf/tables    # a folder of 60 数据库 (and 20 pages with one)
 
 `--tall-start` opens the compilation with three images, a 60-row table
 and two 120-line code blocks: rows far taller than the rest, which the
@@ -89,6 +90,26 @@ def vault(out, n):
     os.utime(os.path.join(out, "Inbox"), (t, t))
     print(f"{n} notes in {len(folders)} folders under {out}")
 
+
+def tables(out, n):
+    """A folder 数据库 of n 数据库 files (the guides' Reading list: 20 rows of
+    tags, people and stars) and n/3 pages, each with one of them as a block in it:
+    a folder page of database cards, the thumbnail test (docs/PERFORMANCE.md)."""
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../shared-mock/guides/src/07a-reading-list.sqlite")
+    d = os.path.join(out, "数据库")
+    os.makedirs(d, exist_ok=True)
+    data = open(src, "rb").read()
+    for i in range(n):
+        open(os.path.join(d, f"表 {i + 1:03d}.sqlite"), "wb").write(data)
+    for i in range(n // 3):
+        with open(os.path.join(d, f"页面 {i + 1:03d}.xml"), "w") as f:
+            f.write(f'<title>页面 {i + 1:03d}</title>\n<p>这一页里放着一张数据库。</p>\n<datatable src="数据库/表 {i + 1:03d}.sqlite" height="420"/>\n<p>表格下面的一段文字。</p>\n')
+    print(f"{n} tables and {n // 3} pages with one under {d}")
+
+
+if sys.argv[1:2] == ["--tables"]:
+    tables(sys.argv[3] if len(sys.argv) > 3 else "/tmp/quiet-perf/tables", int(sys.argv[2]))
+    sys.exit()
 
 if sys.argv[1:2] == ["--vault"]:
     vault(sys.argv[3] if len(sys.argv) > 3 else "/tmp/quiet-big/vault", int(sys.argv[2]))

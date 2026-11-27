@@ -57,10 +57,12 @@ const COLS: [Col; 3] = [Col::Modified, Col::Created, Col::Visited];
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
+/// The 数据库 blocks' grids in miniature, by the preview block's id.
+type Grids = HashMap<crate::model::BlockId, Rc<crate::table::still::Thumb>>;
 /// `tables`: the 数据库 files the page shows (their rows drawn in the card), saved apart from the page.
 /// `listed`: for a preview with a child-page list, the entries' generation and the card's own
 /// stamp it was built against; the same pair needs no new look at the page's siblings.
-struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String>, listed: (u64, u64) }
+struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, grids: Grids, has_subpages: bool, tables: Vec<String>, listed: (u64, u64) }
 type Thumb = Rc<ThumbContent>;
 
 /// The files of the 数据库 blocks in `blocks`, at any depth.
@@ -87,50 +89,57 @@ fn tables_time(srcs: &[String]) -> u64 {
     h.finish()
 }
 
-/// The first rows and columns of the 数据库 shown on cards, read off the main thread: reading
-/// a table of 30,000 records took 100-400 ms, in the frame that first drew its card.
-/// By file, table and view; kept while the file's time stays.
+/// The 数据库 shown on cards, their grids' top-left (`Still`) read off the main thread: reading a
+/// table of 30,000 records took 100-400 ms, in the frame that first drew its card. By file, table,
+/// view and whether it sits in a page; kept while the file's time stays, with its laid-out marks.
+type GridKey = (std::path::PathBuf, Option<String>, Option<String>, bool);
 #[derive(Default)]
-struct Grids {
-    done: HashMap<(std::path::PathBuf, Option<String>, Option<String>), (Option<std::time::SystemTime>, Rc<Vec<Vec<String>>>)>,
+struct CardGrids {
+    /// `None`: the file could not be read (asked again once its time changes); and when a card last
+    /// asked for it: past `KEPT` grids the longest unasked goes.
+    done: HashMap<GridKey, (Option<std::time::SystemTime>, Option<Rc<crate::table::still::Thumb>>, web_time::Instant)>,
     /// Asked for this frame, not yet being read.
-    asked: Vec<(std::path::PathBuf, fdl_core::table::TableRef, Option<std::time::SystemTime>)>,
-    reading: std::collections::HashSet<(std::path::PathBuf, Option<String>, Option<String>)>,
+    asked: Vec<(GridKey, fdl_core::table::TableRef, Option<std::time::SystemTime>)>,
+    reading: std::collections::HashSet<GridKey>,
     /// Grids come in so far, for `tables_time`.
     arrived: u64,
 }
-thread_local! { static GRIDS: std::cell::RefCell<Grids> = Default::default(); }
+thread_local! { static GRIDS: std::cell::RefCell<CardGrids> = Default::default(); }
+const KEPT: usize = 128;
 
-/// A card's grid of the 数据库 `r` (header first, up to 8 records and 5 columns), or an
-/// empty one while it is read (`fetch_card_grids`); a grid of an older file time stands in meanwhile.
-fn card_grid(root: &std::path::Path, r: &fdl_core::table::TableRef) -> Rc<Vec<Vec<String>>> {
+/// A card's grid of the 数据库 `r` (`inline`: a block in a page), or none while it is read
+/// (`fetch_card_grids`); a grid of an older file time stands in meanwhile.
+fn card_grid(root: &std::path::Path, r: &fdl_core::table::TableRef, inline: bool) -> Option<Rc<crate::table::still::Thumb>> {
     let path = root.join(&r.src);
-    let key = (path.clone(), r.table.clone(), r.view.clone());
     let time = modified(&path);
+    let key = (path, r.table.clone(), r.view.clone(), inline);
     GRIDS.with(|g| {
         let mut g = g.borrow_mut();
-        let have = g.done.get(&key).map(|(t, grid)| (*t == time, grid.clone()));
-        if have.as_ref().is_none_or(|(fresh, _)| !fresh) && !g.reading.contains(&key) && !g.asked.iter().any(|(p, a, _)| *p == path && a.table == r.table && a.view == r.view) {
-            g.asked.push((path, r.clone(), time));
+        let have = g.done.get_mut(&key).map(|(t, grid, used)| { *used = web_time::Instant::now(); (*t == time, grid.clone()) });
+        if have.as_ref().is_none_or(|(fresh, _)| !fresh) && !g.reading.contains(&key) && !g.asked.iter().any(|(k, _, _)| *k == key) {
+            g.asked.push((key, r.clone(), time));
         }
-        have.map(|(_, grid)| grid).unwrap_or_default()
+        have.and_then(|(_, grid)| grid)
     })
 }
 
-/// Reads the grids `card_grid` was asked for this frame on the background executor, and
-/// draws the window again as each comes in.
+/// Reads the grids `card_grid` was asked for this frame on the background executor (the file, its
+/// view run, cut to what a card shows), and draws the window again as each comes in; the main
+/// thread only lays the cut copy out.
 fn fetch_card_grids(cx: &mut Context<Workspace>) {
-    let asked = GRIDS.with(|g| { let mut g = g.borrow_mut(); let asked = std::mem::take(&mut g.asked); for (p, r, _) in &asked { g.reading.insert((p.clone(), r.table.clone(), r.view.clone())); } asked });
-    for (path, r, time) in asked {
+    let asked = GRIDS.with(|g| { let mut g = g.borrow_mut(); let asked = std::mem::take(&mut g.asked); for (k, _, _) in &asked { g.reading.insert(k.clone()); } asked });
+    let (rows, width) = crate::table::still::Thumb::room();
+    for (key, r, time) in asked {
         let root = crate::store::Store::active_dir();
-        let read = cx.background_executor().spawn({ let r = r.clone(); async move { let _s = crate::devtools::span("card-grid-read"); fdl_core::table::block_grid_head(&root, &r, 8, 5) } });
+        let read = cx.background_executor().spawn({ let r = r.clone(); async move { let _s = crate::devtools::span("card-grid-read"); fdl_core::table::block_still(&root, &r, rows, width) } });
         cx.spawn(async move |this, cx| {
-            let grid = read.await;
+            let still = read.await;
             GRIDS.with(|g| {
                 let mut g = g.borrow_mut();
-                let key = (path, r.table, r.view);
                 g.reading.remove(&key);
-                g.done.insert(key, (time, Rc::new(grid)));
+                let thumb = still.map(|s| crate::table::still::Thumb::new(s, &r, key.3));
+                if g.done.len() >= KEPT && !g.done.contains_key(&key) && let Some(old) = g.done.iter().min_by_key(|(_, (_, _, used))| *used).map(|(k, _)| k.clone()) { g.done.remove(&old); }
+                g.done.insert(key, (time, thumb, web_time::Instant::now()));
                 g.arrived += 1;
             });
             let _ = this.update(cx, |_, cx| cx.notify());
@@ -161,7 +170,7 @@ fn has_subpage_list(blocks: &[crate::model::Block]) -> bool {
     })
 }
 
-fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize, numbers: &EquationNumbers, eqnos: &mut EquationNumbers) -> Vec<crate::model::Block> {
+fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize, numbers: &EquationNumbers, eqnos: &mut EquationNumbers, grids: &mut Grids) -> Vec<crate::model::Block> {
     if depth > 8 { return vec![]; }
     let mut out = vec![];
     let mut sequence = 0;
@@ -174,7 +183,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
             BlockKind::Table(t) => {
                 let nr = t.rows.len().min(6); let nc = t.col_widths.len().min(6);
                 let rows = t.rows.iter().take(nr).enumerate().map(|(r, row)| row.iter().take(nc).enumerate().map(|(c, cell)| {
-                    crate::model::TableCell { blocks: thumb_blocks(&cell.blocks, budget, depth + 1, numbers, eqnos), bg: cell.bg.clone(), valign: cell.valign.clone(),
+                    crate::model::TableCell { blocks: thumb_blocks(&cell.blocks, budget, depth + 1, numbers, eqnos, grids), bg: cell.bg.clone(), valign: cell.valign.clone(),
                         colspan: cell.colspan.min((nc - c) as u32), rowspan: cell.rowspan.min((nr - r) as u32) }
                 }).collect()).collect();
                 BlockKind::Table(crate::model::Table { col_widths: t.col_widths.iter().take(nc).copied().collect(), header_rows: t.header_rows.min(nr), header_col: t.header_col, rows })
@@ -197,16 +206,6 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                 kind
             }
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
-            // a 数据库 (a table file's card, or one in a page): its first rows and columns as a table, header first
-            BlockKind::DataTable(r) => {
-                let grid = card_grid(&crate::store::Store::active_dir(), r);
-                let (nr, nc) = (grid.len().min(9), grid.first().map_or(0, |h| h.len().min(5)));
-                if nr == 0 || nc == 0 { BlockKind::Table(crate::model::Table { col_widths: vec![], header_rows: 0, header_col: false, rows: vec![] }) } else {
-                    let cell = |s: &str| crate::model::TableCell { blocks: vec![crate::model::Block::text(s)], ..crate::model::TableCell::empty() };
-                    let rows = grid.iter().take(nr).map(|row| (0..nc).map(|c| cell(row.get(c).map_or("", |s| s.as_str()))).collect()).collect();
-                    BlockKind::Table(crate::model::Table { col_widths: vec![crate::model::Table::DEFAULT_WIDTH * 1.4; nc], header_rows: 1, header_col: false, rows })
-                }
-            }
             kind => kind.clone(),
         };
         let text = b.text.slice(0..end);
@@ -236,13 +235,18 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
         }
         let mut copy = crate::model::Block::new(kind, preview);
         if let Some(n) = numbers.get(&b.id) { eqnos.insert(copy.id, *n); }
+        // a 数据库 in a page: the top-left of its grid, once read (the card is built again when it comes in or its file changes)
+        if let BlockKind::DataTable(r) = &b.kind && let Some(g) = card_grid(&crate::store::Store::active_dir(), r, true) { grids.insert(copy.id, g); }
         if let BlockKind::Ordered { seq } = &mut copy.kind { sequence = seq.unwrap_or(sequence + 1); *seq = Some(sequence); } else { sequence = 0; }
         copy.bg = b.bg.clone(); copy.align = b.align;
-        copy.children = thumb_blocks(&b.children, budget, depth + 1, numbers, eqnos);
+        copy.children = thumb_blocks(&b.children, budget, depth + 1, numbers, eqnos, grids);
         out.push(copy);
     }
     out
 }
+
+/// A 数据库 in a page's card is drawn no taller than the tallest card (`render_page_grid`).
+const GRID_ROOM: f32 = 420.;
 
 /// Folder page cards decode pictures at this share of the size they are drawn:
 /// a card is small and glanced at, so a softer picture costs nothing.
@@ -251,11 +255,11 @@ const THUMB: f32 = 0.75;
 /// Long edge drawn for a picture `w` wide with this width / height `ratio`.
 fn thumb_long(w: f32, ratio: f32) -> f32 { (if ratio >= 1. { w } else { w / ratio }) * THUMB }
 
-fn thumb_block(b: &crate::model::Block, depth: usize, inherited: Hsla, quote: bool, eqnos: &EquationNumbers) -> AnyElement {
-    thumb_block_in(b, depth, inherited, quote, false, 0, eqnos)
+fn thumb_block(b: &crate::model::Block, depth: usize, inherited: Hsla, quote: bool, th: &ThumbContent) -> AnyElement {
+    thumb_block_in(b, depth, inherited, quote, false, 0, th)
 }
 
-fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote: bool, cell: bool, list_depth: usize, eqnos: &EquationNumbers) -> AnyElement {
+fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote: bool, cell: bool, list_depth: usize, th: &ThumbContent) -> AnyElement {
     let s = bs::SCALE;
     let metrics = bs::typography(&b.kind);
     let (font_size, line_height) = if cell && !matches!(b.kind, BlockKind::Heading { .. } | BlockKind::Code { .. }) { (14., 22.) } else { (metrics.size, metrics.line_height) };
@@ -293,7 +297,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             let mut body = div().flex_1().min_w_0().flex().flex_col();
             if depth < 8 { for (i, child) in b.children.iter().enumerate() {
                 let gap = if i == 0 { 0. } else { bs::gap(&b.children[i - 1].kind).1.max(bs::gap(&child.kind).0) };
-                body = body.child(div().mt(px(gap * s)).child(thumb_block_in(child, depth + 1, tc, quote, cell, list_depth, eqnos)));
+                body = body.child(div().mt(px(gap * s)).child(thumb_block_in(child, depth + 1, tc, quote, cell, list_depth, th)));
             } }
             let first_line = b.children.first().map(|b| bs::typography(&b.kind).line_height).unwrap_or(theme::BODY_LINE);
             return node.relative().p(px(bs::INSET * s)).rounded(px(bs::CALLOUT_RADIUS * s)).border(px(s)).border_color(bs::border(border.as_ref().map(|c| c.0.as_str()))).bg(bs::fill(bg.as_ref().map(|c| c.0.as_str())))
@@ -337,7 +341,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
                     .map(|d| match value.valign.as_deref() { Some("middle") => d.justify_center(), Some("bottom") => d.justify_end(), _ => d });
                 for (i, child) in value.blocks.iter().enumerate() {
                     let gap = if i == 0 { 0. } else { bs::gap(&value.blocks[i - 1].kind).1.min(6.).max(bs::gap(&child.kind).0.min(8.)) };
-                    col = col.child(div().mt(px(gap * s)).child(thumb_block_in(child, depth + 1, color, quote, true, 0, eqnos)));
+                    col = col.child(div().mt(px(gap * s)).child(thumb_block_in(child, depth + 1, color, quote, true, 0, th)));
                 }
                 table_el = table_el.child(col);
             }
@@ -368,6 +372,8 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             return node.h(px(bd.height * s)).rounded(px(8. * s)).border(px(s)).border_color(Theme::line_border()).bg(crate::board::render::canvas_color(bd)).overflow_hidden()
                 .child(canvas(|_, _, _| {}, move |bounds, _, window, cx| crate::board::render::paint_card(&board, bounds, window, cx)).size_full()).into_any_element();
         }
+        // a 数据库: its grid as it shows, cut at the tallest card
+        BlockKind::DataTable(_) => return node.children(th.grids.get(&b.id).map(|g| g.element(s, GRID_ROOM))).into_any_element(),
         BlockKind::Raw { tag, .. } => return node.p(px(8. * s)).rounded(px(8. * s)).bg(Theme::bg_overlay()).text_color(Theme::text_caption()).child(crate::localized_format!("<{tag}> 已保留的内容", "<{tag}> Preserved content")).into_any_element(),
         _ => {}
     }
@@ -395,7 +401,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
             _ => None,
         };
         let text = if b.text.runs.iter().any(|r| r.marks.inline.as_ref().is_some_and(|i| i.equation().is_some())) {
-            text_preview::PreviewText { text: b.text.clone(), runs, size: font_size * s, line_height: line_height * s, align: b.align, eq_counter: eqnos.get(&b.id).copied().unwrap_or(0) }.into_any_element()
+            text_preview::PreviewText { text: b.text.clone(), runs, size: font_size * s, line_height: line_height * s, align: b.align, eq_counter: th.eqnos.get(&b.id).copied().unwrap_or(0) }.into_any_element()
         } else { StyledText::new(b.text.text.clone()).with_runs(runs).into_any_element() };
         node = node.child(div().flex().items_start().children(marker).child(div().min_w_0().flex_1().map(|d| match b.align { crate::model::Align::Center => d.text_center(), crate::model::Align::Right => d.text_right(), _ => d }).child(text)));
     }
@@ -405,7 +411,7 @@ fn thumb_block_in(b: &crate::model::Block, depth: usize, inherited: Hsla, quote:
         node = node.child(div().min_w_0().when(!matches!(b.kind, BlockKind::Grid), |d| d.mt(px(gap * s)))
             .when(nested, |d| d.pl(px(25. * s)))
             .when(matches!(b.kind, BlockKind::Grid), |d| d.flex().w_0().map(|mut d| { d.style().flex_grow = Some(match child.kind { BlockKind::Column { ratio } => ratio, _ => 1. }); d }))
-            .child(thumb_block_in(child, depth + 1, color, quote || matches!(b.kind, BlockKind::Quote), cell, list_depth + usize::from(nested), eqnos)));
+            .child(thumb_block_in(child, depth + 1, color, quote || matches!(b.kind, BlockKind::Quote), cell, list_depth + usize::from(nested), th)));
     } }
     node.into_any_element()
 }
@@ -736,7 +742,7 @@ impl Workspace {
         if let Some((m, t, used)) = self.folder_page.thumbs.borrow_mut().get_mut(&e.id)
             && *m == full_stamp {
             *used = web_time::Instant::now();
-            if t.has_subpages && t.listed != listed { *t = Rc::new(ThumbContent { blocks: t.blocks.clone(), eqnos: t.eqnos.clone(), has_subpages: true, tables: t.tables.clone(), listed }); }
+            if t.has_subpages && t.listed != listed { *t = Rc::new(ThumbContent { blocks: t.blocks.clone(), eqnos: t.eqnos.clone(), grids: t.grids.clone(), has_subpages: true, tables: t.tables.clone(), listed }); }
             return t.clone();
         }
         let _s = crate::devtools::span("thumb-miss");
@@ -753,11 +759,18 @@ impl Workspace {
             }
         }
         let mut budget = 32;
-        let mut eqnos = HashMap::new();
+        let (mut eqnos, mut grids) = (HashMap::new(), HashMap::new());
         let doc = { let _s = crate::devtools::span("thumb-load"); self.store.load(e.note.as_deref().unwrap_or(&e.id)) };
         let loaded = doc.as_ref().map(|doc| {
+            // a table file: its grid, the card's whole face (its title is the card's)
+            if e.meta.kind == crate::store::DocKind::Table {
+                return doc.blocks.iter().filter_map(|b| match &b.kind {
+                    BlockKind::DataTable(r) => { let g = card_grid(&crate::store::Store::active_dir(), r, false)?; let copy = b.clone(); grids.insert(copy.id, g); Some(copy) }
+                    _ => None,
+                }).collect();
+            }
             let numbers = crate::editor::equation_numbers(doc);
-            thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
+            thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos, &mut grids)
         });
         let read = loaded.is_ok();
         let mut blocks = loaded.unwrap_or_default();
@@ -768,7 +781,7 @@ impl Workspace {
         // stamped with the tables just found, so the next frame finds it
         let tt = tables_time(&tables);
         let stamp = if has_subpages { tt.hash(&mut children_stamp); children_stamp.finish() } else { tt.hash(&mut page_stamp); page_stamp.finish() };
-        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, has_subpages, tables, listed });
+        let t: Thumb = Rc::new(ThumbContent { blocks, eqnos, grids, has_subpages, tables, listed });
         // A failed read (mid-write by another process, still in iCloud) is not
         // remembered: the card would stay blank until the document changes.
         if !read { return t; }
@@ -996,11 +1009,11 @@ impl Workspace {
     /// in a folder that show one (`folder_card.rs`). `pad`: its margin.
     pub(crate) fn thumb_page(&self, e: &Entry, pad: f32) -> Div {
         let thumb = self.thumb(e);
-        self.thumb_page_with(e, &thumb, pad, 0.)
+        self.thumb_page_with(e, &thumb, pad, 0., GRID_ROOM)
     }
 
-    /// `indent`: room before the title for 批量管理's checkbox.
-    fn thumb_page_with(&self, e: &Entry, thumb: &Thumb, pad: f32, indent: f32) -> Div {
+    /// `indent`: room before the title for 批量管理's checkbox; `h`: the card's height (a table file's grid is drawn to it).
+    fn thumb_page_with(&self, e: &Entry, thumb: &Thumb, pad: f32, indent: f32, h: f32) -> Div {
         if thumb.blocks.is_empty() && e.title.trim().is_empty() {
                 div()
                     .size_full()
@@ -1020,10 +1033,14 @@ impl Workspace {
                     let board = thumb.blocks.iter().find_map(|b| match &b.kind { BlockKind::Board(bd) => Some(bd.clone()), _ => None }).unwrap_or_default();
                     return p.child(canvas(|_, _, _| {}, move |bounds, _, window, cx| crate::board::render::paint_card(&board, bounds, window, cx)).flex_1().w_full());
                 }
+                // A 数据库: its grid's top-left, the rows the card has room for.
+                if e.meta.kind == crate::store::DocKind::Table {
+                    return p.children(thumb.blocks.first().and_then(|b| thumb.grids.get(&b.id)).map(|g| g.element(bs::SCALE, h - pad - 28.)));
+                }
                 for (i, block) in thumb.blocks.iter().enumerate() {
                     let (mt, _) = bs::gap(&block.kind);
                     let prev = if i == 0 { 0. } else { bs::gap(&thumb.blocks[i - 1].kind).1 };
-                    p = p.child(div().flex_none().mt(px(mt.max(prev) * bs::SCALE)).child(thumb_block(block, 0, Theme::text(), false, &thumb.eqnos)));
+                    p = p.child(div().flex_none().mt(px(mt.max(prev) * bs::SCALE)).child(thumb_block(block, 0, Theme::text(), false, thumb)));
                 }
                 p
             }
@@ -1038,7 +1055,7 @@ impl Workspace {
             let menu_on = self.row_menu.as_ref().is_some_and(|m| m.id == e.id);
             let check = self.card_check(e);
             // 批量管理: the title steps aside for the checkbox, which sits on its first line.
-            let page = self.thumb_page_with(e, &thumb, 18., if check.is_some() { CHECK_ROOM } else { 0. });
+            let page = self.thumb_page_with(e, &thumb, 18., if check.is_some() { CHECK_ROOM } else { 0. }, card_h);
             let arm = e.id.clone();
             // Carried away as a paper: its place stays as an empty slot of the
             // card's shape (no page, no cover), so nothing half-shows through.

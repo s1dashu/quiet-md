@@ -1,0 +1,22 @@
+# A folder page of 数据库 cards (docs/PERFORMANCE.md, "Database thumbnails").
+# Library: python3 tools/perf/gen_library.py --tables 60 <dir>: 60 table files and 20 pages with one.
+# The first `bench 1 noop` right after `row 数据库` times the frame that reads the cards in sight;
+# `bench 60 noop` idle frames once they are read; the wheels scroll the cards down, then back up (a positive step scrolls down; each step a frame).
+resize 1300 850
+wait 3000
+move 700 845
+row 数据库
+bench 1 noop
+wait 3000
+shot thumbs-0
+wait 1500
+bench 60 noop
+bench 80 wheel 800 500 40
+wait 1000
+shot thumbs-1
+wait 1500
+bench 80 wheel 800 500 -40
+wait 1000
+# the pointer over the cards: their hover rings fade in and out
+bench 60 move 420 300
+bench 60 move 660 300

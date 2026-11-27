@@ -384,3 +384,29 @@ grep -a 'frame-time\|busy' $TMPDIR/perf/hover/log
 # memory by scenario
 python3 tools/perf/mem_probe.py tools/perf/mem/library.txt $TMPDIR/perf/vault $TMPDIR/perf/mem after
 ```
+
+## Database thumbnails
+
+A folder page's card shows a 数据库 (a table file, or a block in a page) as the top-left of its grid in miniature, drawn as the grid draws it (`src/table/still.rs`). Built from the grid's own elements, a page of such cards tripled the frame time, so the miniature is laid out once into a list of fills, lines and shaped text and painted from that list each frame. The cut-down data (`table::Still`) is read and built on the background executor, as the text table was ([Folder pages](#folder-pages-hover-card-previews-and-opening)); the main thread only lays it out, once per card and look. This compares it with the plain text table of 8 rows × 5 columns the cards showed before.
+
+| Item | Value |
+|---|---|
+| Date | 2026-11-28 |
+| Source | `perf/round-2026-11` `46e0ae1` (before: its text table, read in the background; the same patches as `8bd9dfd` on 0.2.0) and `feat/db-thumb` on top of it (after), `cargo build --release --locked --features devtools` |
+| Machine | Mac mini, Apple M6, 16 GiB, macOS 27.2, shared with other builds (load average 2.6–3.6 during the runs) |
+| Window | 1300 × 850 pt |
+| Library | `gen_library.py --tables 60`: a folder of 60 table files (the guides' Reading list) and 20 pages with one as a block |
+
+[db-thumbs.txt](../tools/harness/examples/db-thumbs.txt) opens the folder, times the first frame after it, idle frames, scrolling down and back up (80 wheel steps each) and the pointer moving over cards. Three runs of each build, alternating; frame times in ms, p50 / p95, the range over the three runs:
+
+| Frames | Before | After |
+|---|---|---|
+| First frame on the folder | 4.6–4.8 | 6.4–7.9 |
+| Idle (`noop`) | 8.2–9.7 / 9.3–22.8 | 3.9–4.9 / 5.0–8.9 |
+| Scrolling down | 9.4–10.5 / 11.8–20.7 | 4.3–4.5 / 6.8–6.9 |
+| Scrolling up | 9.4–10.4 / 10.6–31.3 | 4.2–4.9 / 4.8–5.8 |
+| Pointer over cards | 8.0–9.8 / 9.3–22.3 | 4.0–4.9 / 4.4–9.5 |
+
+Both read the cards off the main thread, so the first frame waits on no file in either. The miniature's marks are laid out on the main thread when its data comes in, once per card; the first frame is likely the one that lays out the cards read by then. With four 数据库 of 30,000 records × 30 columns in a folder (`FDL_FRAMES`, two runs each), the reads take 116–294 ms on the background executor in both, and the slowest frame is 28–38 ms before and 10–14 ms after.
+
+Memory (`tools/perf/mem_probe.py`, two runs each): with the folder open, 99–100 MB before and 100 MB after; scrolled to its end, every one of the 80 cards drawn, 107–108 MB before and 127–128 MB after, about 250 KB a card. Each card keeps only the rows and columns it can show (`table::Still`) and its laid-out marks (most of it likely the shaped text of the rows in sight, not broken down further) until the file changes; at most 128 of them, as many as the previews, so at most about 32 MB.

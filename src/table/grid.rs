@@ -1047,9 +1047,9 @@ fn ghost_col(cell: AnyElement, left: f32, bg: Hsla) -> AnyElement {
 }
 
 /// Where a row's checkbox sits in its controls (and the header's, above them).
-const CHECK_X: f32 = (GUTTER_W - 1. - NUM_W) / 2.; // mid-way inside the gutter's right line, as its number
+pub(crate) const CHECK_X: f32 = (GUTTER_W - 1. - NUM_W) / 2.; // mid-way inside the gutter's right line, as its number
 /// The slot its number (or checkbox) takes.
-const NUM_W: f32 = 20.;
+pub(crate) const NUM_W: f32 = 20.;
 /// The row's handle before the checkbox and 展开 after it, each centred in what is left on its
 /// side, so the checkbox sits where the number does, mid-gutter.
 const GRAB_X: f32 = 0.;
