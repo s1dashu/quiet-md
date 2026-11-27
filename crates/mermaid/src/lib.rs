@@ -1,6 +1,6 @@
 //! Mermaid diagrams drawn as SVG, written for Quiet.md instead of a port of
 //! mermaid.js: flowcharts (`graph` / `flowchart`), state diagrams (read into
-//! the flowchart model) and sequence diagrams,
+//! the flowchart model), sequence diagrams and pie charts,
 //! parsed here, laid out in layers (flowcharts, `layout.rs`) or in lanes
 //! (sequence diagrams) and written as plain SVG that resvg draws: no CSS, no
 //! foreignObject, no markers. Colours come from the host (`Palette`) and text
@@ -10,6 +10,7 @@
 
 mod flow;
 mod layout;
+mod pie;
 mod seq;
 mod state;
 mod svg;
@@ -46,6 +47,8 @@ pub struct Palette {
     /// Frames of loop / alt / opt blocks and their label tabs.
     pub frame: String,
     pub frame_fill: String,
+    /// Fills of a chart's series (pie slices), used in turn.
+    pub series: Vec<String>,
 }
 
 impl Default for Palette {
@@ -55,6 +58,7 @@ impl Default for Palette {
             background: s("#ffffff"), text: s("#1f2329"), line: s("#646a73"),
             node_fill: s("#eef3fe"), node_border: s("#8fb0f8"), cluster_fill: s("#f5f6f7"), cluster_border: s("#dee0e3"),
             note_fill: s("#fef7d9"), note_border: s("#f7d67a"), activation_fill: s("#f5f6f7"), frame: s("#8f959e"), frame_fill: s("#f5f6f7"),
+            series: ["#bedbff", "#a4f4cf", "#ffd6a8", "#ddd6ff", "#ffc9c9", "#fff085", "#e0e0e0"].map(s).to_vec(),
         }
     }
 }
@@ -101,6 +105,7 @@ pub enum Kind {
     Flowchart,
     Sequence,
     State,
+    Pie,
 }
 
 /// A source line: its 1-based number and its text, trimmed.
@@ -150,6 +155,7 @@ pub fn kind(src: &str) -> Option<Kind> {
         "graph" | "flowchart" | "flowchart-v2" | "flowchart-elk" => Some(Kind::Flowchart),
         "sequenceDiagram" => Some(Kind::Sequence),
         "stateDiagram" | "stateDiagram-v2" => Some(Kind::State),
+        "pie" => Some(Kind::Pie),
         _ => None,
     }
 }
@@ -162,6 +168,7 @@ pub fn render(src: &str, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
         Some(Kind::Flowchart) => flow::render(&lines, title, style, m),
         Some(Kind::Sequence) => seq::render(&lines, title, style, m),
         Some(Kind::State) => state::render(&lines, title, style, m),
+        Some(Kind::Pie) => pie::render(&lines, title, style, m),
         None => {
             let word = first.text.split(|c: char| c.is_whitespace() || c == ';' || c == ':').next().unwrap_or("");
             err(first.no, format!("“{word}” diagrams aren't supported yet"))

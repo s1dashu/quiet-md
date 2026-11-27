@@ -132,6 +132,8 @@ pub fn style() -> Style {
         activation_fill: x(Theme::bg_overlay()),
         frame: x(Theme::text_caption()),
         frame_fill: x(Theme::bg_overlay()),
+        // the callout border tints: soft enough for text on them
+        series: ["blue", "green", "orange", "purple", "red", "yellow", "gray"].iter().map(|h| x(crate::theme::callout_border(h).unwrap_or(page))).collect(),
     };
     let style = fdl_mermaid::Style { font: font(), font_size: 14., colors };
     let key = format!("{style:?}");
@@ -320,7 +322,8 @@ mod tests {
         assert!(e.starts_with("line 2:"), "{e}");
         assert!(super::draw("hello there", &super::style(), &r).err().unwrap().contains("aren't supported"));
         assert!(super::draw("sequenceDiagram\n  A->>", &super::style(), &r).is_err());
-        assert!(super::draw("pie title x\n \"a\" : 1", &super::style(), &r).is_err());
+        assert!(super::draw("journey\n  title x", &super::style(), &r).err().unwrap().contains("aren't supported"));
+        assert!(super::draw("pie title x\n \"a\" : -1", &super::style(), &r).is_err());
     }
 
     /// Text is measured in the font drawn: a label's box is wider than its text.
@@ -386,5 +389,7 @@ mod tests {
         ("flowchart", "flowchart LR\n  A[开始] --> B{检查}\n  B -- 是 --> C[完成]\n  B -- 否 --> D[重试] --> B"),
         ("subgraphs", "flowchart TB\n  c1-->a2\n  subgraph one\n  a1-->a2\n  end\n  subgraph two\n  b1-->b2\n  end\n  one --> two"),
         ("sequence", "sequenceDiagram\n  participant U as 用户\n  U->>App: 打开\n  alt 命中\n    App-->>U: 304\n  else\n    App-->>U: 200\n  end\n  Note over U,App: 同步\n  loop 每 30 秒\n    App->>App: 心跳\n  end"),
+        ("state", "stateDiagram-v2\n  [*] --> 草稿\n  草稿 --> 审阅 : 提交\n  state 审阅 {\n    [*] --> 初审\n    --\n    [*] --> 复核\n  }\n  state c <<choice>>\n  审阅 --> c\n  c --> 发布 : 通过\n  c --> 草稿 : 退回\n  note right of 发布 : 对外可见\n  发布 --> [*]"),
+        ("pie", "pie showData title 来源\n  \"搜索\" : 42.5\n  \"直接访问\" : 30\n  \"推荐\" : 12"),
     ];
 }
