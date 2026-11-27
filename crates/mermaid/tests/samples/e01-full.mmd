@@ -1,0 +1,23 @@
+---
+title: 订单
+---
+erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE_ITEM : contains
+    PRODUCT ||--o{ LINE_ITEM : "appears in"
+    c[客户] }|..|{ ADDRESS : uses
+    CUSTOMER {
+        string id PK "客户编号"
+        string(99) name
+        string email UK
+    }
+    ORDER {
+        int id PK
+        string customer_id FK
+    }
+    subgraph 目录
+        PRODUCT
+    end
+    CAR 1 to zero or more DRIVER : allows
+    DRIVER:::hot
+    classDef hot fill:#f96

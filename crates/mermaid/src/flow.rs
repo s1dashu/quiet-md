@@ -27,6 +27,8 @@ pub struct Members {
     pub notes: Vec<String>,
     pub attrs: Vec<String>,
     pub methods: Vec<String>,
+    /// An ER entity's attributes instead: type, name, keys, comment.
+    pub table: Vec<[String; 4]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -807,6 +809,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
     let width = dw.max(title_w) + 2. * margin;
     let height = dh + top + margin;
     let mut doc = Doc::new(&style.font);
+    doc.paper = col.background.clone();
     if let Some(b) = &title_block { doc.text(b, width / 2., margin + b.h / 2., Anchor::Middle, &col.text); }
 
     // subgraphs, outermost first
@@ -990,7 +993,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
 }
 
 /// A class's box laid out: its compartments' text and size.
-struct ClassBox { notes: Block, name: Block, attrs: Block, methods: Block, w: f32, h: f32 }
+struct ClassBox { notes: Block, name: Block, attrs: Block, methods: Block, table: Vec<[Block; 4]>, cols: [f32; 4], w: f32, h: f32 }
 
 impl ClassBox {
     const PAD: f32 = 10.;
@@ -999,11 +1002,19 @@ impl ClassBox {
         let name = Block::new(name, 0., fs, true, m);
         let attrs = Block::new(&mb.attrs.join("\n"), 0., fs * 0.93, false, m);
         let methods = Block::new(&mb.methods.join("\n"), 0., fs * 0.93, false, m);
-        let w = [notes.w, name.w, attrs.w, methods.w].into_iter().fold(60., f32::max) + 2. * ClassBox::PAD + 8.;
+        let table: Vec<[Block; 4]> = mb.table.iter().map(|r| r.clone().map(|c| Block::new(&c, 0., fs * 0.93, false, m))).collect();
+        let mut cols = [0f32; 4];
+        for r in &table { for (k, b) in r.iter().enumerate() { cols[k] = cols[k].max(if b.is_empty() { 0. } else { b.w + 2. * ClassBox::PAD }); } }
+        let table_w: f32 = cols.iter().sum();
+        let w = [notes.w, name.w, attrs.w, methods.w].into_iter().fold(60., f32::max).max(table_w - 2. * ClassBox::PAD - 8.) + 2. * ClassBox::PAD + 8.;
+        // the table's last column takes what is left
+        if let Some(k) = cols.iter().rposition(|&c| c > 0.) { cols[k] += w - table_w; }
         let part = |b: &Block| if b.is_empty() { 12. } else { b.h + ClassBox::PAD };
-        let h = notes.h + name.h + 2. * ClassBox::PAD - 4. + part(&attrs) + part(&methods);
-        ClassBox { notes, name, attrs, methods, w, h }
+        let head = notes.h + name.h + 2. * ClassBox::PAD - 4.;
+        let h = head + if table.is_empty() { part(&attrs) + part(&methods) } else { table.iter().map(ClassBox::row_h).sum() };
+        ClassBox { notes, name, attrs, methods, table, cols, w, h }
     }
+    fn row_h(r: &[Block; 4]) -> f32 { r.iter().map(|b| b.h).fold(0., f32::max) + 10. }
     fn draw(&self, doc: &mut Doc, l: f32, t: f32, p: &Paint, color: &str) {
         doc.rect(l, t, self.w, self.h, 0., p);
         let q = Paint::new("none", &p.stroke, p.width);
@@ -1012,6 +1023,19 @@ impl ClassBox {
         y += self.notes.h;
         doc.text(&self.name, l + self.w / 2., y + self.name.h / 2., Anchor::Middle, color);
         y += self.name.h + ClassBox::PAD - 2.;
+        for r in &self.table {
+            let rh = ClassBox::row_h(r);
+            doc.line((l, y), (l + self.w, y), &q);
+            let mut x = l;
+            for (k, b) in r.iter().enumerate() {
+                if self.cols[k] <= 0. { continue }
+                if x > l { doc.line((x, y), (x, y + rh), &q); }
+                doc.text(b, x + ClassBox::PAD, y + rh / 2., Anchor::Start, color);
+                x += self.cols[k];
+            }
+            y += rh;
+        }
+        if !self.table.is_empty() { return }
         for b in [&self.attrs, &self.methods] {
             doc.line((l, y), (l + self.w, y), &q);
             let hh = if b.is_empty() { 12. } else { b.h + ClassBox::PAD };

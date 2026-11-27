@@ -35,10 +35,12 @@ impl Paint {
 pub struct Doc {
     pub out: String,
     pub font: String,
+    /// What hollow marks are filled with (the page), so lines under them hide.
+    pub paper: String,
 }
 
 impl Doc {
-    pub fn new(font: &str) -> Doc { Doc { out: String::with_capacity(8192), font: font.into() } }
+    pub fn new(font: &str) -> Doc { Doc { out: String::with_capacity(8192), font: font.into(), paper: "none".into() } }
 
     pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, p: &Paint) {
         let _ = write!(self.out, "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"", n(x), n(y), n(w.max(0.)), n(h.max(0.)));
@@ -98,6 +100,21 @@ impl Doc {
             }
             Head::Circle => { let c = back(len * 0.45, 0.); self.circle(c.0, c.1, len * 0.4, &Paint::new(color, color, 1.)); }
             Head::Triangle => self.polygon(&[tip, back(len * 1.2, len * 0.55), back(len * 1.2, -len * 0.55)], &Paint::new("none", color, 1.2)),
+            Head::One | Head::ZeroOne | Head::Many | Head::ZeroMany => {
+                let p = Paint::new("none", color, 1.2);
+                let w = len * 0.55;
+                let bar = |s: &mut Doc, t: f32| s.line(back(t, w), back(t, -w), &p);
+                if matches!(head, Head::Many | Head::ZeroMany) {
+                    // the foot: three toes from a point back on the line to the edge
+                    let heel = back(len * 1.2, 0.);
+                    for k in [-1., 0., 1.] { self.line(heel, back(0., w * 1.1 * k), &p); }
+                } else { bar(self, len * 0.5); }
+                if matches!(head, Head::One | Head::Many) { bar(self, len * 1.5); } else {
+                    let c = back(len * 1.95, 0.);
+                    let paper = self.paper.clone();
+                    self.circle(c.0, c.1, len * 0.45, &Paint::new(&paper, color, 1.2));
+                }
+            }
             Head::Diamond | Head::FilledDiamond => {
                 let fill = if head == Head::Diamond { "none" } else { color };
                 self.polygon(&[tip, back(len * 0.9, len * 0.45), back(len * 1.8, 0.), back(len * 0.9, -len * 0.45)], &Paint::new(fill, color, 1.2));
@@ -130,6 +147,8 @@ pub enum Head {
     None, Arrow, Open, Circle, Cross,
     // class diagrams: inheritance / realization, aggregation, composition
     Triangle, Diamond, FilledDiamond,
+    // ER diagrams' crow's feet: exactly one, zero or one, one or more, zero or more
+    One, ZeroOne, Many, ZeroMany,
 }
 
 /// A smooth path through `pts` (d3's `curveBasis`, the curve Mermaid draws

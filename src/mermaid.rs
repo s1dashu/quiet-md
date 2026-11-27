@@ -391,6 +391,7 @@ mod tests {
         ("sequence", "sequenceDiagram\n  participant U as 用户\n  U->>App: 打开\n  alt 命中\n    App-->>U: 304\n  else\n    App-->>U: 200\n  end\n  Note over U,App: 同步\n  loop 每 30 秒\n    App->>App: 心跳\n  end"),
         ("state", "stateDiagram-v2\n  [*] --> 草稿\n  草稿 --> 审阅 : 提交\n  state 审阅 {\n    [*] --> 初审\n    --\n    [*] --> 复核\n  }\n  state c <<choice>>\n  审阅 --> c\n  c --> 发布 : 通过\n  c --> 草稿 : 退回\n  note right of 发布 : 对外可见\n  发布 --> [*]"),
         ("class", "classDiagram\n  class 订单 {\n    <<entity>>\n    +String id\n    +total() Money\n  }\n  客户 \"1\" --> \"*\" 订单 : 下单\n  订单 *-- 明细\n  支付 <|.. 卡支付\n  订单 ..> 支付"),
+        ("er", "erDiagram\n  客户 ||--o{ 订单 : 下单\n  订单 ||--|{ 明细 : 包含\n  客户 {\n    string id PK \"编号\"\n    string 姓名\n  }\n  商品 }|..|{ 明细 : 出现在"),
         ("pie", "pie showData title 来源\n  \"搜索\" : 42.5\n  \"直接访问\" : 30\n  \"推荐\" : 12"),
     ];
 }
