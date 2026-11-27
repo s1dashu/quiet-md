@@ -28,7 +28,7 @@ pub(super) const META: &str = "meta";
 pub(super) const FOLDER_ITEM: &str = "_root";
 /// The fields of an item this build reads and writes; others (a newer
 /// build's) are kept as they are.
-pub(super) const KNOWN: &[&str] = &["path", "created", "modified", "pinned", "starred", "order", "root_order", "width", "catalogue_closed", "reading", "info", "refs_hidden", "kept"];
+pub(super) const KNOWN: &[&str] = &["path", "created", "modified", "pinned", "starred", "pin_order", "order", "root_order", "width", "catalogue_closed", "reading", "info", "refs_hidden", "kept"];
 
 type Fields = BTreeMap<String, (Value, u64)>;
 

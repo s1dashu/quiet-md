@@ -23,6 +23,15 @@ fn group_gaps(rows: &[Row]) -> Vec<f32> {
     std::iter::once(0.).chain(rows.iter().enumerate().map(|(i, r)| { if i > 0 && r.depth == 0 { acc += crate::sidebar::TOP_GAP; } acc })).collect()
 }
 
+/// Where a top-level folder's heading dragged to `y` (its middle, in the list) goes among `rows`
+/// (the others'): before the heading whose top is nearest, or after the last group.
+fn top_slot(rows: &[Row], g: &[f32], y: f32) -> usize {
+    // how far slot `i`'s middle (row `i`'s, as it stands with no slot open) is from `y`
+    let off = |i: usize| (i as f32 * PITCH + g[(i + 1).min(rows.len())] + crate::sidebar::ROW_H / 2. - y).abs();
+    rows.iter().enumerate().filter(|(_, r)| r.depth == 0).map(|(i, _)| i).chain([rows.len()])
+        .min_by(|a, b| off(*a).total_cmp(&off(*b))).unwrap_or(rows.len())
+}
+
 /// A row of the tree; its entry is shared with the cached rows (`RowCache`).
 #[derive(Clone)]
 struct Row { entry: Rc<Entry>, depth: usize }
@@ -197,6 +206,8 @@ pub(crate) struct SidebarDrag {
     pub icon_alt: bool,
     /// The tree's rows, and the folders with something in them (they get a chevron).
     rows: std::cell::RefCell<RowCache>,
+    /// 置顶's rows, dragged into an order of their own (`pin_drag`).
+    pub pins: crate::pin_drag::PinRows,
 }
 
 impl SidebarDrag {
@@ -223,7 +234,7 @@ pub(crate) fn row_face(e: &Entry) -> Div {
             .child(ui_text(crate::settings::display_title(&e.title))))
 }
 
-fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
+pub(crate) fn faded(shadows: Vec<BoxShadow>, a: f32) -> Vec<BoxShadow> {
     shadows.into_iter().map(|mut s| { s.color = s.color.opacity(a); s }).collect()
 }
 
@@ -262,8 +273,9 @@ impl Workspace {
     pub(crate) fn move_folder_drag(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(d) = self.folder_drag.active.as_mut() else { return };
         d.at = at;
-        // A top-level folder's row is clicked, never dragged: top-level folders don't move inside one another.
-        if !d.started && crate::shared_store::top_of_row(&d.id).is_none() && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
+        // A top-level folder's row moves among the others only (`project_folder_drop`), never into one; in 批量操作 not at all.
+        let top = crate::shared_store::top_of_row(&d.id).is_some();
+        if !d.started && (!top || (self.batch.is_none() && self.store.shown_tops().len() > 1)) && (f32::from(at.x - d.start.x).hypot(f32::from(at.y - d.start.y)) >= 4.) {
             d.started = true; d.lift.to = 1.;
             self.folder_drag.icon_press = false;
             self.folder_drag.icon_alt = false;
@@ -282,6 +294,12 @@ impl Workspace {
         let g = group_gaps(&rows);
         let Some(d) = self.folder_drag.active.as_mut().filter(|d| d.started) else { return };
         let y = f32::from(d.at.y - d.offset.y - bounds.top()) + crate::sidebar::ROW_H / 2.;
+        if crate::shared_store::top_of_row(&d.id).is_some() {
+            // A top-level folder (its rows folded away under it): a slot before another's heading, or after the last.
+            d.index = top_slot(&rows, &g, y);
+            (d.depth, d.parent, d.hover) = (0, None, None);
+            return;
+        }
         // never out to the top-level folders' own level: what is moved stays inside one
         let desired = (d.initial_depth as i32 + (f32::from(d.at.x - d.start.x) / crate::sidebar::INDENT).round() as i32).max(1) as usize;
         // Hit the visible folder row with the pointer, including collapsed folders.
@@ -353,6 +371,7 @@ impl Workspace {
     }
 
     pub(crate) fn end_folder_drag(&mut self, cancel: bool, cx: &mut Context<Self>) {
+        if self.folder_drag.pins.active.is_some() { return self.end_pin_drag(cancel, cx); }
         let rows = self.drag_rows();
         // 自动排序 decides the order among siblings: a drop that only reorders them springs back.
         let sorted = self.folder_page.order().field != crate::folder_page::PageSort::Manual;
@@ -361,9 +380,19 @@ impl Workspace {
         if !d.started { self.folder_drag.active = None; cx.notify(); return; }
         let b = self.list_scroll.bounds();
         let cancel = cancel || d.at.x < b.left() || d.at.x > b.right() || d.at.y < b.top() || d.at.y > b.bottom();
-        let reorder = !cancel && sorted && held.as_ref() == Some(&d.parent);
-        let cancel = cancel || reorder;
+        let top = crate::shared_store::top_of_row(&d.id).map(str::to_string);
+        let reorder = !cancel && sorted && top.is_none() && held.as_ref() == Some(&d.parent);
         let before = rows.get(d.index).filter(|r| r.entry.meta.parent == d.parent).map(|r| r.entry.id.clone());
+        // A top-level folder: the order of the headings, whatever the sort; put back where it was, nothing to write.
+        let tops = top.as_ref().map(|k| {
+            let was: Vec<String> = self.store.top_folders().into_iter().map(|t| t.0).collect();
+            let mut now: Vec<String> = was.iter().filter(|x| *x != k).cloned().collect();
+            let at = before.as_deref().and_then(crate::shared_store::top_of_row).and_then(|b| now.iter().position(|x| x == b)).unwrap_or(now.len());
+            now.insert(at, k.clone());
+            (was, now)
+        });
+        let cancel = cancel || reorder || tops.as_ref().is_some_and(|(was, now)| was == now);
+        let Some(d) = self.folder_drag.active.as_mut() else { return };
         let mut movement = PendingMove { id: d.id.clone(), parent: d.parent.clone(), before, history: 0, joined: false };
         let depth = if cancel { d.original_depth } else { d.depth };
         let index = if cancel { d.original_index } else { d.index };
@@ -387,7 +416,13 @@ impl Workspace {
         self.folder_drag.slot = None;
         // A folder carried open comes back open: its rows open out under it.
         if self.expanded.contains(&movement.id) { self.folder_drag.reopen = Some(movement.id.clone()); }
-        if !cancel {
+        if !cancel && let Some((was, now)) = tops {
+            match self.store.arrange_tops(&now) {
+                Ok(()) => self.remember_places(crate::file_history::Places { pins: vec![], tops: Some((was, now)) }, crate::settings::tr("拖拽移动", "Drag move")),
+                Err(e) => self.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx),
+            }
+            self.tops_changed(cx);
+        } else if !cancel {
             if let Some(parent) = &movement.parent { self.expanded.insert(parent.clone()); }
             let file_before = self.entries.to_vec();
             self.apply_tree_move(&movement);
@@ -839,6 +874,7 @@ impl Workspace {
     }
 
     pub(crate) fn render_folder_drag_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if let Some(pin) = self.render_pin_drag_overlay(cx) { return Some(pin); }
         let d = self.folder_drag.active.as_ref().filter(|d| d.started)?;
         let mut layer = div().id("folder-drag-overlay").absolute().inset_0().occlude()
             .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, window, cx| {
@@ -868,12 +904,25 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{Entry, Row, slot_depth, takes_drop};
+    use super::{Entry, PITCH, Row, group_gaps, slot_depth, takes_drop, top_slot};
 
     fn row(kind: &str, depth: usize) -> Row {
         let meta = crate::store::Meta { folder: (kind != "doc").then(String::new), ..Default::default() };
         let note = (kind == "page").then(|| "note".to_string());
         Row { entry: Entry { id: kind.into(), meta, title: String::new(), icon: None, body: "".into(), reminders: vec![], links: vec![], note, top: String::new() }.into(), depth }
+    }
+
+    /// A top-level folder's heading lands before another's heading or after the last group, never inside one.
+    #[test]
+    fn a_top_level_folder_lands_between_the_others() {
+        // the other two: A (two rows open under it) and B (one)
+        let rows = [row("folder", 0), row("doc", 1), row("doc", 1), row("folder", 0), row("doc", 1)];
+        let g = group_gaps(&rows);
+        let mid = |i: usize| i as f32 * PITCH + g[i + 1] + crate::sidebar::ROW_H / 2.;
+        assert_eq!(top_slot(&rows, &g, mid(0) - 20.), 0);
+        assert_eq!(top_slot(&rows, &g, mid(1)), 0, "nearer A's heading than B's");
+        assert_eq!(top_slot(&rows, &g, mid(2) + 10.), 3);
+        assert_eq!(top_slot(&rows, &g, mid(4) + 20.), 5, "after the last group");
     }
 
     /// #418: a drop on a document, one with child pages too, reorders; only a folder takes it in.

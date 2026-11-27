@@ -38,6 +38,14 @@ pub struct Meta {
     pub modified: u64,
     #[serde(default)]
     pub pinned: bool,
+    /// Its place in 置顶, a fractional index across every top-level folder (`pins`);
+    /// `None` for a pin from before there was one (or another build's), placed by `pinned_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<String>,
+    /// When a pin without `pin_order` was made (ms): the stamp of its `pinned`, or an older
+    /// build's 收藏时间. Read, never written.
+    #[serde(skip)]
+    pub pinned_at: u64,
     /// Last time the document was opened, for 最近访问 (this computer only).
     #[serde(default)]
     pub opened: u64,
@@ -102,7 +110,7 @@ impl Meta {
     pub fn named_by_file(&self) -> bool { self.markdown || !self.kind.is_doc() }
     /// An older build's 收藏 is 置顶 (the maintainer, 2026-11-26): the next
     /// write says `pinned` and drops `starred`, so taking it again changes nothing.
-    pub(crate) fn take_star(&mut self) { if self.starred > 0 { self.pinned = true; self.starred = 0; } }
+    pub(crate) fn take_star(&mut self) { if self.starred > 0 { if !self.pinned { self.pinned_at = self.starred; } self.pinned = true; self.starred = 0; } }
 }
 
 /// What a library file holds. Whatever is not a document still lives in the
@@ -146,7 +154,7 @@ fn catalogue_closed_default() -> bool { true }
 impl Default for Meta {
     fn default() -> Self {
         Self {
-            folder: None, top_order: None, created: 0, modified: 0, pinned: false, opened: 0,
+            folder: None, top_order: None, created: 0, modified: 0, pinned: false, pin_order: None, pinned_at: 0, opened: 0,
             width: PageWidth::default(), catalogue_closed: true,
             parent: None, order: 0, starred: 0, reading: false,
             info: InfoRow::default(), refs_hidden: false, kept: false,
@@ -419,6 +427,8 @@ pub struct Store {
     /// until the first `list` is done, so it is not on the way to the first
     /// frame; `Some(true)` then, and the next `list` does it.
     clean_due: Option<bool>,
+    /// 收藏时间 by id from the FORMAT 4 index it was upgraded from (`index.json.v4`), read once (`date_pins`).
+    v4_stars: std::cell::OnceCell<HashMap<String, u64>>,
 }
 
 /// What `load_meta` would take in again is already in memory while no device
@@ -591,6 +601,11 @@ struct Attached {
     pinned: bool,
     #[serde(default, skip_serializing_if = "is_zero")]
     starred: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pin_order: Option<String>,
+    /// `Meta::pinned_at`, carried along; never on disk.
+    #[serde(skip)]
+    pinned_at: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     order: u64,
     #[serde(default, rename = "root_order", skip_serializing_if = "Option::is_none")]
@@ -613,12 +628,13 @@ type DiskIndex = BTreeMap<String, Attached>;
 
 impl Attached {
     fn of(id: &str, m: &Meta) -> Self {
-        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, order: m.order, top_order: m.top_order,
+        Attached { id: id.to_string(), created: m.created, modified: m.modified, pinned: m.pinned, starred: 0, pin_order: m.pin_order.clone(), pinned_at: m.pinned_at, order: m.order, top_order: m.top_order,
             width: m.width, catalogue_closed: m.catalogue_closed, reading: m.reading, info: m.info, refs_hidden: m.refs_hidden, kept: m.kept }
     }
     /// `starred` is read (`take_star`), and `of` writes it no more: saving drops it from the disk.
     fn meta(&self) -> Meta {
-        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, order: self.order, top_order: self.top_order,
+        Meta { created: self.created, modified: self.modified, pinned: self.pinned || self.starred > 0, pin_order: self.pin_order.clone(),
+            pinned_at: if self.pinned_at > 0 || self.pinned { self.pinned_at } else { self.starred }, order: self.order, top_order: self.top_order,
             width: self.width, catalogue_closed: self.catalogue_closed, reading: self.reading, info: self.info, refs_hidden: self.refs_hidden, kept: self.kept, ..Default::default() }
     }
 }
@@ -1474,7 +1490,7 @@ impl Store {
         let v5 = !flat && Self::format_at(&root) >= 5;
         let v6 = v5 && Self::format_at(&root) >= 6;
         let mut store = Store { file_changes: vec![], top_dir: root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(),
-            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None, v4_stars: Default::default() };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.index.values_mut().for_each(Meta::take_star);
@@ -1589,6 +1605,28 @@ impl Store {
         }
         *self.seen.get_mut() = seen;
         *self.merged.get_mut() = merged;
+        let mut index = std::mem::take(&mut self.index);
+        self.date_pins(&mut index);
+        self.index = index;
+    }
+
+    /// When each pin without a `pin_order` was made (`Meta::pinned_at`), so 置顶 lists them newest
+    /// first as before: an older build's 收藏时间 (on disk still, or in the FORMAT 4 index this
+    /// library was upgraded from, 0.1.14's), else the stamp of its `pinned`. Pins 0.1.14 had share
+    /// the upgrade's stamp, later than any 收藏时间 then: they come first, the former 收藏 after.
+    fn date_pins(&self, index: &mut HashMap<String, Meta>) {
+        // the placed too: one put back where it was by 撤销 is placed by it again
+        let undated = |m: &Meta| m.pinned && m.pinned_at == 0;
+        if !index.values().any(undated) { return }
+        let merged = self.merged.borrow();
+        let none = HashMap::new();
+        let stars = if !index.values().any(|m| undated(m) && m.pin_order.is_none()) { self.v4_stars.get().unwrap_or(&none) } else { self.v4_stars.get_or_init(|| {
+            let disk: DiskIndex = reread(&self.top_dir.join(INTERNAL).join("index.json.v4")).unwrap_or_default();
+            disk.into_iter().filter(|(_, a)| a.starred > 0 && !a.pinned).map(|(k, a)| (if a.id.is_empty() { meta::path_id(&k) } else { a.id }, a.starred)).collect()
+        }) };
+        for (id, m) in index.iter_mut().filter(|(_, m)| undated(m)) {
+            m.pinned_at = stars.get(id).copied().or_else(|| merged.items.get(id)?.get("pinned").map(|w| w.ts)).unwrap_or(0);
+        }
     }
 
     /// Whether `load_meta` has nothing to take in: no device file changed
@@ -1618,6 +1656,8 @@ impl Store {
         let absent = self.synced.borrow().as_ref().map(|s| s.absent.clone()).unwrap_or_default();
         disk.retain(|k, _| listed(k) && !absent.contains(k));
         let mut fresh = self.from_disk(&disk, &self.read_local());
+        drop(merged);
+        self.date_pins(&mut fresh);
         // `begin_write` puts back the times not written yet either way.
         for (id, t) in &self.view.borrow().opened { if let Some(m) = fresh.get_mut(id) { m.opened = m.opened.max(*t); } }
         let shape = |index: &HashMap<String, Meta>| {
@@ -1631,6 +1671,8 @@ impl Store {
                 *n += 1;
                 let placed = m.top_order.is_some() || m.order > 0;
                 (m.top_order, m.order, m.parent) = (None, if placed { *n } else { 0 }, None);
+                // made here or read back: either is when it was pinned, give or take the write
+                m.pinned_at = 0;
                 (k, (parent, m))
             }).collect::<BTreeMap<_, _>>()
         };
@@ -3961,10 +4003,20 @@ impl Store {
         Ok(self.index[id].clone())
     }
 
+    /// 置顶 on or off; on, placed by when (`Meta::pinned_at`), as a pin from before 置顶 had an order.
     pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> {
+        self.set_pin(id, pinned.then_some(None))
+    }
+
+    /// 置顶 `id` at `pin` (`Some(key)`: its `pin_order`, `Some(None)`: none, placed by when),
+    /// or off (`None`), in one write. A pin's place alone changes the same way.
+    pub fn set_pin(&mut self, id: &str, pin: Option<Option<String>>) -> Result<()> {
         let _lock = self.begin_write()?;
         if let Some(m) = self.index.get_mut(id) {
-            m.pinned = pinned;
+            // its stamp, give or take the write (`date_pins` reads that back); a place alone keeps it
+            if pin.is_none() { m.pinned_at = 0 } else if !m.pinned { m.pinned_at = meta::now_ms() }
+            m.pinned = pin.is_some();
+            m.pin_order = pin.flatten();
         }
         self.save_index()
     }
@@ -5935,6 +5987,75 @@ mod tests {
         STAY_4.with(|k| k.set(false));
     }
 
+    /// 置顶's order (`crate::pins`). A 0.1.14 library (FORMAT 4): its pins first, as 0.1.14 listed them
+    /// (last changed first), then its 收藏, latest first, also once the 收藏时间 are written away
+    /// (read again from `index.json.v4`). A new pin goes on top; a place is a key of the moved pin's
+    /// own, which another device reads the same; 取消置顶 drops it.
+    #[test]
+    fn pins_keep_an_order_of_their_own() {
+        let lib = Lib::new("pin-order");
+        STAY_4.with(|k| k.set(true));
+        let mut s = lib.open();
+        let [p1, p2, st1, st2, both, n] = ["钉一", "钉二", "藏一", "藏二", "都有", "新的"].map(|t| s.create_from(&doc(t)).unwrap());
+        drop(s);
+        let file = lib.0.join(".quiet/index.json");
+        let mut disk: serde_json::Value = reread(&file).unwrap();
+        for (_, e) in disk.as_object_mut().unwrap() {
+            let id = e["id"].as_str().unwrap().to_string();
+            // p2 changed last; st2 starred later than st1
+            let (pin, star, modified) = [(&p1, true, 0, 10), (&p2, true, 0, 20), (&st1, false, 1_600_000_000_000u64, 30), (&st2, false, 1_650_000_000_000, 5), (&both, true, 1_000, 15)]
+                .into_iter().find(|r| *r.0 == id).map_or((false, 0, 1), |r| (r.1, r.2, r.3));
+            e["pinned"] = pin.into(); e["modified"] = modified.into();
+            if star > 0 { e["starred"] = star.into(); }
+        }
+        crate::vfs::write(&file, serde_json::to_vec(&disk).unwrap()).unwrap();
+        STAY_4.with(|k| k.set(false));
+        let order = |s: &mut Store| crate::pins::sorted(&s.list()).into_iter().map(|e| e.id.clone()).collect::<Vec<String>>();
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // the next write drops `starred`: the order stands, from `index.json.v4`
+        s.set_width(&n, PageWidth::Wide).unwrap();
+        assert!(meta::load(&lib.0, "", &mut vec![]).get(&st1, "starred").is_none());
+        drop(s);
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // a new pin: on top
+        let list = s.list();
+        let key = crate::pins::top_key(&crate::pins::sorted(&list));
+        s.set_pin(&n, Some(Some(key))).unwrap();
+        assert_eq!(order(&mut s), [n.clone(), p2.clone(), both.clone(), p1.clone(), st2.clone(), st1.clone()]);
+        // st1 dragged under n: the first place among the unplaced places them all, in the order shown
+        let list = s.list();
+        let shown: Vec<(&str, Option<&str>)> = [&n, &st1, &p2, &both, &p1, &st2].iter().map(|id| { let e = list.iter().find(|e| &e.id == *id).unwrap(); (e.id.as_str(), e.meta.pin_order.as_deref()) }).collect();
+        let writes = crate::pins::keys_for(&shown);
+        assert_eq!(writes.len(), 5, "n keeps its key");
+        for (id, k) in writes { s.set_pin(&id, Some(Some(k))).unwrap(); }
+        assert_eq!(order(&mut s), [n.clone(), st1.clone(), p2.clone(), both.clone(), p1.clone(), st2.clone()]);
+        // then one move writes the moved pin alone
+        let list = s.list();
+        let shown: Vec<(&str, Option<&str>)> = [&n, &st1, &both, &p2, &p1, &st2].iter().map(|id| { let e = list.iter().find(|e| &e.id == *id).unwrap(); (e.id.as_str(), e.meta.pin_order.as_deref()) }).collect();
+        let writes = crate::pins::keys_for(&shown);
+        assert_eq!(writes.len(), 1);
+        let before = view(&lib);
+        for (id, k) in writes { s.set_pin(&id, Some(Some(k))).unwrap(); }
+        let after = view(&lib);
+        let changed: Vec<(&String, &String)> = after.iter().flat_map(|(id, f)| f.iter().map(move |(k, w)| (id, k, w))).filter(|(id, k, w)| before.get(*id).and_then(|b| b.get(*k)) != Some(*w)).map(|(id, k, _)| (id, k)).collect();
+        assert_eq!(changed.len(), 1, "{changed:?}");
+        assert_eq!(changed[0].1, "pin_order");
+        // another device, and this one again: the same order
+        let mut b = Store::open_as(lib.0.clone(), &library_key(&lib.0), dev("bbbb")).unwrap();
+        assert_eq!(order(&mut b), [n.clone(), st1.clone(), both.clone(), p2.clone(), p1.clone(), st2.clone()]);
+        drop(s);
+        let mut s = lib.open();
+        assert_eq!(order(&mut s), [n.clone(), st1.clone(), both.clone(), p2.clone(), p1.clone(), st2.clone()]);
+        // 取消置顶 drops its place; pinned again it is new, on top
+        s.set_pinned(&p1, false).unwrap();
+        assert!(meta::load(&lib.0, "", &mut vec![]).get(&p1, "pin_order").is_none());
+        let key = crate::pins::top_key(&crate::pins::sorted(&s.list()));
+        s.set_pin(&p1, Some(Some(key))).unwrap();
+        assert_eq!(order(&mut b), [p1.clone(), n.clone(), st1.clone(), both.clone(), p2.clone(), st2.clone()]);
+    }
+
     /// The old layout's `index.json` (FORMAT 3), moved to real folders: the same.
     #[test]
     fn a_format_3_star_is_a_pin() {
@@ -6320,7 +6441,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None, v4_stars: Default::default() };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }

@@ -1021,7 +1021,9 @@ impl Session {
                 }
                 Pending::Pin { id, on } => {
                     let path = self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default();
-                    self.lib_of(&id)?.set_pinned(&id, on).map_err(|e| fail("io", format!("{e:#}")))?;
+                    // on top of 置顶, as the app pins (`fdl_core::pins`)
+                    let pin = on.then(|| Some(fdl_core::pins::top_key(&fdl_core::pins::sorted(&self.entries))));
+                    self.lib_of(&id)?.set_pin(&id, pin).map_err(|e| fail("io", format!("{e:#}")))?;
                     self.refresh();
                     report.push(json!({ "path": path, "action": if on { "pinned" } else { "unpinned" } }));
                 }

@@ -149,17 +149,24 @@ impl Workspace {
         let mut fixed = div().flex_none().flex().flex_col().px(px(SB_X));
         let mut list = div().flex().flex_col().px(px(SB_X)).pb(px(8.));
         // Pinned docs are shortcuts: they stay in 我的文档 too.
-        // 置顶 follows the same order as the lists below it. Only the pinned are
-        // sorted: copying and sorting every entry each frame cost 3 ms in a big library.
-        let order = self.folder_page.order();
-        let mut pinned: Vec<&Entry> = self.entries.iter().filter(|e| e.meta.pinned).collect();
-        pinned.sort_by(|a, b| order.cmp(a, b));
+        // 置顶 has an order of its own, dragged by hand (`fdl_core::pins`, `pin_drag`), whatever
+        // the lists below are sorted by. Only the pinned are sorted: copying and sorting every
+        // entry each frame cost 3 ms in a big library.
+        let pinned: Vec<Entry> = fdl_core::pins::sorted(self.entries.iter()).into_iter().cloned().collect();
         if !pinned.is_empty() {
             fixed = fixed.child(self.section(0, crate::settings::text("置顶"), cx));
             if !self.folded[0] {
-                for e in pinned {
-                    fixed = fixed.child(self.doc_row(e, "pinned", 0, false, cx));
+                let ids: Vec<String> = pinned.iter().map(|e| e.id.clone()).collect();
+                let offsets = self.pin_offsets(&ids, window);
+                let mut rows = div().flex().flex_col()
+                    .on_mouse_move(cx.listener(|w, ev: &MouseMoveEvent, window, cx| {
+                        if w.folder_drag.pins.active.as_ref().is_some() { w.move_pin_drag(ev.position, ev.pressed_button == Some(MouseButton::Left), window, cx); }
+                    }))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|w, _, window, cx| w.finish_pin_click(window, cx)));
+                for (e, off) in pinned.iter().zip(offsets) {
+                    rows = rows.child(self.pin_row(&e.id, off, self.doc_row(e, "pinned", 0, false, cx)));
                 }
+                fixed = fixed.child(rows);
             }
             fixed = fixed.child(div().h(px(GROUP_GAP - SECTION_TOP)));
         }
@@ -431,7 +438,7 @@ impl Workspace {
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
+                cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
                     if w.rename.as_ref().is_some_and(|r| r.id == id) {
                         return;
                     }
@@ -443,8 +450,8 @@ impl Workspace {
                         return;
                     }
                     if in_lib { w.arm_folder_drag(&id, ev.position, cx); }
-                    // A 置顶 row opens on press.
-                    else if pinned { w.open(&id, window, cx); }
+                    // A 置顶 row opens when let go without moving, else it is dragged (`pin_drag`).
+                    else if pinned { w.arm_pin_drag(&id, ev.position, cx); }
                 }),
             )
             .on_mouse_down(

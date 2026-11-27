@@ -402,6 +402,14 @@ impl TopFolders {
         r.path.parent().is_some() && !system.into_iter().flatten().any(|d| canonical(&d) == canonical(&r.path))
     }
 
+    /// The top-level folders in the order of `keys` (the sidebar's, dragged by hand), written to
+    /// `folders.json`; one not named keeps its place after them.
+    pub fn arrange(&mut self, keys: &[String]) -> Result<()> {
+        let at = |k: &str| keys.iter().position(|x| x == k).unwrap_or(keys.len());
+        self.folders.sort_by_key(|r| at(&r.key));
+        self.save()
+    }
+
     pub fn folder(&self, key: &str) -> Option<&TopFolder> { self.folders.iter().find(|r| r.key == key) }
 
     /// Why top-level folder `key` keeps its name, for the menu: the folder a test run or preview
@@ -559,6 +567,19 @@ mod tests {
         assert!(a.join("in a.xml").fs_is_file() || a.join("in a.md").fs_is_file());
         let back = tops.add(&a).unwrap();
         assert!(tops.list().iter().any(|e| e.id == made && e.top == back), "same id after reopening");
+    }
+
+    /// The sidebar's headings dragged into another order (`arrange`): one not named keeps its place after them.
+    #[test]
+    fn folders_take_the_order_they_are_dragged_into() {
+        let (a, b, c) = (dir("ord-a"), dir("ord-b"), dir("ord-c"));
+        let mut tops = TopFolders { fixed: true, ..Default::default() };
+        let [ka, kb, kc] = [&a, &b, &c].map(|d| tops.add(d).unwrap());
+        let keys = |t: &TopFolders| t.folders.iter().map(|r| r.key.clone()).collect::<Vec<_>>();
+        tops.arrange(&[kc.clone(), ka.clone(), kb.clone()]).unwrap();
+        assert_eq!(keys(&tops), [kc.clone(), ka.clone(), kb.clone()]);
+        tops.arrange(&[kb.clone(), kc.clone()]).unwrap();
+        assert_eq!(keys(&tops), [kb, kc, ka]);
     }
 
     #[test]

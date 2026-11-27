@@ -1294,10 +1294,13 @@ impl Workspace {
 
     pub fn toggle_pin(&mut self, id: &str, cx: &mut Context<Self>) {
         let mut on = false;
+        // A new pin goes on top of 置顶 (`fdl_core::pins`).
+        let key = fdl_core::pins::top_key(&fdl_core::pins::sorted(self.entries.iter()));
         if let Some(e) = self.entries.edit().iter_mut().find(|e| e.id == id) {
             e.meta.pinned = !e.meta.pinned;
             on = e.meta.pinned;
-            let _ = self.store.set_pinned(id, e.meta.pinned);
+            e.meta.pin_order = on.then_some(key);
+            let _ = self.store.set_pin(id, on.then(|| e.meta.pin_order.clone()));
         }
         self.sort();
         self.row_menu = None;
@@ -2337,7 +2340,7 @@ impl Render for Workspace {
                 if ev.keystroke.key == "escape" && w.has_card_drag() {
                     w.cancel_card_drag(cx); cx.stop_propagation(); return;
                 }
-                if ev.keystroke.key == "escape" && w.folder_drag.active.is_some() {
+                if ev.keystroke.key == "escape" && (w.folder_drag.active.is_some() || w.folder_drag.pins.active.is_some()) {
                     w.end_folder_drag(true, cx); cx.stop_propagation(); return;
                 }
                 if w.record_shortcut(ev, cx) { return; }

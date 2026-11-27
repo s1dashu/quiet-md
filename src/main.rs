@@ -73,6 +73,7 @@ mod sidebar_drop;
 mod folder_card;
 mod folders;
 mod file_history;
+mod pin_drag;
 mod settings;
 mod table;
 mod l10n;

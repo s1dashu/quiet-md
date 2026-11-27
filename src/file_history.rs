@@ -8,7 +8,13 @@ struct Record { token: u64, label: &'static str, changes: Vec<FileDelta>, entrie
     across: Vec<Across>,
     /// Top-level folders this step took off the sidebar with their folder (deleted through the one
     /// holding them): back on it when undone, off again when redone.
-    tops: Vec<fdl_core::top_folders::TopFolderEntry> }
+    tops: Vec<fdl_core::top_folders::TopFolderEntry>,
+    /// Places only, no file touched: 置顶's (id, `pin_order` before, after) and the top-level folders'
+    /// order (keys before, after), dragged by hand.
+    places: Places }
+
+#[derive(Clone, Default)]
+pub(crate) struct Places { pub pins: Vec<(String, Option<String>, Option<String>)>, pub tops: Option<(Vec<String>, Vec<String>)> }
 
 /// A change as the window's rows have it, at a top-level folder's top level (under its row), not as its library does.
 fn rows_only(c: &FileDelta) -> bool {
@@ -119,10 +125,36 @@ impl Workspace {
         if changes.is_empty() { return 0; }
         self.file_history.next += 1;
         let token = self.file_history.next;
-        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![], tops: vec![] });
+        self.file_history.undo.push(Record { token, label, changes, entries, across: vec![], tops: vec![], places: Places::default() });
         if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
         self.file_history.redo.clear();
         token
+    }
+
+    /// A step that only places things (`Places`): undone and redone at once, without the libraries' file history.
+    pub(crate) fn remember_places(&mut self, places: Places, label: &'static str) {
+        if places.pins.is_empty() && places.tops.is_none() { return; }
+        self.file_history.next += 1;
+        let token = self.file_history.next;
+        self.file_history.undo.push(Record { token, label, changes: vec![], entries: vec![], across: vec![], tops: vec![], places });
+        if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
+        self.file_history.redo.clear();
+    }
+
+    /// `Places` back (undo) or again (redo): a pin no longer pinned stays as it is.
+    fn apply_places(&mut self, p: &Places, redo: bool, cx: &mut Context<Self>) -> anyhow::Result<()> {
+        let mut result = Ok(());
+        for (id, before, after) in &p.pins {
+            let key = if redo { after } else { before };
+            let Some(e) = self.entries.edit().iter_mut().find(|e| &e.id == id && e.meta.pinned) else { continue };
+            e.meta.pin_order = key.clone();
+            if let Err(err) = self.store.set_pin(id, Some(key.clone())) { result = Err(err); }
+        }
+        if let Some((before, after)) = &p.tops {
+            if let Err(err) = self.store.arrange_tops(if redo { after } else { before }) { result = Err(err); }
+            self.tops_changed(cx);
+        }
+        result
     }
 
     /// Fold `changes` into the newest record when it made one of `ids`: a
@@ -195,6 +227,18 @@ impl Workspace {
         let redo = self.file_history.requests.pop_front().unwrap();
         let record = if redo { self.file_history.redo.last() } else { self.file_history.undo.last() }.cloned();
         let Some(record) = record else { self.file_history.requests.clear(); return; };
+        if record.changes.is_empty() && record.across.is_empty() && record.tops.is_empty() {
+            let done = self.apply_places(&record.places, redo, cx);
+            if redo { self.file_history.redo.pop(); self.file_history.undo.push(record.clone()); }
+            else { self.file_history.undo.pop(); self.file_history.redo.push(record.clone()); }
+            match done {
+                Ok(()) => self.show_toast(&format!("{}{}", if redo { crate::settings::tr("已重做：", "Redone: ") } else { crate::settings::tr("已撤销：", "Undone: ") }, record.label), cx),
+                Err(e) => { self.file_history.requests.clear(); self.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx); }
+            }
+            self.sort();
+            cx.notify();
+            return self.run_file_history(window, cx);
+        }
         if !self.flush(cx) { self.file_history.requests.clear(); return; }
         for c in &record.changes {
             let content = c.before.is_none() || c.after.is_none() || c.before.as_ref().zip(c.after.as_ref()).is_some_and(|(a,b)| a.title != b.title);
@@ -314,7 +358,7 @@ mod tests {
     #[core::prelude::v1::test]
     fn the_folders_undo_only_without_the_document() {
         let mut h = FileHistory::default();
-        h.undo.push(Record { token: 1, label: "创建副本", changes: vec![], entries: vec![], across: vec![], tops: vec![] });
+        h.undo.push(Record { token: 1, label: "创建副本", changes: vec![], entries: vec![], across: vec![], tops: vec![], places: Places::default() });
         let mut table = fdl_core::table::Doc::new(fdl_core::table::Base::blank_seeded(0, 2));
         let (t, f) = (table.base.tables[0].id, table.base.tables[0].fields[0].id);
         let r = table.base.tables[0].records[0].id;

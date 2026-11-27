@@ -20,6 +20,7 @@ pub mod merge_file;
 pub mod model;
 pub mod palette;
 pub mod paths;
+pub mod pins;
 pub mod paste;
 pub mod remote;
 pub mod shown;

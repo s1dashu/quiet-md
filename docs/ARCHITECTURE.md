@@ -102,6 +102,7 @@ This approach copies the entire document at each history step. A historical benc
 | `store.rs` | Library I/O, index recovery, trash, settings and `image_path` |
 | `shown.rs` | What a folder shows: the files it lists (`LIBRARY_FILES`, checked by content for `.xml` and `.sqlite`), the folders the scan does not go into (`skips_dir`), the `.gitignore` subset (`Ignore`) and the look before 添加文件夹 (`survey`). See FORMAT.md, "What a folder shows" |
 | `across.rs` | A page or folder moved into another top-level folder (`Store::move_across`): files renamed or copied over, ids and index fields kept, pictures copied into the target's `.assets/`, mentions across the edge written by id; see the last section |
+| `pins.rs` | 置顶's own order across every top-level folder: each pin's `pin_order` key, new pins on top, keys for a drag that move only the moved pin. See docs/FORMAT.md |
 | `top_folders.rs` | `TopFolders`: the top-level folders the sidebar lists (`TopFolder`, each its own `Store` and `.quiet/`), this computer's list of them (`folders.json`), nesting checks and ids unique across them. See docs/design/workspaces.md |
 | `paste.rs` | HTML and Markdown to blocks, shared by paste and import |
 | `markdown.rs` | Markdown export |
@@ -187,7 +188,7 @@ User titles, body text, attachment names and saved button labels are user conten
 
 ## Undo for folders and file operations
 
-Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation.
+Folders are `Meta::folder` index entries. Only folders can be parents. Core's `store/folders.rs` handles legacy tree migration, hierarchy checks and sibling order. The app's `folders.rs`, `sidebar_drag.rs` and `folder_card.rs` implement folder pages, dragging and animation; a top-level folder's heading drags among the others (`TopFolders::arrange`, folders.json), and `pin_drag.rs` drags 置顶's rows (core's `pins.rs`).
 
 Create, duplicate, rename, move, delete and restore operations have their own undo history. Under the write lock, the store records successful file operations so changes from other instances stay outside the current operation. After an asynchronous drop or rename reaches disk, the actual record replaces the preview record. Undo checks file state and hierarchy and reads current content from disk, leaving older body snapshots out of file-operation undo. When a management action changes a title, it adjusts caret boundaries in the editor and its history snapshots.
 

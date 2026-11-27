@@ -130,6 +130,14 @@ impl SharedStore {
         if let Some(p) = front { Store::set_active_dir(&p); }
         r
     }
+    /// The top-level folders in the order of `keys` (`TopFolders::arrange`); the one in front stays in front.
+    pub fn arrange_tops(&self, keys: &[String]) -> Result<()> {
+        let mut sh = self.0.borrow_mut();
+        let r = sh.tops.arrange(keys);
+        let front = sh.active.clone().and_then(|k| sh.tops.folder(&k).filter(|r| r.store.is_some()).map(|r| r.path.clone())).or_else(|| sh.tops.first().map(|r| r.path.clone()));
+        if let Some(p) = front { Store::set_active_dir(&p); }
+        r
+    }
     pub fn can_rename_folder_top(&self, key: &str) -> bool { self.0.borrow().tops.can_rename(key) }
     pub fn folder_top_keeps_name(&self, key: &str) -> bool { self.0.borrow().tops.keeps_name(key) }
     /// Where a 快速笔记 goes: the top-level folder picked in Settings while it is open, else the first open one.
@@ -526,7 +534,8 @@ impl SharedStore {
         if stray || parent.is_some_and(|p| self.top_of(p) != self.top_of(id)) { anyhow::bail!("{}", crate::settings::tr("暂不支持在文件夹之间移动", "Moving between folders isn't supported yet")); }
         Ok(())
     }
-    pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<()> { self.on_res(id, |s| s.set_pinned(id, pinned)) }
+    /// `Store::set_pin`: 置顶 at a place of its own (`fdl_core::pins`), or off.
+    pub fn set_pin(&mut self, id: &str, pin: Option<Option<String>>) -> Result<()> { self.on_res(id, |s| s.set_pin(id, pin)) }
     pub fn is_markdown(&self, id: &str) -> bool { self.on(id, |s| s.is_markdown(id)).unwrap_or(false) }
     pub fn kind(&self, id: &str) -> crate::store::DocKind { self.on(id, |s| s.kind(id)).unwrap_or_default() }
     pub fn create_markdown(&mut self, doc: &Document, front: &str) -> Result<String> { self.put(None, |s, _| s.create_markdown(doc, front)) }

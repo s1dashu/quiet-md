@@ -152,6 +152,7 @@ In FORMAT 4 keys are relative paths. Folder keys end in a slash (e.g. `"Work/"`)
 | `id` | Runtime ID for the editor, windows and undo. Links use paths. | Required |
 | `created` / `modified` | Unix time in seconds | Required |
 | `pinned` | Pinned | false |
+| `pin_order` | Its place in 置顶, across every top-level folder (below) | None: placed by when it was pinned |
 | `starred` | Older builds' favorites: read as `pinned` (below), never written | 0 |
 | `order` | Sibling order within a folder | 0 (automatic) |
 | `root_order` | Top-level sibling order | Automatic |
@@ -164,7 +165,9 @@ In FORMAT 4 keys are relative paths. Folder keys end in a slash (e.g. `"Work/"`)
 
 The path supplies the parent folder, name and Markdown status. Deleting the index preserves content, structure and links but loses metadata such as pins and manual order. New fields must use `#[serde(default)]` and be omitted when they hold their default value.
 
-**Favorites became pins** (2026-11). Older builds had 收藏 (`starred`) beside 置顶 (`pinned`); there is only 置顶 now. A `starred` above 0 is read as `pinned: true` (`Meta::take_star`), and since `starred` is no longer written, this device's next write records `pinned: true` and, in FORMAT 5 and 6, `starred: null`. Every newer device reads the same either way, and two writing it write the same values; once written, an unpin stays, while a star an older build sets later pins the document again. `store::FORMAT` stayed 6: an older build reads such a library correctly, only with no favorites. The pin order is not new: 置顶 lists its documents in the order the lists below it use, so the former favorites take their place among the pins by that order, not after them.
+**Favorites became pins** (2026-11). Older builds had 收藏 (`starred`) beside 置顶 (`pinned`); there is only 置顶 now. A `starred` above 0 is read as `pinned: true` (`Meta::take_star`), and since `starred` is no longer written, this device's next write records `pinned: true` and, in FORMAT 5 and 6, `starred: null`. Every newer device reads the same either way, and two writing it write the same values; once written, an unpin stays, while a star an older build sets later pins the document again. `store::FORMAT` stayed 6: an older build reads such a library correctly, only with no favorites. The former favorites come after the pins (next paragraph).
+
+**置顶's own order** (2026-11). `pin_order` is a fractional index like `order` (`crates/core/src/pins.rs`), compared across every top-level folder's pins, since 置顶 lists them together. Placing a pin by hand writes that pin's key alone, so two devices placing two pins never undo each other; a new pin gets a key before the first, so it comes on top (as in the Finder's sidebar and Notes). 取消置顶 writes `pin_order: null`. A pin without a key (pinned before this, or by an older build) comes after the placed ones, newest first by when it was pinned: the stamp of its `pinned` field, or for a former favorite its 收藏时间 (`starred`, or once that is written away, the same field in `index.json.v4`, the FORMAT 4 index the library was upgraded from). A 0.1.14 library's pins share the upgrade's stamp, later than any 收藏时间 then, so they come first, in 0.1.14's order (last changed first), and its favorites after them, latest first. The first drag among unplaced pins gives each its key in the order shown. `store::FORMAT` stays 6: an older build ignores `pin_order` (it is not one of its fields) and lists the pins its own way.
 
 ### Migrating the old layout (FORMAT 3 → 4)
 
