@@ -8230,7 +8230,7 @@ mod tests {
     }
 
     /// 创建副本 of a folder (批量管理): the folder with everything in it, each
-    /// page as its kind, links still pointing where they did; one undo takes
+    /// page as its kind, links out of it still pointing where they did; one undo takes
     /// the whole copy away and leaves the original as it was.
     #[test]
     fn duplicating_a_folder_copies_everything_in_it() {
@@ -8264,6 +8264,78 @@ mod tests {
         assert!(s.abs("资料 副本/子夹/乙.xml").fs_is_file() && s.abs("资料 副本/书单.sqlite").fs_is_file());
     }
 
+    /// A folder's copy links within itself (BATCH_FOLDERS.md「后续」): a mention, a plain link to
+    /// a file and a 数据表's 笔记 cell that point at a page copied with it point at the copy, in
+    /// a folder inside it too; what points outside the folder points where it did. One undo.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn a_folders_copy_links_to_its_own_pages() {
+        use crate::table::{sqlite, Doc, FieldOpts, FieldType, Value};
+        let lib = Lib::new("dup-links");
+        let mut s = lib.open();
+        let other = s.create_from(&doc("其他")).unwrap();
+        let f = s.create_folder("资料", None).unwrap();
+        let b = s.create_from_in(&doc("乙"), Some(&f)).unwrap();
+        let sub = s.create_folder("子夹", Some(&f)).unwrap();
+        let c = s.create_from_in(&linking("丙", &[(&b, "乙")]), Some(&sub)).unwrap();
+        s.create_from_in(&linking("甲", &[(&b, "乙"), (&c, "丙"), (&other, "其他")]), Some(&f)).unwrap();
+        let linked = |title: &str, hrefs: &[&str]| {
+            let mut d = doc(title);
+            for h in hrefs {
+                let mut b = crate::model::Block::text("");
+                b.text.push(h, crate::model::Marks { link: Some(h.to_string()), ..Default::default() });
+                d.blocks.push(b);
+            }
+            d
+        };
+        // Markdown and DocxXML pages link to files by path, `../资料/…` the long way round too.
+        s.create_markdown_in(&linked("笔记", &["乙.xml", "子夹/丙.xml", "../其他.xml"]), "", Some(&f)).unwrap();
+        s.create_from_in(&linked("文件", &["../资料/子夹/丙.xml", "../其他.xml"]), Some(&f)).unwrap();
+        // A 数据表 with its notes (its folder, `table_folder`), and one pointing out of it.
+        let table = s.create_table_in("书单", &crate::table::Base::blank(0), Some(&f)).unwrap();
+        let tf = s.table_folder(&table).unwrap();
+        s.create_from_in(&doc("三体"), Some(&tf)).unwrap();
+        let rel = "资料/书单/书单.sqlite";
+        let mut d = Doc::new(sqlite::load(&s.abs(rel)).unwrap());
+        let t = d.base.tables[0].id;
+        let nf = d.add_field(t, None, "读书笔记", FieldType::Note, FieldOpts::default()).unwrap();
+        let rows: Vec<_> = d.base.tables[0].records.iter().map(|r| r.id).collect();
+        d.set_cells(t, vec![(rows[0], nf, Value::Text("三体.xml".into())), (rows[1], nf, Value::Text("../乙.xml".into())), (rows[2], nf, Value::Text("../../其他.xml".into()))]);
+        sqlite::save(&s.abs(rel), &d.base, &d.dirty).unwrap();
+        let cells = |s: &Store, rel: &str| -> Vec<String> {
+            let t = &sqlite::load(&s.abs(rel)).unwrap().tables[0];
+            let f = t.fields.iter().find(|f| f.ty == FieldType::Note).unwrap().id;
+            t.records.iter().filter_map(|r| match r.get(f) { Value::Text(h) => Some(h.clone()), _ => None }).collect()
+        };
+        let journal = s.track_file_changes();
+        let copy = s.duplicate(&f, "资料 副本").unwrap();
+        let changes = journal.take();
+        let read = |s: &Store, rel: &str| crate::vfs::read_to_string(s.abs(rel)).unwrap();
+        let id_of = |s: &Store, rel: &str| s.index.iter().find(|(_, m)| m.rel == rel).unwrap().0.clone();
+        let targets = |s: &Store, rel: &str| s.load(&id_of(s, rel)).unwrap().doc_links().into_iter().map(|l| l.target).collect::<Vec<_>>();
+        let (b2, c2) = (id_of(&s, "资料 副本/乙.xml"), id_of(&s, "资料 副本/子夹/丙.xml"));
+        // Mentions: as paths on disk, and as the copies' ids once read.
+        let a2 = read(&s, "资料 副本/甲.xml");
+        assert!(a2.contains("href=\"乙.xml\"") && a2.contains("href=\"子夹/丙.xml\"") && a2.contains("href=\"../其他.xml\""), "{a2}");
+        assert_eq!(targets(&s, "资料 副本/甲.xml"), [b2.clone(), c2, other.clone()]);
+        assert_eq!(targets(&s, "资料 副本/子夹/丙.xml"), [b2], "out of a folder inside, to the copy");
+        let md = read(&s, "资料 副本/笔记.md");
+        assert!(md.contains("(乙.xml)") && md.contains("(子夹/丙.xml)") && md.contains("(../其他.xml)"), "{md}");
+        let file = read(&s, "资料 副本/文件.xml");
+        assert!(file.contains("href=\"子夹/丙.xml\"") && file.contains("href=\"../其他.xml\""), "{file}");
+        assert_eq!(cells(&s, "资料 副本/书单/书单.sqlite"), ["三体.xml", "../乙.xml", "../../其他.xml"]);
+        // The original as it was.
+        assert!(!read(&s, "资料/文件.xml").contains("副本") && !read(&s, "资料/笔记.md").contains("副本"));
+        assert_eq!(targets(&s, "资料/甲.xml"), [b, c, other]);
+        // 撤销 takes the copy away in one step; 重做 brings it back linked to itself.
+        s.apply_file_history(&changes, false).unwrap();
+        assert!(!s.abs("资料 副本").fs_exists() && s.abs("资料/子夹/丙.xml").fs_is_file());
+        s.apply_file_history(&changes, true).unwrap();
+        assert!(read(&s, "资料 副本/文件.xml").contains("href=\"子夹/丙.xml\""));
+        assert_eq!(targets(&s, "资料 副本/子夹/丙.xml"), [id_of(&s, "资料 副本/乙.xml")]);
+        assert_eq!(s.index[&copy].parent, None);
+    }
+
     /// A folder's 正文 follows the copy's name, so the copy is a document with
     /// child pages too; the 正文 copied alone goes beside its folder.
     #[test]
@@ -8272,11 +8344,15 @@ mod tests {
         let mut s = lib.open();
         let outer = s.create_folder("外", None).unwrap();
         let plan = s.create_from_in(&doc("方案"), Some(&outer)).unwrap();
-        s.create_child(&plan, &doc("子页")).unwrap();
+        s.create_child(&plan, &linking("子页", &[(&plan, "方案")])).unwrap();
         let folder = s.folder_of_note(&plan).unwrap();
         let copy = s.duplicate(&folder, "方案 副本").unwrap();
         assert!(s.abs("外/方案 副本/方案 副本.xml").fs_is_file() && s.abs("外/方案 副本/子页.xml").fs_is_file());
-        assert!(s.note_of(&copy).is_some());
+        let note = s.note_of(&copy).unwrap();
+        // The child page mentions its 正文: the copy's, under its new name.
+        assert!(crate::vfs::read_to_string(s.abs("外/方案 副本/子页.xml")).unwrap().contains("href=\"方案 副本.xml\""));
+        let child = s.index.iter().find(|(_, m)| m.rel == "外/方案 副本/子页.xml").unwrap().0.clone();
+        assert_eq!(s.load(&child).unwrap().doc_links()[0].target, note);
         let alone = s.duplicate(&plan, "方案 副本 2").unwrap();
         assert_eq!(s.index[&alone].parent.as_deref(), Some(outer.as_str()), "beside its folder, not a child page of it");
         assert!(s.abs("外/方案 副本 2.xml").fs_is_file());

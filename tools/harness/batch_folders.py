@@ -7,7 +7,9 @@ a temporary library and checks the files on disk:
 
   grid      the grid: a folder card and a document card checked (the folder not
             dimmed, its box where a card's is); 创建副本 copies the folder with its
-            subfolders and pages beside it, in the background; ⌘Z takes the copies away
+            subfolders and pages beside it, in the background, the mentions between
+            its pages pointing at the copies and the one out of it where it did;
+            ⌘Z takes the copies away
   list      the list: a folder and a document checked; 移动到 another folder takes
             the folder's pages along, its links following; ⌘Z puts them back
   sidebar   the sidebar: a folder and a page inside it checked (Shift-click); 删除
@@ -35,15 +37,17 @@ PREFS = json.dumps({"appearance": "light", "english": True, "language": "en", "s
 
 
 def library(root):
-    """Project/{Alpha, Beta, Sub/{Inner, Deep/Leaf}, Other/Keep}, and Outside, which Inner links to."""
+    """Project/{Alpha, Beta, Sub/{Inner, Deep/Leaf}, Other/Keep}, and Outside. Inner mentions
+    Outside, Alpha (out of Sub) and Leaf (in Sub), Leaf mentions Inner."""
     (root / ".quiet").mkdir(parents=True)
     (root / ".quiet" / "preferences.json").write_text(PREFS)
     (root / "Project" / "Sub" / "Deep").mkdir(parents=True)
     (root / "Project" / "Other").mkdir(parents=True)
     (root / "Project" / "Alpha.xml").write_text("<title>Alpha</title>\n<p>alpha</p>\n")
     (root / "Project" / "Beta.xml").write_text("<title>Beta</title>\n<p>beta</p>\n")
-    (root / "Project" / "Sub" / "Inner.xml").write_text('<title>Inner</title>\n<p>To <cite type="doc" href="../../Outside.xml" file-type="docx">Outside</cite></p>\n')
-    (root / "Project" / "Sub" / "Deep" / "Leaf.xml").write_text("<title>Leaf</title>\n<p>leaf</p>\n")
+    cite = lambda href, title: f'<p>To <cite type="doc" href="{href}" file-type="docx">{title}</cite></p>\n'
+    (root / "Project" / "Sub" / "Inner.xml").write_text("<title>Inner</title>\n" + cite("../../Outside.xml", "Outside") + cite("../Alpha.xml", "Alpha") + cite("Deep/Leaf.xml", "Leaf"))
+    (root / "Project" / "Sub" / "Deep" / "Leaf.xml").write_text("<title>Leaf</title>\n" + cite("../Inner.xml", "Inner"))
     (root / "Project" / "Other" / "Keep.xml").write_text("<title>Keep</title>\n<p>keep</p>\n")
     (root / "Outside.xml").write_text("<title>Outside</title>\n<p>outside</p>\n")
     return root
@@ -73,7 +77,11 @@ def grid():
     project = lib / "Project"
     assert (project / "Sub copy" / "Inner.xml").is_file() and (project / "Sub copy" / "Deep" / "Leaf.xml").is_file(), names(project)
     assert (project / "Alpha copy.xml").is_file(), names(project)
-    assert 'href="../../Outside.xml"' in (project / "Sub copy" / "Inner.xml").read_text(), "the copy's link no longer reaches Outside"
+    inner = (project / "Sub copy" / "Inner.xml").read_text()
+    assert 'href="../../Outside.xml"' in inner and 'href="../Alpha.xml"' in inner, f"the copy's links out of the folder no longer reach the originals:\n{inner}"
+    # Within the copy, to the copies (they would read ../../Sub/Deep/Leaf.xml and ../../Sub/Inner.xml otherwise).
+    assert 'href="Deep/Leaf.xml"' in inner and 'href="../Inner.xml"' in (project / "Sub copy" / "Deep" / "Leaf.xml").read_text(), f"the copy's links within it point at the originals:\n{inner}"
+    assert 'href="Deep/Leaf.xml"' in (project / "Sub" / "Inner.xml").read_text(), "the original's link changed"
     assert (project / "Sub" / "Deep" / "Leaf.xml").is_file(), "the original moved"
     # ⌘Z: one step takes every copy away.
     lib, log = run("grid-undo", script + "key cmd-z\nwait 2500\nshot undone\n")

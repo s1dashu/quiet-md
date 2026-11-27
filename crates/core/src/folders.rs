@@ -50,30 +50,39 @@ impl Store {
     /// 创建副本 of `id`, named `title`, beside it: a document of any kind, or a
     /// folder with everything in it (its 正文 named after the copy, so it stays
     /// its 正文). A 正文 alone goes beside its folder, not into it as a child
-    /// page; a 本机文件 into the library's top level. Links inside the copies
-    /// still point at the pages they pointed at. Returns the copy's id.
+    /// page; a 本机文件 into the library's top level. In a folder's copy, what
+    /// the pages inside mention of each other is their copies (`relink_copies`);
+    /// what is outside it stays the original. Returns the copy's id.
     pub fn duplicate(&mut self, id: &str, title: &str) -> Result<String> {
         let m = self.index.get(id).ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
         let parent = if m.local() { None } else if let Some(f) = self.folder_of_note(id) { self.index.get(&f).and_then(|f| f.parent.clone()) } else { m.parent.clone() };
-        self.copy_into(id, Some(title), parent.as_deref())
+        let mut copies = vec![];
+        let new = self.copy_into(id, Some(title), parent.as_deref(), &mut copies)?;
+        // The copies are made: a link left pointing at the original is a warning, not a failure.
+        if copies.len() > 1 && let Err(e) = self.relink_copies(&copies) { self.warnings.push(format!("未能更新副本中的链接：{e}")); }
+        Ok(new)
     }
 
     /// `duplicate` into folder `parent`; `title`: None keeps the page's own.
-    fn copy_into(&mut self, id: &str, title: Option<&str>, parent: Option<&str>) -> Result<String> {
+    /// `copies`: each (original, copy) made, the folders too.
+    fn copy_into(&mut self, id: &str, title: Option<&str>, parent: Option<&str>, copies: &mut Vec<(String, String)>) -> Result<String> {
         let m = self.index.get(id).cloned().ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
         if let Some(name) = &m.folder {
             let title = title.unwrap_or(name);
             let (note, new) = (self.note_of(id), self.create_folder(title, parent)?);
+            copies.push((id.to_string(), new.clone()));
             // In the sidebar's order, each the new folder's last child.
             let mut kids: Vec<String> = self.index.iter().filter(|(_, k)| k.parent.as_deref() == Some(id)).map(|(k, _)| k.clone()).collect();
             kids.sort_by(|a, b| (self.index[a].place(), a).cmp(&(self.index[b].place(), b)));
-            for k in kids { self.copy_into(&k, (note.as_deref() == Some(&k)).then_some(title), Some(&new))?; }
+            for k in kids { self.copy_into(&k, (note.as_deref() == Some(&k)).then_some(title), Some(&new), copies)?; }
             return Ok(new);
         }
         #[cfg(not(target_family = "wasm"))]
         if m.kind == DocKind::Table {
             let own = title.map_or_else(|| stem_of(base_name(&m.rel)).to_string(), str::to_string);
-            return self.copy_table_in(id, &own, parent);
+            let new = self.copy_table_in(id, &own, parent)?;
+            copies.push((id.to_string(), new.clone()));
+            return Ok(new);
         }
         let mut doc = self.load(id)?;
         if let Some(t) = title { doc.title = crate::model::RichText::plain(t); }
@@ -86,7 +95,52 @@ impl Store {
             self.create_markdown_in(&doc, &front, parent)?
         } else { self.create_from_in(&doc, parent)? };
         if !m.width.is_standard() { self.set_width(&new, m.width)?; }
+        copies.push((id.to_string(), new.clone()));
         Ok(new)
+    }
+
+    /// After a folder's copy (`copies`: original → copy): links between the pages copied point
+    /// at the copies, as a move rewrites them (`relocate`), the copy read as the original
+    /// moved. Mentions by id, plain links to files and 数据表's 笔记 cells by path; what points
+    /// outside the folder points where it did. Pictures and attachments are left as copied.
+    fn relink_copies(&mut self, copies: &[(String, String)]) -> Result<()> {
+        if self.flat { return Ok(()); }
+        let _lock = self.begin_write()?;
+        let ids: HashMap<&str, &str> = copies.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let pairs: Vec<(String, String)> = copies.iter().filter_map(|(a, b)| Some((self.index.get(a)?.rel.clone(), self.index.get(b)?.rel.clone()))).collect();
+        let rels: HashMap<&str, &str> = pairs.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let moved = |p: &str| rels.get(p).map(|r| r.to_string());
+        for (old, new) in copies {
+            let (Some(o), Some(m)) = (self.index.get(old), self.index.get(new)) else { continue };
+            if m.folder.is_some() { continue; }
+            let (was, dir) = (parent_rel(&o.rel).to_string(), parent_rel(&m.rel).to_string());
+            #[cfg(not(target_family = "wasm"))]
+            if m.kind == DocKind::Table {
+                // A 笔记 cell is a path from the table's file, as the original's.
+                let r = crate::table::sqlite::rewrite_notes(&self.path(new), |href| {
+                    let target = layout::resolve(&was, href)?;
+                    let to = layout::relative(&dir, &moved(&target).unwrap_or(target));
+                    (to != href).then_some(to)
+                });
+                if let Err(e) = r { self.warnings.push(format!("未能更新数据表中的笔记路径（{}）：{e}", m.rel)); }
+                continue;
+            }
+            if !m.kind.is_doc() || m.kind == DocKind::Board { continue; }
+            let Ok(text) = crate::vfs::read_to_string(self.path(new)) else { continue };
+            let Ok(mut doc) = self.parse_doc(new, &text) else { continue };
+            // Plain links were copied as written: from where the original is.
+            doc.map_links(&mut |h| layout::rebase_link(&was, &dir, h, &moved));
+            layout::each_inline(&mut doc, &mut |i| if let Some(l) = i.doc_link().filter(|l| ids.contains_key(l.id.as_str())).cloned() {
+                *i = docxml::to_inline(crate::model::InlineKind::DocLink(crate::model::InlineDocLink { id: ids[l.id.as_str()].to_string(), title: l.title }));
+            });
+            let out = self.serialize_doc(new, &doc, self.is_markdown(new).then_some(text.as_str()));
+            if out == text { continue; }
+            match write_atomic(&self.path(new), out.as_bytes()) {
+                Ok(()) => { self.parsed.remove(new); }
+                Err(e) => self.warnings.push(format!("未能更新文档中的链接（{}）：{e}", m.rel)),
+            }
+        }
+        Ok(())
     }
 
     /// True when it numbered something (else nothing was written).
