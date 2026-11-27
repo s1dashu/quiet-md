@@ -252,7 +252,7 @@ impl Editor {
         }
         let url = if file { link.clone() } else { normalize(&link) };
         if !file && !contains_url(&url) {
-            return self.toast(crate::settings::text("请输入有效的链接。"), cx);
+            return self.toast(crate::settings::tr("请输入有效的链接", "Enter a valid link"), cx);
         }
         self.core.sel = Selection { anchor: Pos::new(block, range.start), head: Pos::new(block, range.end) };
         self.core.checkpoint(EditKind::Other);

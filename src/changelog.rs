@@ -18,7 +18,7 @@ const REAL_FOLDERS: &str = "文档库改为真实文件夹，以标题命名，�
 const NOTES: &[(&str, &[(&str, &str)])] = &[
     ("0.2.0", &[
         ("侧栏按顶层文件夹分组，文件夹页就是起点；标题栏按钮重新排列", "The sidebar groups your top-level folders, each folder's page is where you start, and the header buttons are rearranged"),
-        ("数据表正式开放：从新建菜单、/ 菜单或 CSV 新建", "Data tables are here: make one from the New menu, the / menu or a CSV file"),
+        ("数据库正式开放：从新建菜单、/ 菜单或 CSV 新建", "Databases are here: make one from the New menu, the / menu or a CSV file"),
         ("「…」菜单里新增专注模式、打字机模式和段落聚焦", "Focus Mode, Typewriter Mode and Paragraph Focus in the … menu"),
         ("「显示」› 放大 / 缩小只缩放正文，正文字号可以自定义", "View › Zoom In / Out scale the note's text only; Text size takes a custom size"),
         ("命令行工具 quiet 和设置 › 连接 Agent，让 AI Agent 读写文档库", "The quiet command-line tool and Settings › Agent Connector let AI agents work in your library"),
@@ -27,7 +27,7 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("回收站可以设置几天后自动删除", "Choose how many days the Trash keeps deleted pages"),
         ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Move pages and folders into another top-level folder; Favorites fold into Pinned"),
         ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Pasting keeps formatting on Windows and Linux; any shortcut can be cleared"),
-        ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Mermaid diagrams, Keep Window on Top, spaces between Chinese and English"),
+        ("导入思源笔记；子文档、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Keep Window on Top, spaces between Chinese and English"),
     ]),
     ("0.1.14", &[
         ("查找替换支持正则表达式", "Find and replace supports regular expressions"),

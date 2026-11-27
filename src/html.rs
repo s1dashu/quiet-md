@@ -229,7 +229,7 @@ impl Writer<'_> {
                 let _ = write!(out, "<div class=\"b\"{align}>{}", esc(&f.name));
                 out.push_str("</div>");
             }
-            // A 数据表 as a plain table of the view it shows.
+            // A 数据库 as a plain table of the view it shows.
             BlockKind::DataTable(t) => {
                 let grid = fdl_core::table::block_grid(&crate::store::Store::active_dir(), t);
                 if !grid.is_empty() {

@@ -795,6 +795,9 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
     let max_x = (wide - vs.width).max(0.);
     let max_y = (tall - vs.height).max(0.);
     let corner = if inline { frame_r() } else { SHEET_R };
+    // the frozen columns' shadow is cast by a block just inside their edge, from the frame's top to its foot,
+    // only what falls past it shown
+    let caster = || div().absolute().left(px(-24.)).w(px(24.)).bg(Theme::bg_body()).shadow(crate::design::shadow::sticky());
     div().id("tb-grid").relative().flex_1().min_h_0().flex().flex_col()
         // in a page, a frame around the header and the rows only
         .child(div().relative().flex_1().min_h_0().flex().flex_col().when(inline, |d| d.rounded(px(frame_r())).bg(Theme::bg_body()).shadow(crate::design::shadow::frame()))
@@ -804,13 +807,14 @@ pub(crate) fn render(v: &TableView, base: &Base, t: &Table, view: &View, window:
             // the frame only while the grid has the keys (or a cell, menu or list of its own is open):
             // with the record panel, a note or another pane in front, no cell is about to take them
             .children(cursor_ring(v, &cols).filter(|_| v.focus.is_focused(window) || v.editing.is_some() || v.popup.is_some() || v.dropdown.is_some()))
-            // scrolled sideways: the frozen columns cast a shadow over the ones passing under them
-            .when(sx > 0.5, |d| d.child(div().absolute().top_0().bottom_0().left(px(cols.frozen_w)).right_0().overflow_hidden()
-                // cast by a block just inside the edge, only what falls past it shown
-                .child(div().absolute().top_0().bottom_0().left(px(-24.)).w(px(24.)).bg(Theme::bg_body()).shadow(crate::design::shadow::sticky()))))
+            // scrolled sideways: the frozen columns cast a shadow over the ones passing under them, down to the
+            // frame's foot (the lane under them is theirs: the thumb starts past them)
+            .when(sx > 0.5, |d| d.child(div().absolute().top_0().bottom_0().left(px(cols.frozen_w)).right_0().overflow_hidden().child(caster().top_0().bottom(px(-ly)))))
             .children(col_edge(v, &cols))
             .children(col_grips(v, &cols, &fields, cx))
             .children(edit_overlay(v, &cols, &fields)))
+            // the rest of that shadow, across the bottom lane (laid out by the frame, as one with the part above)
+            .when(sx > 0.5 && ly > 0., |d| d.child(div().absolute().bottom_0().h(px(ly)).left(px(cols.frozen_w)).right_0().overflow_hidden().child(caster().bottom_0().h(px(header_h() + fh)))))
             .children(scrollbars(v, max_x, max_y, size(fw, header_h() + fh), (lx, ly), corner, cols.frozen_w, cx)))
         .on_scroll(cx.listener(move |v, ev: &ScrollEvent, _, cx| {
             let d = ev.delta.pixel_delta(px(20.));

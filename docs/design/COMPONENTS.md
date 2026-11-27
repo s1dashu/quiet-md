@@ -31,7 +31,8 @@
 | `mod.rs` | token：`color`、`chip`、`geo()`（`G`）、`shadow`、`R`、`text`、`radius` | 主题变量、Vega 尺寸 |
 | `base.rs` | `under()`（组件样式垫在调用方样式下面）、`element!` 宏、`icon()` | — |
 | `button.rs` | `Button` + `ButtonVariant`（Primary / Outline / Secondary / Ghost / Destructive / Link）+ `ButtonSize`（Lg 40 / Default 36 / Sm 32 / Tool 28 / Xs 24）；`icon`、`icon_end`、`label`、`selected`、`disabled`、`variant` | Button |
-| `card.rs` | `Card`、`Item`、`Separator`、`Toast` + `ToastTone` | Card、Item、Separator、Sonner |
+| `card.rs` | `Card`、`Item`、`Separator` | Card、Item、Separator |
+| `toast.rs` | `Toast` + `ToastTone`，`toast::{show, toaster, dismiss_front, dismiss_where}` | Sonner（Radix Toast 的结构） |
 | `menu.rs` | `Popover`（`.menu()`、`.padded()`）、`MenuItem`、`MenuLabel`、`MenuSeparator`；常量 `menu::PAD`、`ROW_H`、`SEP_H`、`LABEL_H` 给算子菜单位置用 ；`MenuItem::switch(on)`（带开关的行：点了只切换，菜单留着，Esc 和点外面才关）；`hang`（按钮菜单挂在量到的按钮下 4、`Align::Start / End`、放不下翻上去）、`room` + `Popover::fit`（放不下时限高、滚动） | DropdownMenu、Popover |
 | `scroll.rs` | `ScrollBar`（`render(&handle)`；`rounded(r)` / `corners(top, bottom)`：上下各让出整个圆角加 1，`ends_for`，贴窗口角的用 `WINDOW_R`；`make_room(el, inset)` / `room(inset)`：框溢出时右边让出滚动条通道，`inset` 是内容本来离右边的距离，定宽的框加宽）、`scroll::bar(key, &handle, r)` / `bar_corners`（给任何 `overflow_y_scroll` 框挂上，放在框的最后一个子元素）和 `scroll::make_room(el, key, inset)`（同一个框，放在它样式的最后）、`Fade`、`THUMB` / `PAD` / `thumb_color`（页面和宽表格自己的滚动条也用）。`Popover::fit` 自己做好这些，内容不是菜单行时用 `.inset(x)` 说明 | ScrollArea、ScrollBar |
 | `field.rs` | `Field`（`Field::select`、`Field::select_value`，`FieldSize`）、`Textarea`、`Label` | Input、SelectTrigger、Textarea、Label |
@@ -69,7 +70,7 @@
 | `Card` | `Card::new(id)` | — | `.child()`（默认一列） | 同 `Button`，另有 `ParentElement` |
 | `Item` | `Item::new(title)` | — | `.description(Option<s>)`；`.child()` 是右边的控件 | `Styled`、`ParentElement` |
 | `Separator` | `Separator::new()` | `.vertical()` | — | `Styled` |
-| `Toast` | `Toast::new(ToastTone::{Success, Error, Info}, s)`（Sonner：宽 356、圆角 18、13 号字、Lucide 的线框图标） | — | — | `Styled` |
+| `Toast` | `Toast::new(ToastTone::{Success, Error, Info}, 标题)`，可加 `.description(s)`、`.action(名字, 回调)`、`.close_button()`；`toast::show(窗口, toast, cx)` 放进那个窗口的堆叠（Sonner：宽 356、圆角 18、13 号字、Lucide 的线框图标；标题和描述各自换行，最多 3 行后加省略号） | — | — | 直接放（组件库的样例） |
 | `Toggle` | `Toggle::new(id)`（默认 sm） | `.sized(ToggleSize::{Default 36, Sm 32, Lg 40})`、`.outline()` | `.icon(name)` / `.editor_icon(name)`、`.label(s)`、`.pressed(bool)`（`aria-pressed`：`muted` 底，深色弹层上提一档）、`.disabled(bool)` | 同 `Button` |
 | `ButtonGroup` | `ButtonGroup::new().child(button)…` | — | 子元素紧挨着，里侧圆角变直角、里侧左边框去掉；`.separator(ButtonGroupSeparator::new())` | `Styled` |
 | `ButtonGroupSeparator` | `ButtonGroupSeparator::new()` | — | 1px `input` 竖线，和这一行一样高，上下各缩 1 | `Styled` |

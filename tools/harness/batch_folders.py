@@ -15,6 +15,8 @@ a temporary library and checks the files on disk:
             ⌘Z brings it all back
   sidebar_copy  the same pick duplicated: the page inside is copied once, with its
             folder (上层优先), not again beside itself
+  emptied   the list: Other's only page moved out with 移动到; Other, empty now, still
+            shows in the sidebar and on Project's folder page, also after a relaunch
 
 Everything happens in a temporary library; no system clipboard or user
 library is accessed. Pass case names to run only those. Screenshots of each
@@ -119,7 +121,25 @@ def sidebar_copy():
     assert not (project / "Sub" / "Inner copy.xml").exists(), "a page inside a picked folder was copied twice"
 
 
-CASES = {"grid": grid, "list": list_, "sidebar": sidebar, "sidebar_copy": sidebar_copy}
+# A folder emptied here stays (docs/FORMAT.md, What a folder shows): `hoverrow` and `moveat`
+# end the run with exit code 3 when the row or the list row is not there.
+SEE_OTHER = "row Project\nwait 800\nshowing Project\nanchor page-view\nwait 300\nrow List\nwait 500\nmoveat list:Other\nwait 300\nhoverrow Other\nwait 300\nshot emptied\n"
+
+
+def emptied():
+    script = ("row Project\nwait 600\nrow Other\nwait 800\nshowing Other\nanchor page-view\nwait 300\nrow List\nwait 500\nanchor tb-more\nwait 300\nrow Manage\nwait 400\n"
+              "anchor list:Keep\nwait 300\nanchor page-batch-move\nwait 600\ntype Project\nwait 400\nanchor move:Project\nwait 300\nanchor move-ok\nwait 2500\nshot moved\nkey escape\nwait 300\n" + SEE_OTHER)
+    lib, log = run("emptied", script)
+    assert (lib / "Project" / "Keep.xml").is_file() and (lib / "Project" / "Other").is_dir(), names(lib / "Project")
+    assert names(lib / "Project" / "Other") == [], names(lib / "Project" / "Other")
+    # Opened again: still there.
+    out = work / "emptied-again"
+    (work / "emptied-again.txt").write_text("resize 1300 850\nwait 300\nmove 700 500\nwait 1200\n" + SEE_OTHER)
+    r = subprocess.run([sys.executable, str(here / "run.py"), str(work / "emptied-again.txt"), str(lib), str(out)], env=dict(os.environ, FDL_NOBLINK="1"), timeout=180)
+    assert r.returncode == 0, (out / "log").read_text(errors="replace")[-800:]
+
+
+CASES = {"grid": grid, "list": list_, "sidebar": sidebar, "sidebar_copy": sidebar_copy, "emptied": emptied}
 
 if __name__ == "__main__":
     for name in sys.argv[1:] or list(CASES):

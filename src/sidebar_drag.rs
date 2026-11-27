@@ -452,7 +452,8 @@ impl Workspace {
             self.queue_tree_write(TreeWrite::Move(movement), cx);
             self.sync_sub_pages(cx);
         }
-        if reorder { self.show_toast_kind(crate::ui::ToastKind::Info, crate::settings::tr("自动排序时不能拖动调整顺序，可在文件夹页的「显示」里改为手动排序", "Pages are sorted automatically. Switch to Manual order in a folder's View menu to rearrange them."), cx); }
+        if reorder { self.show_toast_with(crate::design::Toast::new(crate::ui::ToastKind::Info, crate::settings::tr("当前按自动顺序排列", "Pages are sorted automatically"))
+            .description(crate::settings::tr("在文件夹页的「显示」里选「手动排序」后可以拖动", "Choose Manual order in a folder's View menu to drag them")), cx); }
         cx.notify();
     }
 

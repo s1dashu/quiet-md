@@ -1,7 +1,7 @@
 <title>欢迎使用 Quiet.md</title>
 <p>Quiet.md 是一个安静记笔记的地方。不用注册账号，也没有云端空间：每篇文档都是 Mac 上的一个文件。随手记下一个想法也好，用标题、列表、表格、代码和图片梳理一件复杂的事也好，都可以在这里完成。</p>
 <p>这组指南大约十分钟就能带你熟悉 Quiet.md。它们本身就是用 Quiet.md 写的，你看到的每一种排版都可以自己做出来。<b>尽管放心修改。</b>它们是可以动手练习的示例，而不是只读的说明书。</p>
-<callout emoji="💡" background-color="light-blue" border-color="blue"><p>最好的学习方式是边读边试。想找一块空白的地方随便练习，可以打开 {{doc:practice}}。</p></callout>
+<callout emoji="💡" background-color="light-blue" border-color="blue"><p>最好的学习方式是边读边试。想找一块空白的地方随便练习，按 <code>⌘ N</code> 新建一篇文档即可。</p></callout>
 <h1>认识界面</h1>
 <img src="assets/guides/home.jpg" caption="文件夹：所有文档一目了然" align="center"/>
 <p>窗口主要分为两个区域。</p>
@@ -20,7 +20,7 @@
 <h1>三种书写方式</h1>
 <grid><column width-ratio="0.3333"><h3>斜杠命令</h3><p>在空行输入 <code>/</code> 插入一个块。继续输入可以筛选，试试 <code>/表格</code> 或 <code>/代码</code>。</p></column><column width-ratio="0.3333"><h3>Markdown</h3><p>输入 <code># </code> 得到标题，输入 <code>- </code> 得到列表。用 <code>**粗体**</code> 把文字包起来，输完结尾的符号就会变成<b>粗体</b>。</p></column><column width-ratio="0.3334"><h3>快捷键</h3><p>用 <code>⌘ B</code> 设为粗体，用 <code>⌘ ⌥ 1</code> 设为标题。按 <code>⌘ /</code> 可以查看所有快捷键。</p></column></grid>
 <h1>浏览指南</h1>
-<p>可以按顺序读，也可以直接跳到需要的那一篇。在侧栏里，它们分在“文档”“Markdown 文件”“画板”和“数据表”几个文件夹中，后三个里各放着一个可以动手试的真实文件。</p>
+<p>可以按顺序读，也可以直接跳到需要的那一篇。在侧栏里，它们分在“{{folder:documents}}”“{{folder:markdown-files}}”“{{folder:boards-folder}}”“{{folder:data-tables-folder}}”和“{{folder:everyday}}”几个文件夹中；“{{folder:markdown-files}}”“{{folder:boards-folder}}”“{{folder:data-tables-folder}}”里各放着一个可以动手试的真实文件。</p>
 <table><colgroup><col width="300"/><col width="390"/></colgroup><thead><tr><th><p>指南</p></th><th><p>你会学到</p></th></tr></thead><tbody>
 <tr><td><p>{{doc:writing}}</p></td><td><p>标题、文字样式、颜色、链接、列表、任务、引用、高亮块、提醒和按钮</p></td></tr>
 <tr><td><p>{{doc:tables}}</p></td><td><p>表格、分栏、代码块和 LaTeX 公式</p></td></tr>

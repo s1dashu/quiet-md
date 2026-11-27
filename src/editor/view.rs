@@ -39,8 +39,6 @@ pub enum EditorEvent {
     Mode(bool),
     /// 选择要展示的文档信息 / 隐藏文档信息 changed the info row.
     Info(crate::store::InfoRow),
-    /// The editor showed a toast (the workspace drops its own).
-    Toast,
     /// A 创建副本 button was clicked.
     Duplicate,
     /// A standalone 画板 was closed (退出 / Esc): go back to where it is.
@@ -49,9 +47,9 @@ pub enum EditorEvent {
     HistoryEscape,
     /// Esc in 专注模式 with nothing else to cancel: leave it.
     FocusEscape,
-    /// A 数据表 made, trashed or restored a note for a 笔记 cell: the library's lists are read again.
+    /// A 数据库 made, trashed or restored a note for a 笔记 cell: the library's lists are read again.
     LibraryChanged,
-    /// A note edited in a 数据表's record panel was saved: its row follows.
+    /// A note edited in a 数据库's record panel was saved: its row follows.
     NoteSaved(Box<crate::table::NoteSaved>),
 }
 
@@ -309,7 +307,7 @@ pub struct Editor {
     pub(super) cd: super::countdown::CdUi,
     pub(super) boards: super::board::BoardUi,
     pub(super) datatables: super::datatable::DataTablesUi,
-    /// A standalone 数据表 (`.sqlite`): its table fills the pane.
+    /// A standalone 数据库 (`.sqlite`): its table fills the pane.
     pub table_file: bool,
     pub(super) btn: super::button::BtnUi,
     pub(super) rm: super::reminder::RmUi,
@@ -555,7 +553,7 @@ impl Editor {
             col_anim: HashMap::default(),
             tables: Default::default(),
             captions: HashMap::new(),
-            img: super::image::ImageUi::new(cx),
+            img: super::image::ImageUi::new(window.window_handle(), cx),
             file: super::file::FileUi::new(),
             heading_orders: Default::default(),
             size_pick: (0, 0),
@@ -1104,7 +1102,7 @@ impl Editor {
                 self.changed(window, cx);
                 return self.open_board(nid, window, cx);
             }
-            // an empty 数据表 in a file of its own, shown in the page
+            // an empty 数据库 in a file of its own, shown in the page
             SlashKind::DataTable => {
                 let Some(src) = new_table_file() else { return };
                 let nid = self.core.insert_block(Block::new(BlockKind::DataTable(crate::table::TableRef::new(src)), RichText::default()));
@@ -2090,8 +2088,8 @@ impl Editor {
     fn on_space_cjk(&mut self, _: &k::SpaceCjk, window: &mut Window, cx: &mut Context<Self>) {
         if !self.guard(window, cx) || self.read_only { return; }
         let n = self.core.space_document();
-        if n == 0 { return self.toast(crate::settings::tr("没有需要加空格的地方", "No spaces to add"), cx); }
-        self.toast(&crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
+        if n == 0 { return self.toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("空格都已加好", "Spacing is already right"), cx); }
+        self.toast_kind(crate::editor_ui::ToastKind::Success, &crate::localized_count!(n, "已加 {} 个空格", "Added {} space", "Added {} spaces", n), cx);
         self.changed_preserving_viewport(window, cx);
     }
 
@@ -3231,7 +3229,7 @@ fn guard<A: Action, F: Fn(&mut Editor, &A, &mut Window, &mut Context<Editor>) + 
 
 impl Editor { pub(crate) fn refresh_theme(&mut self) { self.items_key = None; self.menu = None; } }
 
-/// A blank `.sqlite` in the library's assets for a new 数据表 block; its path relative to the library.
+/// A blank `.sqlite` in the library's assets for a new 数据库 block; its path relative to the library.
 #[cfg(not(target_family = "wasm"))]
 fn new_table_file() -> Option<String> {
     let name = format!("{}.sqlite", uuid::Uuid::new_v4());

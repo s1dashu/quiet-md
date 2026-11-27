@@ -7,10 +7,13 @@ Each file in src/ is one document (file name order = reading order): a
 DocxXML .xml, or a Markdown file, 画板 or 数据表 copied as it is (NAMED titles
 those). Placeholders in the .xml ones:
   {{doc:key}}                       @文档 link to the guide whose KEYS entry is key
+  {{folder:key}}                    the name of the FOLDERS entry key (titles too)
   {{reminder:YYYY-MM-DD HH:MM}}     timed date reminder, notified when it is due
   {{reminder-day:YYYY-MM-DD}}       whole-day reminder, notified 09:00 that day
   {{countdown:YYYY-MM-DD HH:MM}}    countdown block to that moment (blue)
   {{button:Action|url|text|color}}  inline button (OpenLink / DuplicatePage)
+A 数据表's 笔记 cell may hold {{doc:key}} too: it becomes the guide's path,
+relative to the table's folder, as a 笔记 cell holds it.
 Assets under guides/assets are copied to <out>/.assets/guides.
 
 `--lang zh` builds the Simplified Chinese guides from src/zh/*.xml (same file
@@ -18,11 +21,14 @@ names, same keys) into shared-mock/library-zh, without .assets: the app
 seeds it with the English library's (`guides.rs`), so its images and covers
 must be ones the English guides bring along too.
 
-The output is a FORMAT 4 library: folders on disk, each document a file named
-after its title (store::file_name_for), links as paths relative to the file,
-and what the files cannot say in .quiet/index.json, keyed by path.
+The output is a library in the current format (store::FORMAT, read from
+crates/core/src/store.rs; FORMAT 6, docs/FORMAT.md): folders on disk, each
+document a file named after its title (store::file_name_for), links as paths
+relative to the file, and what the files cannot say in .quiet/meta/, as one
+device's shards. That device is DEVICE: the app seeds the library as this
+computer's (`guides.rs`), so a new library opens with nothing to upgrade.
 """
-import datetime as dt, json, re, shutil, sys, time, uuid
+import datetime as dt, hashlib, json, re, shutil, sqlite3, sys, time, uuid
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
@@ -32,12 +38,18 @@ if zh: args = args[2:]
 assert len(args) == 1, __doc__
 out = Path(args[0]).resolve()
 NS = uuid.UUID("6f7c1e9a-9d0b-4a51-8c7e-2a1d3b4c5e6f")
-# Folders in the guide library: key -> title, a folder on disk.
-FOLDERS = ({"documents": "文档", "markdown-files": "Markdown 文件", "boards-folder": "画板", "data-tables-folder": "数据表"} if zh else
-           {"documents": "Documents", "markdown-files": "Markdown files", "boards-folder": "Boards", "data-tables-folder": "Data tables"})
+# The format the app writes; a new one needs its layout here first.
+FORMAT = int(re.search(r"^pub const FORMAT: u32 = (\d+);", (here.parents[1] / "crates/core/src/store.rs").read_text(), re.M).group(1))
+assert FORMAT == 6, f"store::FORMAT is {FORMAT}: teach build.py that layout (docs/FORMAT.md)"
+# The device folder in .quiet/meta/ the app renames to this computer's id (guides.rs).
+DEVICE = "guides"
+# Folders in the guide library: key -> title, a folder on disk. The guides
+# name a folder with {{folder:key}}, so renaming one is done here.
+FOLDERS = ({"documents": "文档", "markdown-files": "Markdown 文件", "boards-folder": "画板", "data-tables-folder": "数据库", "everyday": "日常使用"} if zh else
+           {"documents": "Documents", "markdown-files": "Markdown files", "boards-folder": "Boards", "data-tables-folder": "Databases", "everyday": "Everyday use"})
 # The top level, in order; every entry gets its place, so the sidebar and
-# Home's manual order (the default) read the same.
-TOP = ["welcome", "documents", "markdown-files", "boards-folder", "data-tables-folder", "organize", "data", "personalize", "practice"]
+# Home's manual order (the default) read the same. Only Welcome is not in a folder.
+TOP = ["welcome", "documents", "markdown-files", "boards-folder", "data-tables-folder", "everyday"]
 # file stem -> (key, parent key, pinned); a parent is a key of FOLDERS
 KEYS = {
     "01-welcome": ("welcome", None, False),
@@ -50,20 +62,24 @@ KEYS = {
     "06a-trip": ("board-trip", "boards-folder", False),
     "07-data-tables": ("data-tables", "data-tables-folder", False),
     "07a-reading-list": ("reading-list", "data-tables-folder", False),
-    "08-organize": ("organize", None, False),
-    "09-data": ("data", None, False),
-    "10-personalize": ("personalize", None, False),
-    "11-practice": ("practice", None, False),
+    "07b-guide-index": ("guide-index", "data-tables-folder", False),
+    "08-organize": ("organize", "everyday", False),
+    "09-data": ("data", "everyday", False),
+    "10-personalize": ("personalize", "everyday", False),
 }
 # What is not a DocxXML document (a Markdown file, a 画板, a 数据表) is titled
 # by its file name: key -> title. Its source is copied as it is.
-NAMED = ({"md-example": "Markdown 示例", "board-trip": "规划一次旅行", "reading-list": "阅读清单"} if zh else
-         {"md-example": "Markdown example", "board-trip": "Plan a trip", "reading-list": "Reading list"})
+NAMED = ({"md-example": "Markdown 示例", "board-trip": "规划一次旅行", "reading-list": "阅读清单", "guide-index": "指南目录"} if zh else
+         {"md-example": "Markdown example", "board-trip": "Plan a trip", "reading-list": "Reading list", "guide-index": "Guide index"})
 ids = {k: str(uuid.uuid5(NS, k)) for k, _, _ in KEYS.values()}
 ids.update({k: str(uuid.uuid5(NS, k)) for k in FOLDERS})
 files = [p for p in sorted((here / "src" / ("zh" if zh else "")).iterdir()) if p.is_file() and not p.name.startswith(".")]
 ext = {KEYS[p.stem][0]: p.suffix for p in files}
 srcs = {KEYS[p.stem][0]: p.read_bytes() if p.suffix == ".sqlite" else p.read_text() for p in files}
+def folder(m):
+    assert m.group(1) in FOLDERS, f"unknown folder {m.group(1)}"
+    return FOLDERS[m.group(1)]
+srcs = {k: re.sub(r"\{\{folder:([a-z-]+)\}\}", folder, x) if isinstance(x, str) else x for k, x in srcs.items()}
 assert set(NAMED) == {k for k, e in ext.items() if e != ".xml"}, "NAMED must title every file that is not .xml"
 missing = set(ids) - set(srcs) - set(FOLDERS)
 assert not missing, f"no source for {missing}"
@@ -135,25 +151,39 @@ def fill(x):
 
 covers = set()
 
+def fill_notes(path):
+    """The 笔记 cells of the 数据表 at `path` that say {{doc:key}}: that guide's path from here_dir."""
+    db = sqlite3.connect(path)
+    for table, field in db.execute("SELECT table_name, name FROM _fields WHERE type = 'note'").fetchall():
+        for rid, v in db.execute(f'SELECT id, "{field}" FROM "{table}" WHERE "{field}" LIKE ?', ("{{%",)).fetchall():
+            k = re.fullmatch(r"\{\{doc:([a-z-]+)\}\}", v)
+            assert k and k.group(1) in paths and ext[k.group(1)] in (".xml", ".md"), f"{path.name}: {v} is not a document's"
+            db.execute(f'UPDATE "{table}" SET "{field}" = ? WHERE id = ?', (rel_path(here_dir, paths[k.group(1)]), rid))
+    db.commit()
+    db.close()
+
 if out.exists() and any(out.iterdir()):
     sys.exit(f"{out} is not empty")
 out.mkdir(parents=True, exist_ok=True)
 (out / ".quiet").mkdir()
-index = {}
+# id -> fields, as store's meta.rs writes them: `path` (a folder's ends in
+# `/`), `created` / `modified` in seconds, the place among siblings as a
+# fractional index in `order` (in a folder) or `root_order` (at the top).
+items = {}
 order = list(KEYS.values())
 inside = {}
 for k, title in FOLDERS.items():
     (out / file_name(title)).mkdir()
-    index[file_name(title) + "/"] = {"id": ids[k], "created": now - 3600, "modified": now}
+    items[ids[k]] = {"path": file_name(title) + "/", "created": now - 3600, "modified": now}
 for i, (k, parent, pinned) in enumerate(order):
     here_dir = paths[k].rpartition("/")[0]
     if ext[k] == ".xml": (out / paths[k]).write_text(fill(srcs[k]))
-    elif ext[k] == ".sqlite": (out / paths[k]).write_bytes(srcs[k])
+    elif ext[k] == ".sqlite": (out / paths[k]).write_bytes(srcs[k]); fill_notes(out / paths[k])
     else: (out / paths[k]).write_text(srcs[k])
     # Reading order is written out: TOP places the top level, and a folder's
     # pages are numbered in file order.
     t = now - 60 * i
-    meta = {"id": ids[k], "created": now - 3600 + i, "modified": t}
+    meta = {"path": paths[k], "created": now - 3600 + i, "modified": t}
     if pinned: meta["pinned"] = True
     if parent:
         assert parent in FOLDERS, f"{k}: pages live in folders, not under {parent}"
@@ -161,13 +191,31 @@ for i, (k, parent, pinned) in enumerate(order):
         meta["order"] = inside[parent]
     else:
         assert k in TOP, f"{k} is missing from TOP"
-    index[paths[k]] = meta
+    items[ids[k]] = meta
 assert set(TOP) == {k for k, p, _ in KEYS.values() if not p} | set(FOLDERS), "TOP must list every top-level entry"
-key_of = {**{k: paths[k] for k in paths}, **{k: file_name(t) + "/" for k, t in FOLDERS.items()}}
 for i, k in enumerate(TOP):
-    index[key_of[k]]["root_order"] = i + 1
-(out / ".quiet" / "index.json").write_text(json.dumps(dict(sorted(index.items())), ensure_ascii=False, indent=2) + "\n")
-(out / ".quiet" / "format.json").write_text('{\n  "format": 4\n}')
+    items[ids[k]]["root_order"] = i + 1
+# Ranks as keys: generate_n_keys_between(None, None, n) gives "a0" … "az".
+B62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+for f in items.values():
+    for field in ("order", "root_order"):
+        if field in f: assert f[field] <= len(B62); f[field] = "a" + B62[f[field] - 1]
+# Every field stamped now, in milliseconds: [value, stamp].
+stamp = now * 1000
+shards = {}
+for id, f in items.items():
+    # meta::shard_of: the low six bits of the SHA-1 of the id.
+    shards.setdefault(hashlib.sha1(id.encode()).digest()[0] & 63, {})[id] = {k: [v, stamp] for k, v in f.items()}
+dev = out / ".quiet" / "meta" / DEVICE
+dev.mkdir(parents=True)
+# As serde_json's to_vec_pretty writes them (struct fields in order, maps
+# sorted), so the app's first clean-up finds nothing to write again.
+pretty = lambda v: json.dumps(v, ensure_ascii=False, indent=2)
+(dev / "device.json").write_text(pretty({"id": DEVICE, "name": "", "platform": ""}))
+for n, its in sorted(shards.items()):
+    (dev / f"{n:02x}.json").write_text(pretty({"v": 1, "items": {id: dict(sorted(f.items())) for id, f in sorted(its.items())}}))
+# No id: the app gives each library its own when it seeds it.
+(out / ".quiet" / "format.json").write_text(pretty({"format": FORMAT}))
 if zh:
     # Images and covers come from the English library (see above).
     used = {m for x in srcs.values() if isinstance(x, str) for m in re.findall(r'(?:src|path)="assets/guides/([^"]+)"', x)}

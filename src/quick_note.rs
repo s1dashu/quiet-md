@@ -6,7 +6,7 @@ actions!(quick_note, [QuickNew]);
 struct QuickWindows(Vec<WindowHandle<crate::app::Workspace>>);
 impl Global for QuickWindows {}
 
-pub fn open(cx: &mut App) { open_document(None, cx); }
+pub fn open(cx: &mut App) { open_document(None, None, cx); }
 
 #[cfg(target_os = "macos")]
 #[derive(Default)]
@@ -24,11 +24,12 @@ pub fn open_last(cx: &mut App) {
     let id = cx.try_global::<LastDocument>().and_then(|s| s.0.clone()).filter(|id| entries.iter().any(|e| &e.id == id))
         .or_else(|| entries.iter().max_by_key(|e| e.meta.opened).map(|e| e.id.clone()));
     let Some(id) = id else { return };
-    show_document(id, cx);
+    show_document(id, None, cx);
 }
 
-/// The window showing document `id` comes forward; none does: a window of its own.
-pub fn show_document(id: String, cx: &mut App) {
+/// The window showing document `id` comes forward; none does: a window of its own,
+/// sized after the main window it was asked from (`opener`).
+pub fn show_document(id: String, opener: Option<Opener>, cx: &mut App) {
     for handle in cx.windows() {
         if let Some(handle) = handle.downcast::<crate::app::Workspace>()
             && handle.update(cx, |w, window, _| {
@@ -39,12 +40,53 @@ pub fn show_document(id: String, cx: &mut App) {
             }).unwrap_or(false)
         { if !crate::devtools::scripted() { cx.activate(true); } return; }
     }
-    open_document(Some(id), cx);
+    open_document(Some(id), opener, cx);
 }
 
-pub fn open_document(document: Option<String>, cx: &mut App) {
+/// What a window opened from a main window (在新窗口中打开) takes from it: its size, and its
+/// sidebar, open (how wide) or not. The new window's own sidebar is its own afterwards.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Opener { pub size: [f32; 2], pub sidebar: Option<f32> }
+
+/// Whose size a window's frame is written down as when it changes (`remember`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Frame {
+    /// The main window: its size and its spot (`window_size`, `window_origin`).
+    Main,
+    /// 快速笔记 / 快捷新建: `quick_note_size`.
+    Quick,
+    /// A document in a window of its own: sized after a main window, writes nothing down.
+    Document,
+}
+
+impl crate::app::Workspace {
+    /// What a window this one opens takes from it; only a main window passes anything on.
+    pub(crate) fn opener(&self, window: &Window) -> Option<Opener> {
+        if self.frame != Frame::Main { return None }
+        let s = window.window_bounds().get_bounds().size;
+        // In 专注模式 or too narrow, the sidebar is only away for now: as it will be again.
+        let open = self.focus_mode.sidebar_before().unwrap_or(self.sidebar_open || self.sidebar_auto_hidden);
+        Some(Opener { size: [f32::from(s.width), f32::from(s.height)], sidebar: open.then_some(self.sidebar_width) })
+    }
+}
+
+/// A new window's sidebar, open or not and how wide: the opener's; nothing to go by, closed at
+/// `width` (the last one dragged to).
+pub(crate) fn new_window_sidebar(opener: Option<Opener>, width: f32) -> (bool, f32) {
+    match opener.and_then(|o| o.sidebar) { Some(w) => (true, w), None => (false, width) }
+}
+
+/// A new window's size: a document's that of the main window it was opened from, else the main
+/// window's last (`main`); a quick note's its own last (`quick`), first 640 × 800.
+fn new_window_size(document: bool, opener: Option<Opener>, main: [f32; 2], quick: Option<[f32; 2]>) -> [f32; 2] {
+    if document { opener.map_or(main, |o| o.size) } else { quick.unwrap_or([640., 800.]) }
+}
+
+/// `document` in a window of its own (`None`: a new quick note).
+pub fn open_document(document: Option<String>, opener: Option<Opener>, cx: &mut App) {
     let stored = cx.try_global::<crate::shared_store::SharedStore>().and_then(|s| s.settings().quick_note_size);
-    let remembered = cx.try_global::<Sizes>().and_then(|s| s.quick).or(stored).unwrap_or([640., 800.]);
+    let main = cx.try_global::<Sizes>().and_then(|s| s.main).unwrap_or_else(|| { let s = main_window_size(cx); [f32::from(s.width), f32::from(s.height)] });
+    let remembered = new_window_size(document.is_some(), opener, main, cx.try_global::<Sizes>().and_then(|s| s.quick).or(stored));
     let mut previous = None;
     let handles = cx.try_global::<QuickWindows>().map(|w| w.0.clone()).unwrap_or_default();
     let mut alive = Vec::new();
@@ -84,7 +126,7 @@ pub fn open_document(document: Option<String>, cx: &mut App) {
         app_owns_titlebar_drag: true,
         focus: !crate::devtools::scripted(),
         ..Default::default()
-    }, |window, cx| { crate::devtools::opened(window, cx); cx.new(|cx| crate::app::Workspace::new_document_window(document, window, cx)) });
+    }, |window, cx| { crate::devtools::opened(window, cx); cx.new(|cx| crate::app::Workspace::new_document_window(document, opener, window, cx)) });
     match result {
         Ok(handle) => { cx.global_mut::<QuickWindows>().0.push(handle); if !crate::devtools::scripted() { cx.activate(true); } },
         Err(e) => eprintln!("无法打开快速笔记：{e}"),
@@ -168,22 +210,28 @@ pub fn register(cx: &mut App) -> bool {
 }
 
 /// Window sizes seen this session (quick note and main), saved on quit.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct Sizes { quick: Option<[f32; 2]>, main: Option<[f32; 2]>, main_pos: Option<([f32; 2], Option<String>)> }
 impl Global for Sizes {}
-pub fn remember(window: &Window, quick: bool, cx: &mut App) {
+pub fn remember(window: &Window, frame: Frame, cx: &mut App) {
+    if frame == Frame::Document { return }
     if let WindowBounds::Windowed(bounds) = window.window_bounds() {
-        let s = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
-        let mut sizes = cx.try_global::<Sizes>().cloned().unwrap_or_default();
-        if quick { sizes.quick = Some(s) } else {
-            sizes.main = Some(s);
-            // The display's UUID: a `DisplayId` is only meaningful inside one
-            // run, so it cannot be the thing we write down.
-            let display = window.display(cx).and_then(|d| d.uuid().ok()).map(|u| u.to_string());
-            sizes.main_pos = Some(([f32::from(bounds.origin.x), f32::from(bounds.origin.y)], display));
-        }
-        cx.set_global(sizes);
+        // The display's UUID: a `DisplayId` is only meaningful inside one
+        // run, so it cannot be the thing we write down.
+        let display = if frame == Frame::Main { window.display(cx).and_then(|d| d.uuid().ok()).map(|u| u.to_string()) } else { None };
+        let sizes = cx.try_global::<Sizes>().cloned().unwrap_or_default();
+        cx.set_global(remembered(sizes, frame, bounds, display));
     }
+}
+/// `sizes` with a window's new frame written down as its `frame` says.
+fn remembered(mut sizes: Sizes, frame: Frame, bounds: gpui::Bounds<Pixels>, display: Option<String>) -> Sizes {
+    let s = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
+    match frame {
+        Frame::Quick => sizes.quick = Some(s),
+        Frame::Main => { sizes.main = Some(s); sizes.main_pos = Some(([f32::from(bounds.origin.x), f32::from(bounds.origin.y)], display)); }
+        Frame::Document => {}
+    }
+    sizes
 }
 pub fn persist(cx: &mut App) {
     let (Some(sizes), Some(store)) = (cx.try_global::<Sizes>().cloned(), cx.try_global::<crate::shared_store::SharedStore>()) else { return };
@@ -264,4 +312,43 @@ fn set(id: u32, combo: &str, _: &mut App) -> anyhow::Result<()> {
     let error = crate::settings::tr("当前系统暂不支持全局快捷键", "Global shortcuts are not supported on this platform yet");
     HOTKEY_ERROR.lock().unwrap()[id as usize - 1] = Some(error.into());
     Err(anyhow::anyhow!(error))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Frame, Opener, Sizes, new_window_sidebar, new_window_size, remembered};
+    use gpui::{point, px, size};
+    const MAIN: [f32; 2] = [1280., 800.];
+
+    #[test]
+    fn a_document_window_takes_the_main_windows_size() {
+        let opener = Opener { size: [1500., 900.], sidebar: None };
+        // the main window it was opened from, else the main window's last; never the quick note's
+        assert_eq!(new_window_size(true, Some(opener), MAIN, Some([640., 800.])), [1500., 900.]);
+        assert_eq!(new_window_size(true, None, MAIN, Some([640., 800.])), MAIN);
+        // a quick note keeps its own
+        assert_eq!(new_window_size(false, Some(opener), MAIN, Some([700., 600.])), [700., 600.]);
+        assert_eq!(new_window_size(false, None, MAIN, None), [640., 800.]);
+    }
+
+    #[test]
+    fn a_document_window_takes_the_main_windows_sidebar() {
+        let open = Opener { size: MAIN, sidebar: Some(320.) };
+        assert_eq!(new_window_sidebar(Some(open), 280.), (true, 320.));
+        assert_eq!(new_window_sidebar(Some(Opener { sidebar: None, ..open }), 280.), (false, 280.));
+        // opened from no main window (a global shortcut, a file from Finder): closed, as before
+        assert_eq!(new_window_sidebar(None, 280.), (false, 280.));
+    }
+
+    #[test]
+    fn only_its_own_kind_of_window_writes_a_size_down() {
+        let at = |x: f32, w: f32| gpui::Bounds { origin: point(px(x), px(40.)), size: size(px(w), px(700.)) };
+        let start = Sizes { quick: Some([640., 800.]), main: Some(MAIN), main_pos: Some(([10., 20.], Some("d".into()))) };
+        // a document's window resized or moved: neither the quick note's size nor the main window's frame
+        assert_eq!(remembered(start.clone(), Frame::Document, at(300., 900.), None), start);
+        let quick = remembered(start.clone(), Frame::Quick, at(300., 900.), None);
+        assert_eq!((quick.quick, quick.main, quick.main_pos.clone()), (Some([900., 700.]), start.main, start.main_pos.clone()));
+        let main = remembered(start.clone(), Frame::Main, at(300., 1000.), Some("e".into()));
+        assert_eq!((main.quick, main.main, main.main_pos), (start.quick, Some([1000., 700.]), Some(([300., 40.], Some("e".into())))));
+    }
 }

@@ -243,7 +243,7 @@ impl Workspace {
             Ok(true) => self.show_toast_kind(crate::editor_ui::ToastKind::Success, crate::settings::tr("已保存当前版本", "Saved a version"), cx),
             // Identical text never adds a snapshot; say so rather than let the
             // click look broken.
-            Ok(false) => self.show_toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("内容与上一份相同，没有新增版本", "Same as the newest version; nothing added"), cx),
+            Ok(false) => self.show_toast_kind(crate::editor_ui::ToastKind::Info, crate::settings::tr("与最新版本相同", "Same as the newest version"), cx),
             Err(e) => return self.set_history_error(e.to_string(), cx),
         }
         self.refresh_history(window, cx);
@@ -288,9 +288,9 @@ impl Workspace {
 
     pub fn restore_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((id, name)) = self.history.as_ref().and_then(|h| h.selected.clone().map(|n| (h.id.clone(), n))) else { return };
-        // a 数据表 writes as it is edited: nothing of the present may be pending when its file is replaced
+        // a 数据库 writes as it is edited: nothing of the present may be pending when its file is replaced
         let table = self.is_table(&id);
-        // a build without 数据表 leaves its file as it is
+        // a build without 数据库 leaves its file as it is
         if table { if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); } crate::table::flush_all(cx); }
         let doc = match self.store.restore_version(&id, &name) {
             Ok(d) => d,
@@ -301,7 +301,8 @@ impl Workspace {
         self.exit_preview(cx);
         self.history = None;
         if self.store.save(&id, &doc).is_err() {
-            self.show_toast_kind(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败：当前版本未被改动。", "Restore failed; the current version was left alone."), cx);
+            self.show_toast_with(crate::design::Toast::new(crate::editor_ui::ToastKind::Error, crate::settings::tr("恢复失败", "Restore failed"))
+                .description(crate::settings::tr("当前版本保持原样", "The current version stays as it was")), cx);
             return;
         }
         if table && let Some(p) = self.store.file_path(&id) { crate::table::reload(&p, cx); }

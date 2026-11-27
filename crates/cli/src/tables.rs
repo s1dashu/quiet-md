@@ -387,15 +387,15 @@ fn group_tree(t: &Table, rows: &[Row], at: &mut usize, level: usize, row: &dyn F
 }
 
 impl Session {
-    /// The 数据表 a document is or shows: `at` a datatable block, else its first one.
+    /// The 数据库 a document is or shows: `at` a datatable block, else its first one.
     fn table_ref(&mut self, a: &Value) -> R<TableRef> {
         let i = self.doc_arg(a)?;
         let d = &self.docs[i];
         Ok(match arg(a, "at") {
-            Some(x) => { let id = blocks::resolve(&d.doc, x)?; match &blocks::find(&d.doc, id).unwrap().kind { BlockKind::DataTable(t) => t.clone(), k => return Err(fail("bad_kind", format!("{x} is a {} block, not a 数据表", blocks::kind_name(k)))) } }
+            Some(x) => { let id = blocks::resolve(&d.doc, x)?; match &blocks::find(&d.doc, id).unwrap().kind { BlockKind::DataTable(t) => t.clone(), k => return Err(fail("bad_kind", format!("{x} is a {} block, not a 数据库", blocks::kind_name(k)))) } }
             None => match d.doc.blocks.iter().find_map(|b| if let BlockKind::DataTable(t) = &b.kind { Some(t.clone()) } else { None }) {
                 Some(t) => t,
-                None => return Err(fail("bad_kind", format!("{} holds no 数据表", d.path)).hint("pass --at <ref> of a datatable block")),
+                None => return Err(fail("bad_kind", format!("{} holds no 数据库", d.path)).hint("pass --at <ref> of a datatable block")),
             },
         })
     }

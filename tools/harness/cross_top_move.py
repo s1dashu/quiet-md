@@ -9,6 +9,9 @@ folders, One and Two (`QUIET_MD_FOLDERS`); every write is held back
                   One (and that page's of it) written by id; ⌘Z brings it back into One
   sidebar_doc     a page dragged onto a folder of Two
   move_dialog     移动到 a page into a folder of Two, picked in the dialog's tree
+  move_to_top     移动到 opened in Two: titled from Two, the top-level folders the tree's first rows
+                  (no 我的文档 above them); a folder of Two moved to One's top level
+  move_lone       with One the only top-level folder: a row stands in for it, and picking it moves a page to its top level
   open_page       the page open in the editor goes with its folder and is typed into: saved in Two
   fails           a folder of Two that cannot be written to: the row is back in One, nothing moved
 
@@ -50,14 +53,15 @@ def library(src):
     return src
 
 
-def run(name, script, locked=None):
-    """The script on a fresh copy of `library`, with folder `locked` (relative to the copy) read-only meanwhile."""
+def run(name, script, locked=None, tops=("One", "Two")):
+    """The script on a fresh copy of `library`, with folder `locked` (relative to the copy) read-only meanwhile,
+    and `tops` the top-level folders open."""
     out = work / name
     out.mkdir(parents=True)
     lib = out / "lib"
     shutil.copytree(library(work / f"src-{name}"), lib)
     folders = out / "folders.json"
-    folders.write_text(json.dumps({"v": 1, "folders": [{"key": "k-one", "path": str(lib / "One"), "added": 1}, {"key": "k-two", "path": str(lib / "Two"), "added": 2}]}))
+    folders.write_text(json.dumps({"v": 1, "folders": [{"key": f"k-{t.lower()}", "path": str(lib / t), "added": i + 1} for i, t in enumerate(tops)]}))
     (out / "s.txt").write_text("resize 1300 850\nwait 300\nmove 700 500\nwait 1200\n" + script + "\nquit\n")
     binary = os.environ.get("FDL_BIN") or str(here.parent.parent / "target" / "release" / "quiet_md")
     env = {"HOME": os.path.expanduser("~"), "QUIET_MD_HOME": str(lib), "QUIET_MD_FOLDERS": str(folders), "FDL_SCRIPT": str(out / "s.txt"), "FDL_SHOTS": str(out),
@@ -121,14 +125,32 @@ def sidebar_doc():
     assert (lib / "Two" / "Target" / "Loose.xml").is_file() and not (lib / "One" / "Loose.xml").exists(), sorted(str(p.relative_to(lib)) for p in lib.rglob("*.xml"))
 
 
-# 移动到 on Loose, Two opened in the dialog's tree, Target in it, OK.
-MOVE = "rrow Loose\nwait 300\nrow Move to\nwait 500\nclick 536 250\nwait 400\nshot dialog\nclick 618 282\nwait 300\nclick 1017 710\nwait 200\nshot ahead\n"
+# 移动到 on Loose, Two opened in the dialog's tree (its arrow, at the row's left), Target in it, OK.
+def opened(name): return f"downat move:{name} 0.045 0.5\nupat move:{name} 0.045 0.5\nwait 400\n"
+MOVE = "rrow Loose\nwait 300\nrow Move to\nwait 500\n" + opened("Two") + "shot dialog\nanchor move:Target\nwait 300\nanchor move-ok\nwait 200\nshot ahead\n"
 
 
 def move_dialog():
     code, lib, log = run("move_dialog", MOVE + "wait 3000\nshot landed\n")
     assert code == 0, log[-600:]
     assert (lib / "Two" / "Target" / "Loose.xml").is_file() and not (lib / "One" / "Loose.xml").exists(), sorted(str(p.relative_to(lib)) for p in lib.rglob("*.xml"))
+
+
+def move_to_top():
+    # Target, in Two (opened in the sidebar first): 移动到, One picked, OK.
+    script = "hoverrow Two\nwait 300\nclick 59 195\nwait 600\nrrow Target\nwait 300\nrow Move to\nwait 500\nshot dialog\n" + opened("One") + "shot opened\nanchor move:One\nwait 300\nshot picked\nanchor move-ok\nwait 3000\nshot landed\n"
+    code, lib, log = run("move_to_top", script)
+    assert code == 0, log[-600:]
+    assert (lib / "One" / "Target" / "Keep.xml").is_file() and not (lib / "Two" / "Target").exists(), sorted(str(p.relative_to(lib)) for p in lib.rglob("*.xml"))
+    assert "Target/Keep.xml" in ids(lib, "One") and "Target/Keep.xml" not in ids(lib, "Two")
+
+
+def move_lone():
+    # One alone: Project opened in the sidebar, Alpha in it, 移动到 One's own row.
+    script = "hoverrow Project\nwait 400\nclick 30 152\nwait 500\nrrow Alpha\nwait 300\nrow Move to\nwait 500\nshot dialog\nanchor move:One\nwait 300\nshot picked\nanchor move-ok\nwait 3000\nshot landed\n"
+    code, lib, log = run("move_lone", script, tops=("One",))
+    assert code == 0, log[-600:]
+    assert (lib / "One" / "Alpha.xml").is_file() and not (lib / "One" / "Project" / "Alpha.xml").exists(), sorted(str(p.relative_to(lib)) for p in lib.rglob("*.xml"))
 
 
 def open_page():
@@ -149,7 +171,7 @@ def fails():
     assert "Target/Loose.xml" not in ids(lib, "Two")
 
 
-CASES = {"sidebar_folder": sidebar_folder, "sidebar_doc": sidebar_doc, "move_dialog": move_dialog, "open_page": open_page, "fails": fails}
+CASES = {"sidebar_folder": sidebar_folder, "sidebar_doc": sidebar_doc, "move_dialog": move_dialog, "move_to_top": move_to_top, "move_lone": move_lone, "open_page": open_page, "fails": fails}
 failed = []
 for name in sys.argv[1:] or CASES:
     try:

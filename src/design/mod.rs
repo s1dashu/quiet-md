@@ -22,6 +22,7 @@ pub mod dialog;
 pub mod field;
 pub mod menu;
 pub mod scroll;
+pub mod toast;
 pub mod toolbar;
 
 // The library's surface, whether or not every piece has a caller yet.
@@ -32,7 +33,9 @@ pub use badge::{Badge, Kbd, KbdGroup};
 #[allow(unused_imports)]
 pub use button::{Button, ButtonSize, ButtonVariant};
 #[allow(unused_imports)]
-pub use card::{Card, Item, Separator, Toast, ToastTone};
+pub use card::{Card, Item, Separator};
+#[allow(unused_imports)]
+pub use toast::{Toast, ToastTone};
 #[allow(unused_imports)]
 pub use control::{Checkbox, Radio, Segment, Segmented, Slider, Swatch, Switch};
 #[allow(unused_imports)]
@@ -322,7 +325,7 @@ pub const T: Geo = Geo {
 
 /// How far a page's own surface sits in from the pane under the header, on the sides and at the
 /// foot: the header's margin round its buttons, so the surface lines up with them. At the top it
-/// starts at the header's foot (that margin is already above it). The 数据表's sheet and the board's
+/// starts at the header's foot (that margin is already above it). The 数据库's sheet and the board's
 /// floating controls (menu, tool bar, styles panel, zoom, help) both keep to it.
 pub const PAGE_INSET: f32 = (crate::app::HEADER_H - crate::app::HEADER_ACTIONS_H) / 2.;
 

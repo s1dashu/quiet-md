@@ -10,7 +10,7 @@
 <tr><td><p>表格、任务列表、删除线</p></td><td><p>GFM，即 GitHub 带火的扩展语法</p></td></tr>
 <tr><td><p>front matter</p></td><td><p>一种约定：文件开头两行 <code>---</code> 之间的 YAML。Quiet.md 原样保留，不显示在页面上。</p></td></tr>
 <tr><td><p>公式</p></td><td><p>一种约定：写在 <code>$</code> 或 <code>$$</code> 之间的 LaTeX</p></td></tr>
-<tr><td><p>Mermaid 图表</p></td><td><p>一种约定：语言写成 <code>mermaid</code> 的代码块。Quiet.md 会把它画成图（和 GitHub、Obsidian 一样）；文件里仍是标准代码块，在不支持的编辑器里显示为代码。</p></td></tr>
+<tr><td><p>Mermaid 图表</p></td><td><p>一种约定：语言写成 <code>mermaid</code> 的代码块。Quiet.md 把它当作普通代码块显示，原样保存；GitHub、Obsidian 会把它画成图。</p></td></tr>
 </tbody></table>
 <h1>在任何页面里打 Markdown</h1><p>不管是不是 Markdown 页面，输入下面这些标记都会即时排版。除非另有说明，都是在行首输入标记再加一个空格。</p>
 <table><colgroup><col width="310"/><col width="380"/></colgroup><tbody>

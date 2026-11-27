@@ -28,7 +28,7 @@
 <h1>Inline code</h1><p>Use inline code for commands, filenames and function names: <code>brew install ripgrep</code> or <code>~/.zshrc</code>. Wrap text in backticks as you type, or select it and press <code>⌘ ⌃ C</code>.</p>
 <h1>Code blocks</h1><h2>Insert a block</h2><ul><li>Type three backticks at the start of a line, then Space or Enter. Add a language, as in <code>```python</code>, to select it immediately.</li><li>Choose Code block from the slash menu, or press <code>⌘ ⌥ C</code>.</li><li>Use the block menu to turn an existing paragraph into code.</li></ul>
 <p>Inside a code block, Tab inserts four spaces, Shift-Tab reduces indentation, and Enter starts a new line. Markdown formatting is disabled and pasted content is treated as plain text.</p>
-<h2>Languages and highlighting</h2><p>Hover over a code block to choose its language. The searchable picker supports more than seventy languages.</p><p>Set the language to Mermaid and Quiet.md draws the code as a diagram: flowcharts, sequence diagrams, Gantt charts and more. Hover over it and choose Hide diagram to edit the code; Show diagram brings the picture back. {{doc:markdown}} has an example.</p>
+<h2>Languages and highlighting</h2><p>Hover over a code block to choose its language. The searchable picker supports more than seventy languages.</p>
 <pre lang="python" caption="fetch_weather.py"><code>import json
 from urllib.request import urlopen
 

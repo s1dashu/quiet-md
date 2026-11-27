@@ -101,7 +101,7 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
             .child(Button::outline("install-cli").sized(ButtonSize::Sm).label(if done { tr("已安装", "Installed") } else { tr("安装命令行工具", "Install Command") }).disabled(done || bundled_cli().is_none())
                 .on_click(cx.listener(|w, _, _, cx| match install_link() {
                     Ok(_) => { w.show_toast_kind(ToastKind::Success, tr("已安装到 ~/.local/bin", "Installed in ~/.local/bin"), cx); cx.notify(); }
-                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("没有装上：{}", "Could not install: {}", e), cx),
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("安装失败", "Install failed")).description(e.to_string()), cx),
                 })))
             .child(small(tr("装到 ~/.local/bin，不需要管理员密码", "Goes in ~/.local/bin, no password needed")))
             .into_any_element())
@@ -113,7 +113,7 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     let platform: Option<AnyElement> = None;
     let cli_body = platform.into_iter().chain([code("copy-cli", tr("quiet ls\nquiet read 文件夹/文档\nquiet help", "quiet ls\nquiet read Folder/Note\nquiet help").into(), cx).into_any_element()]).collect();
-    let cli = part("CLI", None, tr("Skill 配套的命令行工具：在终端里用 quiet 命令列出、读写、搜索文档和数据表。", "The command the skill uses: list, read, write and search documents and data tables with quiet."), cli_body);
+    let cli = part("CLI", None, tr("Skill 配套的命令行工具：在终端里用 quiet 命令列出、读写、搜索文档和数据库。", "The command the skill uses: list, read, write and search documents and databases with quiet."), cli_body);
     let card = |id: &'static str, part: AnyElement| crate::design::Card::new(id).w_full().overflow_hidden().child(part).into_any_element();
     div().w_full().flex().flex_col().gap(px(geo().section_gap))
         .child(card("agents-skill", skill)).child(card("agents-ask", ask)).child(card("agents-cli", cli))

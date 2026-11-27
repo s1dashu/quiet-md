@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::{Input, execute};
 
-const INSTRUCTIONS: &str = "Quiet.md is a notes library of documents, boards and data tables. Read the guide first: call `quiet` with args [\"skill\"]. Use `quiet` for one step (outline, read a section, insert…) and `quiet_run` for anything with a loop or several steps.";
+const INSTRUCTIONS: &str = "Quiet.md is a notes library of documents, boards and databases. Read the guide first: call `quiet` with args [\"skill\"]. Use `quiet` for one step (outline, read a section, insert…) and `quiet_run` for anything with a loop or several steps.";
 
 fn tools() -> Value {
     json!([

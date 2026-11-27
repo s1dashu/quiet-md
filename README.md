@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="A long note open in Quiet.md, with headings, inline math and a table of ion concentrations.">
 </p>
 
-Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Mermaid code blocks draw as diagrams. Data tables keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
+Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Databases keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
 
 ### Draw
 
@@ -77,7 +77,7 @@ Import from Another App… (in the File menu) finds your Obsidian, Logseq, iA Wr
 
 ### Work with agents
 
-The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to data tables and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. Settings › Agent Connector gives your agent one line to paste and, on macOS, installs the command. The [Quiet.md agent skill](#use-with-ai-agents) teaches Claude Code, Codex and other agents to reach for `quiet` whenever you ask about your notes. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off Settings › General › Anonymous usage statistics stops it.
+The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) read, search and edit the same library you write in. It finds blocks by outline, edits through the same engine as the app, rewrites links when notes move, adds rows to databases and draws on boards, and refuses to overwrite what you changed since it read. A note you have open takes in the agent's edit as it lands, every save keeps the previous text as a version, and `quiet run` takes a whole JavaScript script as one change that is written in full or not at all. Settings › Agent Connector gives your agent one line to paste and, on macOS, installs the command. The [Quiet.md agent skill](#use-with-ai-agents) teaches Claude Code, Codex and other agents to reach for `quiet` whenever you ask about your notes. `quiet` counts which of its commands run each day, under a random id and never with your notes, and sends the counts once a day; `quiet telemetry off`, `DO_NOT_TRACK=1` or turning off Settings › General › Anonymous usage statistics stops it.
 
 `quiet` ships inside the app. On macOS, put it on your PATH with `ln -s /Applications/quiet.md.app/Contents/MacOS/quiet /usr/local/bin/quiet`; on Windows it sits beside `quiet_md.exe` in the install folder. See [docs/design/CLI.md](docs/design/CLI.md).
 
@@ -101,7 +101,7 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) r
 - [x] Writing modes: focus, typewriter and paragraph focus
 - [x] Themes, dark mode and nine languages
 - [x] A `quiet` CLI and skill for AI agents
-- [ ] Data tables (in progress)
+- [ ] Databases (in progress)
 - [ ] Mermaid diagrams (in progress)
 - [ ] Mobile support: iPhone, iPad and Android (in progress)
 - [ ] Sync across devices (in progress)

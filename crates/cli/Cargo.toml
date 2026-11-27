@@ -4,7 +4,7 @@
 # but the library through the API), committed as one transaction.
 [package]
 name = "quiet_cli"
-version = "0.1.14"
+version = "0.2.0"
 edition = "2024"
 description = "The Quiet.md library from the command line: read, search, edit and script it"
 license = "MIT"

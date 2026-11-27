@@ -1,11 +1,10 @@
-//! Surfaces in a page (shadcn's `Card`, `Item`, `Separator`) and the transient note (Sonner's toast).
+//! Surfaces in a page (shadcn's `Card`, `Item`, `Separator`).
 //!
 //! ```ignore
 //! Card::new("prefs").child(row).child(Separator::new()).child(row)
-//! Toast::new(ToastTone::Success, "已复制")
 //! ```
 
-use super::base::{element, icon, label, under};
+use super::base::{element, label, under};
 use super::{color, geo, shadow};
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -43,33 +42,6 @@ impl RenderOnce for Separator {
         let mut d = self.base;
         let caller = std::mem::take(d.style());
         let mut d = d.flex_none().bg(color::border()).when(self.vertical, |d| d.w(px(1.)).h_full()).when(!self.vertical, |d| d.h(px(1.)).w_full());
-        d.style().refine(&caller);
-        d
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ToastTone { Success, Error, Info }
-
-/// A toast (Sonner as shadcn ships it: `popover` under `popover-foreground`, `rounded-2xl`, 356 wide,
-/// p-4, gap 6, 13pt text, Lucide's outline mark at 16 in the text's colour, an error's too) at level 2
-/// (`shadow::toast`: the popover's edge over a shallower drop).
-#[derive(IntoElement)]
-pub struct Toast { base: Div, tone: ToastTone, text: SharedString }
-impl Styled for Toast { fn style(&mut self) -> &mut StyleRefinement { self.base.style() } }
-impl Toast {
-    pub fn new(tone: ToastTone, text: impl Into<SharedString>) -> Self { Toast { base: div(), tone, text: text.into() } }
-}
-impl RenderOnce for Toast {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        let g = geo();
-        let mark = match self.tone { ToastTone::Success => "circle-check", ToastTone::Error => "octagon-x", ToastTone::Info => "info" };
-        let glyph = icon(mark, 16., color::foreground()).flex_none();
-        let mut d = self.base;
-        let caller = std::mem::take(d.style());
-        let mut d = d.w(px(356.)).flex().items_center().gap(px(6.)).px(px(g.toast_px)).py(px(g.toast_py)).rounded(px(g.toast_r)).bg(color::popover()).shadow(shadow::toast())
-            .font_family(crate::theme::ui_family()).text_size(px(13.)).line_height(px(super::text::SM_LINE)).text_color(color::foreground())
-            .child(glyph).child(label(self.text));
         d.style().refine(&caller);
         d
     }

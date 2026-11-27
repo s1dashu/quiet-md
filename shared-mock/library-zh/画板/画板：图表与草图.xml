@@ -19,4 +19,4 @@
 <callout emoji="📤" background-color="light-blue" border-color="blue"><p>把文档连同附带的文件一起导出为 Markdown 时，每个画板会存成一张 SVG 图片，旁边附上它的 <code>.excalidraw</code> 文件。导出为 HTML 和 PDF 时，画板以图片形式呈现。</p></callout>
 <h1>示例画板</h1><p>这个文件夹里的 <cite type="doc" href="规划一次旅行.excalidraw" file-type="docx">规划一次旅行</cite> 是一个独立的画板文件，也就是文档文件夹里的一个 <code>.excalidraw</code> 文件。你可以随意修改它。</p>
 <ul><li>一张照片，用插入图像工具插入，或直接粘贴进来。</li><li>四个步骤，用箭头串起来；移动方框时，箭头会跟着走。</li><li>一个名为“行李清单”的画框，里面放着三张便签。移动画框，里面的内容也会一起移动。</li></ul>
-<p>试一试：选中一个步骤，按 <code>⌘ →</code> 添加下一步；或者把一张便签拖出画框。</p><hr/><p>下一篇：<cite type="doc" href="../数据表/数据表：记录、字段与筛选.xml" file-type="docx">数据表：记录、字段与筛选</cite>。</p>
+<p>试一试：选中一个步骤，按 <code>⌘ →</code> 添加下一步；或者把一张便签拖出画框。</p><hr/><p>下一篇：<cite type="doc" href="../数据库/数据库：记录、字段与筛选.xml" file-type="docx">数据库：记录、字段与筛选</cite>。</p>

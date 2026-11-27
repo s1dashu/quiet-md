@@ -166,7 +166,7 @@ impl RenderOnce for Radio {
     }
 }
 
-/// A colour to pick (shadcn has none; ours: the 数据表's option colours and 填色, the board's
+/// A colour to pick (shadcn has none; ours: the 数据库's option colours and 填色, the board's
 /// colours): `fill` on a square at `rounded-sm` with a 1pt `border` hairline; picked, a 2pt `ring`.
 /// Borders, not a ring in the shadow: GPUI paints a shadow under the box too, and fills may be
 /// translucent. Its children sit on the colour (a ✓, a key, the checker of no colour).

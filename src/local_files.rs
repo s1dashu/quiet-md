@@ -20,7 +20,7 @@ pub fn is_markdown_path(p: &std::path::Path) -> bool {
 /// A file Quiet.md edits where it is, by the one list of what it opens
 /// (`shown::LIBRARY_FILES`): Markdown. `Store::open_local` keeps a 本机文件 as
 /// Markdown only: a DocxXML page's file is named by its title and its links and
-/// pictures are read from the library, a 数据表 is found by its place there, and a
+/// pictures are read from the library, a 数据库 is found by its place there, and a
 /// 画板 keeps its pictures there, so those are not opened in place.
 pub fn opens_here(p: &std::path::Path) -> bool {
     p.file_name().and_then(|n| n.to_str()).and_then(fdl_core::shown::kind_of_name).is_some_and(|(kind, markdown)| kind.is_doc() && markdown)
@@ -62,7 +62,7 @@ impl Workspace {
         for p in &md {
             match self.store.open_local(p) {
                 Ok(id) => last = Some(id),
-                Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
+                Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("打开文件失败", "Opening the file failed")).description(crate::settings::diagnostic(&e.to_string())), cx),
             }
         }
         self.entries.set(self.store.list());
@@ -70,7 +70,8 @@ impl Workspace {
         if let Some(id) = last {
             if self.entries.iter().any(|e| e.id == id && e.meta.local()) {
                 // This window is being updated: the others are looked through once it is done.
-                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+                let opener = self.opener(window);
+                cx.defer(move |cx| crate::quick_note::show_document(id, opener, cx));
             } else { self.open(&id, window, cx); }
         }
         cx.notify();
@@ -78,15 +79,16 @@ impl Workspace {
 
     /// An attachment Quiet.md edits (`opens_here`): opened where it is like
     /// 打开文件…, in a window of its own, or the window already showing it.
-    pub(crate) fn open_in_own_window(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+    pub(crate) fn open_in_own_window(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         match self.store.open_local(path) {
             Ok(id) => {
                 self.entries.set(self.store.list());
                 self.sort();
                 // This window is being updated: the others are looked through once it is done.
-                cx.defer(move |cx| crate::quick_note::show_document(id, cx));
+                let opener = self.opener(window);
+                cx.defer(move |cx| crate::quick_note::show_document(id, opener, cx));
             }
-            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文件：{}", "Could not open file: {}", crate::settings::diagnostic(&e.to_string())), cx),
+            Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("打开文件失败", "Opening the file failed")).description(crate::settings::diagnostic(&e.to_string())), cx),
         }
         cx.notify();
     }
@@ -149,7 +151,7 @@ impl Workspace {
             }
         };
         let Some(path) = path.fs_canonicalize().ok().filter(|p| p.fs_exists()) else {
-            self.show_toast_kind(ToastKind::Error, tr("文件不存在", "File not found"), cx);
+            self.show_toast_kind(ToastKind::Error, tr("文件已移走或删除", "The file was moved or deleted"), cx);
             return;
         };
         let existing = self.entries.iter().find(|e| self.store.file_path(&e.id)

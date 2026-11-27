@@ -263,7 +263,7 @@ impl Workspace {
         let b = self.view.eq(&crate::app::View::Trash).then(|| self.folder_page.anchor("trash-days")).flatten()?;
         let days = self.store.trash_days();
         let set = |n: u64, close: bool| cx.listener(move |w: &mut Workspace, _: &ClickEvent, _: &mut Window, cx: &mut Context<Workspace>| {
-            if w.store.set_trash_days(n).is_err() { w.show_toast(crate::settings::tr("设置保存失败", "Couldn’t save the setting"), cx); }
+            if w.store.set_trash_days(n).is_err() { w.show_toast(crate::settings::tr("设置保存失败", "Saving the setting failed"), cx); }
             if close { w.trash_days_menu = false; }
             w.trash = w.store.list_trash();
             cx.notify();
@@ -290,11 +290,13 @@ impl Workspace {
         let file_before = self.store.track_file_changes();
         match self.store.restore(id) {
             Ok(moved) => {
-                self.show_toast(if moved { crate::settings::text("恢复成功。部分文档由于原位置不存在，已恢复到“我的文档”") } else { crate::settings::text("恢复成功") }, cx);
+                let t = crate::design::Toast::new(crate::ui::ToastKind::Success, crate::settings::text("恢复成功"));
+                // a page whose folder is gone came back to 我的文档
+                self.show_toast_with(if moved { t.description(crate::settings::tr("原位置已删除的文档放在了“我的文档”", "Pages whose folder is gone are in My documents")) } else { t }, cx);
             }
             Err(e) => {
                 let detail = e.chain().map(|cause| crate::settings::diagnostic(&cause.to_string())).collect::<Vec<_>>().join(": ");
-                let msg = crate::localized_format!("恢复失败：{}", "Could not restore document: {}", detail);
+                let msg = crate::localized_format!("恢复失败：{}", "Restoring the document failed: {}", detail);
                 self.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
                 self.status = crate::app::SaveStatus::Failed(msg);
             }
@@ -357,7 +359,7 @@ impl Workspace {
                 errors.extend(listed.warnings.iter().map(|s| crate::settings::diagnostic(s)));
                 if errors.is_empty() { w.show_toast(success, cx); }
                 else {
-                    let msg = errors.iter().map(|e| crate::localized_format!("删除失败：{}", "Could not delete document: {}", crate::settings::diagnostic(e))).collect::<Vec<_>>().join("；");
+                    let msg = errors.iter().map(|e| crate::localized_format!("删除失败：{}", "Deleting the document failed: {}", crate::settings::diagnostic(e))).collect::<Vec<_>>().join("；");
                     w.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
                     w.status = crate::app::SaveStatus::Failed(msg);
                 }
@@ -385,7 +387,8 @@ impl Workspace {
 
     pub(crate) fn sweep_failed(&mut self, e: &anyhow::Error, cx: &mut Context<Self>) {
         log::warn!("unused assets: {e:#}");
-        self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法读取文档库，未清理：{}", "Could not read the library; nothing was removed: {}", e), cx);
+        self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("读取文档库失败", "Reading the library failed"))
+            .description(crate::localized_format!("文件都保持原样：{}", "Every file stays as it was: {}", e)), cx);
     }
 
     /// 设置 › 文档库 › 未使用资源 (#237): take away the listed files that are
@@ -402,7 +405,7 @@ impl Workspace {
                 anyhow::Ok(crate::store::Store::remove_unused_assets(&root, &names))
             }).await;
             let _ = this.update(cx, |w, cx| match gone {
-                Ok(0) => w.show_toast(crate::settings::text("没有可清理的资源"), cx),
+                Ok(0) => w.show_toast_kind(ToastKind::Info, crate::settings::text("资源都在使用中"), cx),
                 Ok(n) => w.show_toast_kind(ToastKind::Success, &crate::localized_format!("已移出 {} 个未使用资源", "Moved {} unused assets out of the asset folder", n), cx),
                 Err(e) => w.sweep_failed(&e, cx),
             });

@@ -34,11 +34,14 @@ if [ -n "$HM" ]; then
   for n in home write board; do
     [ -f "$work/hm-run/readme-$n.png" ] || { echo "shots.sh: readme-$n.png missing (see $work/hm-run/log)" >&2; exit 1; }
   done
-  # shot at 1344pt wide (four columns), shrunk to the 1000pt frame the others have
-  compose "$work/hm-run/readme-home.png" "$work/readme-home.png" --scale 0.7440476 --sidebar 357
+  # shot at 1344pt wide (four columns) and kept at its own 2x pixels: the canvas grows with it
+  # (the 2400×1500 frame's margins ×1.344), so no text is resampled
+  compose "$work/hm-run/readme-home.png" "$work/readme-home.png" --sidebar 480 --canvas 3226 2016 --at 269 181
   compose "$work/hm-run/readme-write.png" "$work/readme-write.png" --sidebar 480
   compose "$work/hm-run/readme-board.png" "$work/readme-board.png" --sidebar 480
   for n in home write board; do cwebp -quiet -q 82 "$work/readme-$n.png" -o "docs/images/readme-$n.webp"; done
-  sips -Z 1600 -s format jpeg -s formatOptions 80 "$work/readme-home.png" --out shared-mock/guides/assets/home.jpg >/dev/null
+  cwebp -quiet -q 92 "$work/readme-home.png" -o docs/images/readme-home.webp
+  # exactly half (an even 2:1, so the text stays clean): still 2x for the page width a guide shows it at
+  sips -Z 1613 -s format jpeg -s formatOptions 85 "$work/readme-home.png" --out shared-mock/guides/assets/home.jpg >/dev/null
 fi
 echo "$work"

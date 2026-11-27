@@ -25,9 +25,13 @@ pub(crate) fn seeded(root: &Path) -> std::io::Result<bool> {
     Ok(internal || fs::read_dir(root)?.any(|e| e.map_or(true, |e| { let n = e.file_name().to_string_lossy().into_owned(); !n.starts_with('.') || n == crate::store::ASSETS })))
 }
 
+/// The device folder build.py writes the guides' metadata under (its
+/// `DEVICE`); seeding makes it this computer's.
+const BUNDLED_DEVICE: &str = "guides";
+
 /// A guide document (not an asset or the index).
 fn is_doc(name: &str) -> bool { !name.starts_with('.') && name.ends_with(".xml") }
-/// A page of the guides: a document, the Markdown example, the 画板 or the 数据表.
+/// A page of the guides: a document, the Markdown example, the 画板 or the 数据库.
 #[cfg(test)]
 fn is_page(name: &str) -> bool { !name.starts_with('.') && fdl_core::store::DocKind::of_name(name).is_some() }
 
@@ -106,16 +110,30 @@ fn seed(root: &Path, chinese: bool) -> anyhow::Result<()> {
             _ => fs::write(path, bytes)?,
         }
     }
-    // Published top level first, `.quiet/` (the index and format) last: an
-    // interrupted launch is still pending, never a library missing its notes.
+    // The bundle is in the current format (build.py), its metadata one
+    // device's: this computer's now, as opening an older one would have made
+    // it, so the first opening has nothing to upgrade. The library gets its own id.
+    let meta = pending.join(crate::store::INTERNAL).join("meta");
+    let me = crate::store::device();
+    // A first launch resumed: staged again, under the bundle's name.
+    if meta.join(&me.id).fs_exists() { fs::remove_dir_all(meta.join(&me.id))?; }
+    fs::rename(meta.join(BUNDLED_DEVICE), meta.join(&me.id))?;
+    fs::write(meta.join(&me.id).join("device.json"), serde_json::to_vec_pretty(&me)?)?;
+    let format = pending.join(crate::store::INTERNAL).join("format.json");
+    let mut marker: serde_json::Value = serde_json::from_slice(&fs::read(&format)?)?;
+    marker["id"] = uuid::Uuid::new_v4().to_string().into();
+    fs::write(&format, serde_json::to_vec_pretty(&marker)?)?;
+    // Published top level first, `.quiet/` (the metadata, then the format)
+    // last: an interrupted launch is still pending, never a library missing its notes.
     let mut names: Vec<_> = fs::read_dir(&pending)?.collect::<Result<Vec<_>, _>>()?.into_iter().map(|e| e.file_name()).collect();
     names.sort_by_key(|n| *n == *crate::store::INTERNAL);
     for name in names {
         if name == *crate::store::INTERNAL {
-            for e in fs::read_dir(pending.join(&name))? {
-                let e = e?;
-                let dest = quiet.join(e.file_name());
-                if !dest.fs_exists() { fs::rename(e.path(), dest)?; }
+            let mut inner: Vec<_> = fs::read_dir(pending.join(&name))?.collect::<Result<Vec<_>, _>>()?.into_iter().map(|e| e.file_name()).collect();
+            inner.sort_by_key(|n| n == "format.json");
+            for n in inner {
+                let dest = quiet.join(&n);
+                if !dest.fs_exists() { fs::rename(pending.join(&name).join(&n), dest)?; }
             }
             continue;
         }
@@ -163,9 +181,24 @@ mod tests {
         fdl_core::vfs::remove_dir_all(&root).unwrap();
     }
 
-    /// The seeded library opens as it is (FORMAT 4, no migration): every
-    /// guide listed in its folder, links resolved to the documents, names
-    /// following the store's rules.
+    /// build.py packs the guides in the format the store writes, their
+    /// metadata as one device's shards: a new library has nothing to upgrade.
+    #[test]
+    fn guides_are_in_the_current_format() {
+        for files in [super::FILES, super::zh::FILES] {
+            let (_, marker) = files.iter().find(|(n, _)| *n == ".quiet/format.json").unwrap();
+            let marker: serde_json::Value = serde_json::from_slice(marker).unwrap();
+            assert_eq!(marker["format"], fdl_core::store::FORMAT, "rebuild the guides with shared-mock/guides/build.py");
+            assert!(marker.get("id").is_none(), "each library gets its own id when seeded");
+            let meta: Vec<&str> = files.iter().map(|(n, _)| *n).filter(|n| n.starts_with(".quiet/") && *n != ".quiet/format.json").collect();
+            assert!(meta.iter().all(|n| n.starts_with(&format!(".quiet/meta/{}/", super::BUNDLED_DEVICE))), "{meta:?}");
+            assert!(meta.len() > 1);
+        }
+    }
+
+    /// The seeded library opens as it is, nothing upgraded or written again
+    /// in its metadata: every guide listed in its folder, in build.py's order,
+    /// links resolved to the documents, names following the store's rules.
     #[test]
     fn seeded_library_opens_with_its_folders_and_links() {
         for chinese in [false, true] { seeded_library_opens(chinese); }
@@ -174,9 +207,20 @@ mod tests {
     fn seeded_library_opens(chinese: bool) {
         let root = fdl_core::vfs::temp_dir().join(format!("qmd-guides-open-{}", uuid::Uuid::new_v4()));
         super::seed(&root, chinese).unwrap();
+        let quiet = root.join(crate::store::INTERNAL);
+        let me = crate::store::device().id;
+        assert_eq!(fdl_core::vfs::read_dir(quiet.join("meta")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect::<Vec<_>>(), std::slice::from_ref(&me));
+        let shared = || (tree(&quiet.join("meta")), fdl_core::vfs::read(quiet.join("format.json")).unwrap());
+        let before = shared();
         let mut store = crate::store::Store::open_at(root.clone()).unwrap();
         let list = store.list();
         assert!(store.warnings.is_empty(), "{:?}", store.warnings);
+        // This computer's caches (`.quiet/local/`) aside.
+        assert!(shared() == before, "opening the seeded library rewrote its metadata");
+        assert_eq!(store.devices().iter().map(|d| d.device.id.clone()).collect::<Vec<_>>(), [me]);
+        // The top level in build.py's TOP order: the first guide, then its folders.
+        let top: Vec<_> = { let mut v: Vec<_> = list.iter().filter(|e| e.meta.parent.is_none()).collect(); v.sort_by_key(|e| e.meta.top_order); v.into_iter().map(|e| e.title.clone()).collect() };
+        assert_eq!(top[0], if chinese { "欢迎使用 Quiet.md" } else { "Welcome to Quiet.md" }, "{top:?}");
         let docs: Vec<_> = list.iter().filter(|e| e.meta.folder.is_none()).collect();
         assert_eq!(docs.len(), super::files(chinese).iter().filter(|(n, _)| super::is_page(n)).count());
         // The examples beside the guides are files of their own kinds.
@@ -188,12 +232,35 @@ mod tests {
         let links: Vec<_> = docs.iter().flat_map(|e| e.links.iter()).collect();
         assert!(!links.is_empty());
         for l in links { assert!(ids.contains(l.target.as_str()), "unresolved link {}", l.target); }
+        // So are the 数据库's 笔记 cells (the guide index's): each one a guide.
+        use fdl_core::table::{field, FieldType, Value};
+        let mut notes = 0;
+        for e in docs.iter().filter(|e| e.meta.kind == DocKind::Table) {
+            let base = fdl_core::table::sqlite::load(&store.file_path(&e.id).unwrap()).unwrap();
+            for t in &base.tables { for f in t.fields.iter().filter(|f| f.ty == FieldType::Note) { for r in &t.records {
+                let Value::Text(href) = r.get(f.id) else { continue };
+                let rel = field::note_rel(&e.meta.rel, href);
+                assert!(docs.iter().any(|d| Some(&d.meta.rel) == rel.as_ref() && d.meta.kind == DocKind::Doc), "{}: {href} is no guide", e.meta.rel);
+                notes += 1;
+            } } }
+        }
+        assert!(notes >= 10, "{notes} 笔记 cells");
         for e in docs.iter().filter(|e| !e.meta.named_by_file()) {
             let name = store.file_path(&e.id).unwrap().file_stem().unwrap().to_string_lossy().into_owned();
             assert_eq!(name, crate::store::file_name_for(&e.title), "build.py names {} differently", e.title);
         }
         assert!(!root.join("docs").fs_exists() && !root.join("index.json").fs_exists());
         fdl_core::vfs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Every file under `dir` with its contents.
+    fn tree(dir: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, Vec<u8>> {
+        let mut out = std::collections::BTreeMap::new();
+        for e in fdl_core::vfs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.fs_is_dir() { out.extend(tree(&p)); } else if p.file_name().unwrap() != ".lock" { out.insert(p.clone(), fdl_core::vfs::read(&p).unwrap()); }
+        }
+        out
     }
 
     /// Every Mac-only passage still exists, and the Windows guides keep no Mac
@@ -217,11 +284,17 @@ mod tests {
     /// English library brings along.
     #[test]
     fn chinese_guides_match_the_english_ones() {
-        let index = |files: &[(&str, &[u8])]| -> Vec<serde_json::Value> {
-            let (_, json) = files.iter().find(|(n, _)| *n == ".quiet/index.json").unwrap();
-            let map: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(json).unwrap();
-            let mut v: Vec<_> = map.into_values().map(|mut m| { m.as_object_mut().unwrap().retain(|k, _| !matches!(k.as_str(), "created" | "modified")); m }).collect();
-            v.sort_by_key(|m| m["id"].as_str().unwrap().to_string());
+        // Each item's fields from the shards, but its path, times and the stamps.
+        let index = |files: &[(&str, &[u8])]| -> Vec<(String, serde_json::Value)> {
+            let mut v = vec![];
+            for (n, json) in files.iter().filter(|(n, _)| n.starts_with(".quiet/meta/") && !n.ends_with("/device.json")) {
+                let shard: serde_json::Value = serde_json::from_slice(json).unwrap();
+                for (id, fields) in shard["items"].as_object().unwrap() {
+                    let f: serde_json::Map<_, _> = fields.as_object().unwrap().iter().filter(|(k, _)| !matches!(k.as_str(), "created" | "modified" | "path")).map(|(k, w)| (k.clone(), w[0].clone())).collect();
+                    v.push((format!("{n} {id}"), f.into()));
+                }
+            }
+            v.sort_by(|a, b| a.0.cmp(&b.0));
             v
         };
         assert_eq!(index(super::zh::FILES), index(super::FILES));

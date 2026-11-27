@@ -42,7 +42,7 @@ impl Workspace {
         let Some(target) = self.sidebar_drop.take() else { return };
         let (dirs, files): (Vec<_>, Vec<_>) = paths.into_iter().filter(|p| importable(p)).partition(|p| p.fs_is_dir());
         if dirs.is_empty() && files.is_empty() {
-            self.show_toast_kind(crate::ui::ToastKind::Error, tr("这些文件不能导入：支持 Markdown、DocxXML 文件和文件夹", "These files can't be imported: Markdown, DocxXML files and folders are supported"), cx);
+            self.show_toast_kind(crate::ui::ToastKind::Error, tr("支持导入 Markdown、DocxXML 文件和文件夹", "Markdown and DocxXML files and folders can be imported"), cx);
             cx.notify();
             return;
         }

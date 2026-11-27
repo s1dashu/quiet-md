@@ -36,7 +36,7 @@
 <p>颜色可以组合使用：<span text-color="red" background-color="light-red">需要关注</span>，或者<span text-color="green" background-color="light-green">已检查完成</span>。按 <code>⌘ ⌥ H</code> 可以把上次用过的颜色应用到新的选区。要去掉颜色，在颜色面板里点“恢复默认”。</p>
 <h2>段落背景</h2><p background-color="light-blue">想给整段文字上色，打开它的块菜单，选一个背景颜色即可。这一段用的是浅蓝色。</p><p background-color="light-green">相邻且背景色相同的段落，看起来会连成一整块。</p>
 <h1>链接</h1><p>选中文字后按 <code>⌘ K</code> 添加网址，比如 <a href="https://www.apple.com/macos/">macOS 官网</a>。没有选中文字时，可以同时填写链接文字和网址。</p>
-<ul><li>输入以 <code>https://</code>、<code>http://</code> 或 <code>www.</code> 开头的地址，再输入一个空格，它就会变成链接。</li><li>鼠标悬停在链接上，可以编辑、移除链接或复制地址。</li><li>点击链接会在浏览器中打开。</li><li>要在笔记之间互相链接，输入 <code>@</code> 即可，详见 <cite type="doc" href="../整理与查找笔记.xml" file-type="docx">整理与查找笔记</cite>。</li></ul>
+<ul><li>输入以 <code>https://</code>、<code>http://</code> 或 <code>www.</code> 开头的地址，再输入一个空格，它就会变成链接。</li><li>鼠标悬停在链接上，可以编辑、移除链接或复制地址。</li><li>点击链接会在浏览器中打开。</li><li>要在笔记之间互相链接，输入 <code>@</code> 即可，详见 <cite type="doc" href="../日常使用/整理与查找笔记.xml" file-type="docx">整理与查找笔记</cite>。</li></ul>
 <h1>段落排版</h1><h2>新段落与换行</h2><p><code>Enter</code> 开始一个新段落。<code>⇧ Enter</code> 在当前段落内换行。<br/>这一行和上一行属于同一个段落。</p>
 <h2>对齐</h2><p align="center">用 <code>⌘ ⇧ E</code> 居中对齐。</p><p align="right">用 <code>⌘ ⇧ R</code> 右对齐。</p><p>用 <code>⌘ ⇧ L</code> 恢复左对齐。块菜单里也有这些选项。</p>
 <h2>缩进</h2><p>按 <code>Tab</code> 让段落成为上一段的子级，按 <code>⇧ Tab</code> 移回原来的层级。<p>这是一个子段落，它会跟着父段落一起移动和折叠。<p>子段落下面还可以再有子段落。</p></p></p>
@@ -71,7 +71,7 @@
 <ul><li>点击日期即可修改。可以加上具体时间，也可以设为全天。</li><li>可以选择在事件发生时提醒，也可以提前提醒。全天提醒在上午 9:00 发出。</li><li>一周内即将到来的日期显示为橙色，已过期的显示为红色，更晚的显示为蓝色。</li></ul>
 <callout emoji="🔔" background-color="light-yellow" border-color="yellow"><p>Quiet.md 需要保持运行才能发送提醒通知。退出应用后，提醒会暂停，直到再次打开应用。</p></callout>
 <h2>倒计时</h2><p>插入倒计时后，点击铅笔按钮设置时长或日期，用调色板修改颜色。下面这个示例倒数到元旦：</p>
-<countdown duration="2950502" start-time="1795771499000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
+<countdown duration="2926141" start-time="1795795860000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
 <p>还可以开启倒计时结束时的应用内提醒。</p>
 <h2>按钮</h2><p>按钮可以打开一个网址，或者为当前文档创建副本。在会议记录或日记这类可重复使用的模板里，创建副本按钮特别好用。</p>
 <p><button action="OpenLink" src="https://www.apple.com/macos/" background-color="light-blue">了解 macOS</button> <button action="DuplicatePage" background-color="light-green">为这篇指南创建副本</button></p><p>鼠标悬停在按钮上并点击编辑，可以修改它的文字、颜色和动作。</p>

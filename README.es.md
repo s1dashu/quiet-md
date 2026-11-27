@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Una nota larga abierta en Quiet.md, con encabezados, fórmulas en línea y una tabla de concentraciones de iones.">
 </p>
 
-Encabezados, listas, tareas, citas, avisos destacados, columnas, tablas con celdas combinadas, código con resaltado de sintaxis, fórmulas LaTeX, imágenes, archivos y portadas. Los atajos de Markdown funcionan mientras escribes y el menú `/` tiene todo lo demás. Menciona otra nota para enlazarla; esa nota mostrará sus referencias inversas. Los bloques de código Mermaid se dibujan como diagramas. Las tablas de datos guardan registros con campos de selección, fecha, número, fórmula, búsqueda y relación, en vistas que filtras, ordenas y agrupas; cada celda de una columna Notas es una nota de verdad. El menú … tiene Modo concentración, Modo máquina de escribir y Enfoque de párrafo, y Visualización › Acercar agranda solo el texto.
+Encabezados, listas, tareas, citas, avisos destacados, columnas, tablas con celdas combinadas, código con resaltado de sintaxis, fórmulas LaTeX, imágenes, archivos y portadas. Los atajos de Markdown funcionan mientras escribes y el menú `/` tiene todo lo demás. Menciona otra nota para enlazarla; esa nota mostrará sus referencias inversas. Las bases de datos guardan registros con campos de selección, fecha, número, fórmula, búsqueda y relación, en vistas que filtras, ordenas y agrupas; cada celda de una columna Notas es una nota de verdad. El menú … tiene Modo concentración, Modo máquina de escribir y Enfoque de párrafo, y Visualización › Acercar agranda solo el texto.
 
 ### Dibujar
 
@@ -96,7 +96,7 @@ Importar desde otra app… (en el menú Archivo) busca en el ordenador tus bibli
 - [x] Modos de escritura: concentración, máquina de escribir y enfoque de párrafo
 - [x] Temas, modo oscuro y nueve idiomas
 - [x] Una CLI `quiet` y una skill para agentes de IA
-- [ ] Tablas de datos (en curso)
+- [ ] Bases de datos (en curso)
 - [ ] Diagramas Mermaid (en curso)
 - [ ] Móviles: iPhone, iPad y Android (en curso)
 - [ ] Sincronización entre dispositivos (en curso)

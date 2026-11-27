@@ -15,10 +15,10 @@ fn pick(light: u32, dark_: u32) -> Hsla { hex(if dark() { dark_ } else { light }
 pub const UI_FONT: &str = "Assistant";
 
 /// The chrome's distance from the board's sides and foot (upstream's
-/// `--editor-container-padding`, 16): the page inset a 数据表's sheet keeps
+/// `--editor-container-padding`, 16): the page inset a 数据库's sheet keeps
 /// too (`design::PAGE_INSET`), so the two kinds of page line up.
 pub const PADDING: f32 = crate::design::PAGE_INSET;
-/// Above the top row (menu, toolbar): none, as a 数据表's sheet starts at the
+/// Above the top row (menu, toolbar): none, as a 数据库's sheet starts at the
 /// header's foot, whose margin already leaves room (upstream: `PADDING`).
 pub const TOP_PADDING: f32 = 0.;
 

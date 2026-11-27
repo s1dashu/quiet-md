@@ -1,7 +1,7 @@
 #!/bin/sh
 # An evaluation library at $1 (a folder that does not exist yet): the
 # guides library plus meeting notes, a plan, a proposal, a weekly report and
-# a 数据表, made with `quiet` itself (QUIET_BIN, default target/release/quiet).
+# a 数据库, made with `quiet` itself (QUIET_BIN, default target/release/quiet).
 set -e
 cd "$(dirname "$0")/../.."
 Q=${QUIET_BIN:-$PWD/target/release/quiet}
@@ -20,7 +20,7 @@ $Q new '2026-11-03 周会' --in 会议 --markdown --md '# 议题
 - [ ] 李娜：调研 PDF 分页方案
 - [ ] 王强：给搜索加按标题优先排序' >/dev/null
 $Q new '2026-11-10 周会' --in 会议 --markdown --md '# 议题
-- 数据表的列宽
+- 数据库的列宽
 - 移动端阅读
 
 # 待办

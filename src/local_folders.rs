@@ -77,7 +77,7 @@ impl Workspace {
                 Ok(key) => {
                     self.folder_added(&key, window, cx);
                     // 打开 is not 导入: say that nothing was copied.
-                    let msg = crate::localized_format!("已打开「{}」：在原位置使用，没有复制", "Opened “{}”: used where it is, not copied", self.folder_name(&key));
+                    let msg = crate::localized_format!("已原位打开「{}」", "Opened “{}” in place", self.folder_name(&key));
                     self.show_toast(&msg, cx);
                 }
                 Err(e) => self.add_failed(e, cx),
@@ -104,7 +104,7 @@ impl Workspace {
             AddError::Open(key) => { self.folded_tops.remove(&key); cx.notify(); }
             AddError::TooBroad => self.show_toast_kind(ToastKind::Error, tr("请分别添加文稿、桌面等文件夹", "Add Documents, Desktop and other folders one at a time"), cx),
             AddError::System => self.show_toast_kind(ToastKind::Error, tr("请添加存放笔记的文件夹", "Add the folder your notes are in"), cx),
-            AddError::Other(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法添加文件夹：{}", "Could not add folder: {}", crate::settings::diagnostic(&e)), cx),
+            AddError::Other(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, tr("添加文件夹失败", "Adding the folder failed")).description(crate::settings::diagnostic(&e)), cx),
         }
     }
 
@@ -174,10 +174,10 @@ impl Workspace {
             Err(e) => {
                 let msg = match e {
                     RenameError::Taken(n) => crate::localized_format!("已经有一个叫「{}」的文件夹", "There is already a folder named “{}”", n),
-                    RenameError::Empty => tr("文件夹名不能为空", "The folder name can't be empty").to_string(),
-                    RenameError::Denied => tr("没有权限给这个文件夹改名", "You don't have permission to rename this folder").to_string(),
-                    RenameError::Unavailable | RenameError::Fixed => tr("这个文件夹不能改名", "This folder can't be renamed").to_string(),
-                    RenameError::Other(e) => crate::localized_format!("文件夹改名失败：{}", "Could not rename the folder: {}", crate::settings::diagnostic(&e)),
+                    RenameError::Empty => tr("请输入文件夹名", "Enter a folder name").to_string(),
+                    RenameError::Denied => tr("改名需要这个文件夹的写入权限", "Renaming needs write access to this folder").to_string(),
+                    RenameError::Unavailable | RenameError::Fixed => tr("这个文件夹的名字是固定的", "This folder's name is fixed").to_string(),
+                    RenameError::Other(e) => crate::localized_format!("文件夹改名失败：{}", "Renaming the folder failed: {}", crate::settings::diagnostic(&e)),
                 };
                 self.show_toast_kind(ToastKind::Error, &msg, cx);
                 let row = crate::shared_store::top_row(key);

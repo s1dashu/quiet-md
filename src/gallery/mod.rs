@@ -53,15 +53,16 @@ pub(crate) type K = (&'static str, usize);
 
 /// The pages: name, what is on it, how to draw it.
 type Page = fn(&mut Gallery, &mut Window, &mut Context<Gallery>) -> Div;
-const PAGES: [(&str, &str, Page); 13] = [
+const PAGES: [(&str, &str, Page); 14] = [
     ("按钮", "Button：六种变体、五种尺寸、图标按钮、工具按钮", pages::buttons),
     ("输入", "Field、Select、Textarea、Label", pages::fields),
     ("选择控件", "Checkbox、Radio、Switch、Segmented、Swatch、Slider", pages::toggles),
     ("标签", "Badge、Kbd、KbdGroup、关联、人员", pages::badges),
-    ("菜单", "Popover、MenuItem、MenuLabel、MenuSeparator；应用和数据表的菜单", pages::menus),
-    ("对话框", "Dialog；数据表的新增 / 修改字段", pages::dialogs),
-    ("卡片", "Card、Item、Separator、Toast、ScrollArea", pages::cards),
-    ("面板", "数据表的筛选、排序、字段配置、填色", pages::panels),
+    ("菜单", "Popover、MenuItem、MenuLabel、MenuSeparator；应用和数据库的菜单", pages::menus),
+    ("对话框", "Dialog；数据库的新增 / 修改字段", pages::dialogs),
+    ("卡片", "Card、Item、Separator、ScrollArea", pages::cards),
+    ("提示", "Toast：成功、出错、提示，带描述、带操作、带关闭按钮，长文案换行，堆叠", pages::toasts),
+    ("面板", "数据库的筛选、排序、字段配置、填色", pages::panels),
     ("工具栏", "视图工具栏、勾选操作条、表内搜索", pages::bars),
     ("表格", "表头、行、勾选、选区、填色、分组、添加记录、统计", pages::grid),
     ("记录详情", "展开一条记录", pages::record),
@@ -258,12 +259,16 @@ impl Render for Gallery {
             .child(body));
         let toast = self.toast.as_ref().map(|(s, _)| div().absolute().bottom(px(24.)).left_0().right_0().flex().justify_center().child(Toast::new(ToastTone::Success, s.clone())));
         div().track_focus(&self.focus).key_context("Gallery").relative().size_full().flex().flex_col().bg(color::background()).font_family(crate::theme::ui_family()).text_color(color::foreground())
-            .on_key_down(cx.listener(|g, e: &KeyDownEvent, _, cx| if e.keystroke.key == "escape" { g.open = None; g.dialog = None; cx.notify(); }))
+            .on_key_down(cx.listener(|g, e: &KeyDownEvent, _, cx| if e.keystroke.key == "escape" {
+                // the open menu or dialog (Esc on the toasts closes the front one there)
+                g.open = None; g.dialog = None; cx.notify();
+            }))
             .child(bar)
             .child(div().flex_1().min_h_0().flex().child(nav).child(content))
             // a click outside an open menu closes it (the menu draws above this, deferred)
             .when(self.open.is_some(), |d| d.child(div().id("backdrop").absolute().inset_0().occlude().on_mouse_down(MouseButton::Left, cx.listener(|g, _, _, cx| { g.open = None; cx.notify(); }))))
             .when_some(self.dialog, |d, which| d.child(pages::dialog(self, which, window, cx)))
             .children(toast)
+            .children(crate::design::toast::toaster(window, cx))
     }
 }

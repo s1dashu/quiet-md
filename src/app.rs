@@ -364,6 +364,8 @@ pub struct Rename {
 
 pub struct Workspace {
     pub quick_note: bool,
+    /// Whose size this window's frame is written down as.
+    pub frame: crate::quick_note::Frame,
     pub shortcut_recording: Option<String>,
     pub shortcut_strokes: Vec<String>,
     /// The failed change: (action, message); an empty action is page-wide.
@@ -489,9 +491,6 @@ pub struct Workspace {
     pub trash_menu: Option<(String, Point<Pixels>, Anchor)>,
     /// 回收站's 自动删除 dropdown is open.
     pub trash_days_menu: bool,
-    /// The toast and its clock.
-    pub toast: Option<crate::ui::ToastState>,
-    toast_task: Option<Task<()>>,
     /// Folded sidebar sections: 置顶, then two unused (我的文档 never folds, #421; 本机文件 is gone).
     pub folded: [bool; 3],
     /// Top-level folder folders folded shut in the sidebar, by key.
@@ -563,14 +562,17 @@ impl Workspace {
     }
 
     pub fn new_window(quick: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(quick, None, window, cx)
+        Self::build_window(quick, None, None, window, cx)
     }
 
-    pub fn new_document_window(document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::build_window(true, document, window, cx)
+    /// A window of its own for `document` (`None`: a new quick note); its sidebar as `opener`'s.
+    pub fn new_document_window(document: Option<String>, opener: Option<crate::quick_note::Opener>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::build_window(true, document, opener, window, cx)
     }
 
-    fn build_window(quick: bool, document: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn build_window(quick: bool, document: Option<String>, opener: Option<crate::quick_note::Opener>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        use crate::quick_note::Frame;
+        let frame = if !quick { Frame::Main } else if document.is_some() { Frame::Document } else { Frame::Quick };
         crate::settings::load();
         crate::settings::check_fonts(cx);
         // 文档字体's download list shows progress and what arrived.
@@ -594,7 +596,7 @@ impl Workspace {
         });
         let subs = vec![
             cx.subscribe(&settings_filter, |_, _, ev: &TextFieldEvent, cx| if matches!(ev, TextFieldEvent::Changed) { cx.notify(); }),
-            cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.quick_note, cx)),
+            cx.observe_window_bounds(window, |this, window, cx| crate::quick_note::remember(window, this.frame, cx)),
             // The system switched between light and dark (or the app's own look changed).
             cx.observe_window_appearance(window, |this, _, cx| if crate::settings::sync_dark(cx) { crate::settings::refresh_all(this, cx); }),
             cx.observe_window_activation(window, |this, window, cx| {
@@ -719,10 +721,11 @@ impl Workspace {
         })
         .detach();
         let settings = store.settings();
-        let sidebar_width = settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH);
+        let (sidebar_open, sidebar_width) = if quick { crate::quick_note::new_window_sidebar(opener, settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH)) } else { (true, settings.sidebar_width.unwrap_or(theme::SIDEBAR_WIDTH)) };
         let history_limit = store.history_limit();
         let mut ws = Workspace {
             quick_note: quick,
+            frame,
             shortcut_recording: None,
             shortcut_strokes: vec![],
             shortcut_error: None,
@@ -750,9 +753,10 @@ impl Workspace {
             search,
             search_sel: None,
             // A phone starts on its page; the sidebar is a drawer it opens.
-            sidebar_open: !quick && !theme::compact(f32::from(window.viewport_size().width)),
+            sidebar_open: sidebar_open && !theme::compact(f32::from(window.viewport_size().width)),
             sidebar_width,
-            sidebar_was_open: false,
+            // a sidebar taken from the main window is already there: too narrow, it hides rather than widening the window (`render`)
+            sidebar_was_open: quick && sidebar_open,
             drawer_from: None,
             widen_from: None,
             keyboard_inset: 0.,
@@ -796,8 +800,6 @@ impl Workspace {
             trash: vec![],
             trash_menu: None,
             trash_days_menu: false,
-            toast: None,
-            toast_task: None,
             mode_menu: false,
             mode_btn_bounds: Rc::new(Cell::new(None)),
             more_btn_bounds: Rc::new(Cell::new(None)),
@@ -984,8 +986,8 @@ impl Workspace {
                 match r {
                     // Listed by its name until now: its title and words come with it.
                     Ok(()) if w.store.cloud_only(&target).is_none() => { w.entries.set(w.store.list()); w.sort(); w.open(&target, window, cx); }
-                    Ok(()) => w.show_toast_kind(ToastKind::Error, crate::settings::tr("这篇文档还没有从 iCloud 下载完成", "This document hasn't finished downloading from iCloud"), cx),
-                    Err(e) => w.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法从 iCloud 下载这篇文档：{}", "Could not download this document from iCloud: {}", e), cx),
+                    Ok(()) => w.show_toast_kind(ToastKind::Error, crate::settings::tr("这篇文档仍在从 iCloud 下载", "This document is still downloading from iCloud"), cx),
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("从 iCloud 下载失败", "Downloading from iCloud failed")).description(e.to_string()), cx),
                 }
                 cx.notify();
             });
@@ -1020,7 +1022,7 @@ impl Workspace {
         }) {
             return false;
         }
-        // 版本历史 of a 数据表 (written as it is edited): the file as it is left and as it is
+        // 版本历史 of a 数据库 (written as it is edited): the file as it is left and as it is
         // opened is kept as a version; a file unchanged since the newest version adds nothing
         let table = |w: &Self, i: &str| w.entries.iter().any(|e| e.id == i && e.meta.kind == crate::store::DocKind::Table);
         if let Some(cur) = self.current.clone() && table(self, &cur) { let _ = self.store.snapshot_table(&cur, true); }
@@ -1038,7 +1040,7 @@ impl Workspace {
         let doc = match self.store.load_for_edit(id, shared) {
             Ok(d) => d,
             Err(e) => {
-                self.show_toast_kind(ToastKind::Error, &crate::localized_format!("无法打开文档：{}", "Could not open document: {}", crate::settings::diagnostic(&e.to_string())), cx);
+                self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("打开文档失败", "Opening the document failed")).description(crate::settings::diagnostic(&e.to_string())), cx);
                 cx.notify();
                 return false;
             }
@@ -1057,7 +1059,7 @@ impl Workspace {
                 e.created = m.created;
                 e.info = m.info;
                 if !e.board_file && !e.table_file { e.set_read_only(m.reading, cx); }
-                // a build without 数据表 shows a table file's page as a placeholder, not to be edited
+                // a build without 数据库 shows a table file's page as a placeholder, not to be edited
             }
             e
         });
@@ -1080,10 +1082,6 @@ impl Workspace {
             }
             EditorEvent::Mode(reading) => this.set_mode(*reading, window, cx),
             EditorEvent::Info(info) => this.set_info_row(*info),
-            EditorEvent::Toast => {
-                this.toast = None;
-                cx.notify();
-            }
             EditorEvent::Save => {
                 if !this.flush(cx) { this.confirm = Some(Confirm::SaveFailed); cx.notify(); }
             }
@@ -1093,7 +1091,7 @@ impl Workspace {
                 this.search_sel = this.default_search_sel(cx);
             }
             EditorEvent::OpenRelative(url) => this.open_relative(url, window, cx),
-            EditorEvent::OpenFile(path) => this.open_in_own_window(path, cx),
+            EditorEvent::OpenFile(path) => this.open_in_own_window(path, window, cx),
             EditorEvent::OpenDoc(id) => this.open(id, window, cx),
             EditorEvent::OpenDocAt(id, ordinal) => this.open_at(id, *ordinal, window, cx),
             EditorEvent::HideRefs => this.ask_refs(false, cx),
@@ -1115,7 +1113,7 @@ impl Workspace {
                 }
             }
             EditorEvent::Leave => cx.defer_in(window, |this, window, cx| this.leave_board(window, cx)),
-            // a 数据表's 笔记 cells (`table::notes`) work on the library directly: the lists follow
+            // a 数据库's 笔记 cells (`table::notes`) work on the library directly: the lists follow
             EditorEvent::LibraryChanged => {
                 this.entries.set(this.store.list());
                 this.sort();
@@ -1157,7 +1155,7 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
-        // Pasted images, 数据表 and 画板 belong to this document's top-level folder, and it has its own look.
+        // Pasted images, 数据库 and 画板 belong to this document's top-level folder, and it has its own look.
         if self.store.set_active(id) { cx.defer(crate::settings::top_switched); }
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
@@ -1382,32 +1380,17 @@ impl Workspace {
     }
 
     pub fn show_toast_kind(&mut self, kind: ToastKind, msg: &str, cx: &mut Context<Self>) {
-        self.toast = Some(crate::ui::ToastState::new(kind, msg));
-        if let Some(ed) = &self.editor {
-            ed.update(cx, |e, cx| e.clear_toast(cx));
-        }
-        self.wake_for_toast_fade(cx);
-        cx.notify();
+        self.show_toast_with(crate::design::Toast::new(kind, msg.to_string()), cx);
     }
 
-    /// A frame when the toast's fade starts (its own frames carry it from there); none while paused.
-    fn wake_for_toast_fade(&mut self, cx: &mut Context<Self>) {
-        let Some(wait) = self.toast.as_ref().and_then(|t| t.until_fade()) else { self.toast_task = None; return };
-        self.toast_task = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(wait).await;
-            let _ = this.update(cx, |_, cx| cx.notify());
-        }));
+    /// The work an Info toast said was under way (正在导入…) is done: that toast goes.
+    pub fn dismiss_progress(&mut self, title: &str, cx: &mut Context<Self>) {
+        crate::design::toast::dismiss_where(self.window, |tone, t| tone == ToastKind::Info && t == title, cx);
     }
 
-    fn render_toast(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let this = cx.entity().downgrade();
-        crate::ui::toast_el(self.toast.as_ref()?, window, move |on, _, cx| {
-            let _ = this.update(cx, |w, cx| {
-                if let Some(t) = &mut w.toast { t.hover(on); }
-                w.wake_for_toast_fade(cx);
-                cx.notify();
-            });
-        })
+    /// A toast with a description, an action or a close button, in front of this window's stack.
+    pub fn show_toast_with(&mut self, t: crate::design::Toast, cx: &mut Context<Self>) {
+        crate::design::toast::show(self.window, t, cx);
     }
 
     /// 重命名: the row's title turns into an input; Enter or clicking away saves, Esc cancels.
@@ -1647,7 +1630,7 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
-        // 数据表 write their own files; a cell still being edited goes in first (leaving the page drops its view)
+        // 数据库 write their own files; a cell still being edited goes in first (leaving the page drops its view)
         if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); }
         crate::table::flush_all(cx);
         // 版本历史 preview: the editor holds an older snapshot, so writing it
@@ -1703,7 +1686,7 @@ impl Workspace {
                         if let Some(ed) = peer.read(cx).editor.clone() { ed.update(cx, |e, cx| e.files_changed(cx)); }
                     }
                 }
-                // a renamed 数据表's file moved with its title
+                // a renamed 数据库's file moved with its title
                 let moved = (meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&id)).flatten();
                 ed.update(cx, |e, cx| {
                     e.modified = meta.modified;
@@ -1734,7 +1717,8 @@ impl Workspace {
         let key = self.store.with(None, |s| Ok(s.key().to_string())).unwrap_or_else(|_| crate::store::library_key(&root));
         let moved = crate::store::Store::migrate(&root).and_then(|r| Ok((r, crate::store::Store::open_at_as(root.clone(), &key)?)));
         match moved {
-            Err(e) => self.show_toast_kind(ToastKind::Error, &crate::localized_format!("没能改为真实文件夹，文档库保持原样：{}", "Couldn't move to real folders; the library is unchanged: {}", crate::settings::diagnostic(&e.to_string())), cx),
+            Err(e) => self.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("改为真实文件夹失败", "Moving to real folders failed"))
+                .description(crate::localized_format!("文档库保持原样：{}", "The library stays as it was: {}", crate::settings::diagnostic(&e.to_string()))), cx),
             Ok((report, store)) => {
                 let _ = self.store.with(None, |s| { *s = store; Ok(()) });
                 crate::changelog::migrated(&report);
@@ -1993,7 +1977,7 @@ impl Workspace {
                     .into_any_element(),
             );
             crumbs.push(sep());
-            title = crate::settings::tr("数据表", "Data table").to_string();
+            title = crate::settings::tr("数据库", "Database").to_string();
         }
         // Too narrow for the path: it folds into one "…" (the path on hover),
         // and the title keeps the room. Left: the sidebar's buttons when it is
@@ -2079,7 +2063,7 @@ impl Workspace {
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .child(ui_text(title).optical())
-                                    // a 数据表 file has no title in its page: double-click its name here to rename it
+                                    // a 数据库 file has no title in its page: double-click its name here to rename it
                                     .when(table_file, |d| d.no_drag().on_click(cx.listener(|w, ev: &ClickEvent, window, cx| if ev.click_count() >= 2 && let Some(id) = w.current.clone() { w.start_rename(&id, window, cx); }))),
                             ),
 
@@ -2186,7 +2170,7 @@ impl Render for Workspace {
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
         self.sync_confirm_focus(window, cx);
         crate::editor::image::frame_drawn(window, cx);
-        // a 数据表 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
+        // a 数据库 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
         if let (Some(id), Some(ed)) = (&self.current, &self.editor) && ed.read(cx).table_file && let Some(p) = self.store.file_path(id) { ed.update(cx, |e, cx| e.table_file_at(&p, cx)); }
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());
@@ -2253,7 +2237,7 @@ impl Render for Workspace {
         let lang_menu = self.render_lang_menu(window, cx);
         let pref_menu = self.render_pref_menu(window, cx);
         let font_menu = self.render_font_menu(window, cx);
-        let toast = self.render_toast(window, cx);
+        let toast = crate::design::toast::toaster(window, cx);
         let forced_update = crate::update::prompt(window, cx);
         let mode_menu = self.render_mode_menu(cx);
         let main = match self.view {
@@ -2566,7 +2550,7 @@ pub(crate) fn check_save_safety(phase: &str, cx: &mut App) {
             let id = store.create_from(&doc(name)).unwrap();
             let open_id = id.clone();
             let handle = cx.open_window(WindowOptions { focus: false, ..Default::default() }, |window, cx| {
-                cx.new(|cx| Workspace::new_document_window(Some(open_id), window, cx))
+                cx.new(|cx| Workspace::new_document_window(Some(open_id), None, window, cx))
             }).unwrap();
             handle.update(cx, |ws, _, cx| {
                 ws.editor.as_ref().unwrap().update(cx, |e, cx| e.receive_document(&crate::editor::core::Core::new(doc(&format!("local-{name}"))), cx));

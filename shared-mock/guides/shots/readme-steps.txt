@@ -1,6 +1,6 @@
 # The README's folder page, long note and board, in Han Meimei's notes (shots.sh with HM=).
-# The folder page is shot wider, 1104pt beside the sidebar for four columns, and shrunk
-# to the others' frame (compose.py --scale); the rest at 1000×625.
+# The folder page is shot wider, 1104pt beside the sidebar for four columns, on a canvas
+# grown to match (no resampling); the rest at 1000×625.
 resize 1344 840
 wait 2500
 move 1334 815

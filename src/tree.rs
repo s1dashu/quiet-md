@@ -137,11 +137,18 @@ pub(crate) fn face(e: &Entry) -> Entry {
         reminders: vec![], links: vec![], note: e.note.clone(), top: e.top.clone() }
 }
 
+/// The one top-level folder of all `keys` (`None` for one not known, or none at all).
+fn one_top(mut keys: impl Iterator<Item = Option<String>>) -> Option<String> {
+    let first = keys.next()??;
+    keys.all(|k| k.as_deref() == Some(first.as_str())).then_some(first)
+}
+
 /// The 移动到 dialog.
 pub struct MoveDialog {
     /// Pages being moved (each with its subtree).
     pub ids: Vec<String>,
-    /// Chosen destination: `Some(None)` is the top level of 我的文档.
+    /// Chosen destination: a folder, or a top-level folder's row (`top_row`, its top level).
+    /// Never `Some(None)`: there is no 我的文档 above the top-level folders to move to.
     pub target: Option<Option<String>>,
     pub expanded: HashSet<String>,
     pub search: Entity<TextField>,
@@ -181,7 +188,7 @@ impl Workspace {
     /// Whether 新建子文档 is offered on `id`'s row: a document of the library, or one with children.
     pub(crate) fn takes_children(&self, id: &str) -> bool {
         self.entries.iter().find(|e| e.id == id).is_some_and(|e| match e.meta.folder {
-            // a folder with a 正文 page takes pages under it; one a 数据表 lives in (with its 笔记) doesn't
+            // a folder with a 正文 page takes pages under it; one a 数据库 lives in (with its 笔记) doesn't
             Some(_) => e.note.as_ref().is_some_and(|n| self.entries.iter().find(|x| &x.id == n).is_none_or(|x| x.meta.kind.is_doc())),
             None => !e.meta.local() && e.meta.kind.is_doc() && !e.meta.markdown && self.store.can_have_children(id),
         })
@@ -263,7 +270,9 @@ impl Workspace {
             cx.notify();
         })];
         window.focus(&search.focus_handle(cx), cx);
-        self.move_dlg = Some(MoveDialog { ids, target: None, expanded: HashSet::new(), search, scroll: ScrollHandle::new(), _subs: subs });
+        // the top-level folder the pages are from starts open, as its tree was under 我的文档
+        let expanded = self.move_source(&ids).map(|k| crate::shared_store::top_row(&k)).into_iter().collect();
+        self.move_dlg = Some(MoveDialog { ids, target: None, expanded, search, scroll: ScrollHandle::new(), _subs: subs });
         cx.notify();
     }
 
@@ -288,7 +297,7 @@ impl Workspace {
         let ids: Vec<String> = picked.iter().filter(|id| !target.as_ref().is_some_and(|t| tree.subtree(id).contains(t))).cloned().collect();
         if ids.is_empty() {
             // The dialog hides the picked folders; this is its safety net.
-            if !picked.is_empty() { self.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::tr("不能移到所选文件夹里面", "Can't move into a selected folder"), cx); }
+            if !picked.is_empty() { self.show_toast_kind(crate::ui::ToastKind::Error, crate::settings::tr("请选所选文件夹以外的位置", "Pick a place outside the selected folders"), cx); }
             return;
         }
         let file_before = self.entries.to_vec();
@@ -307,11 +316,16 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The 移动到 dialog: 我的文档 on the left, its page tree on the right.
+    /// The top-level folder the pages `ids` are all in; `None` when they are in several.
+    pub(crate) fn move_source(&self, ids: &[String]) -> Option<String> { one_top(ids.iter().map(|id| self.store.top_of(id))) }
+
+    /// The 移动到 dialog: where the pages are from on the left, the top-level folders' trees
+    /// on the right (no 我的文档 above them: each top-level folder is a place of its own).
     /// Quiet selection fills, a 30pt search field, the modal buttons.
     pub(crate) fn render_move_dialog(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let dlg = self.move_dlg.as_ref()?;
         let tree = Tree::new(&self.entries);
+        let from = self.move_source(&dlg.ids).map(|k| self.folder_name(&k));
         let hidden: HashSet<String> = dlg.ids.iter().flat_map(|id| tree.subtree(id)).collect();
         let q = dlg.search.read(cx).text.trim().to_lowercase();
         let border = crate::design::color::border();
@@ -333,7 +347,7 @@ impl Workspace {
             .bg(Theme::bg_overlay())
             .rounded_l(px(9.))
             .child(search)
-            .child(
+            .children(from.clone().map(|name|
                 div()
                     .mx(px(8.))
                     .h(px(30.))
@@ -344,8 +358,7 @@ impl Workspace {
                     .rounded(px(9.))
                     .bg(Theme::fill_hover_strong())
                     .child(icon("folder", 15., Theme::icon()))
-                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(self.front_top_name())),
-            );
+                    .child(div().ml(px(8.)).text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).child(ui_text(name)))));
 
         let row = |key: String, selected: bool| {
             div()
@@ -369,18 +382,7 @@ impl Workspace {
         // rows 8 from the side: while the tree scrolls it makes room for the shared scrollbar's lane
         let mut list = crate::design::scroll::make_room(div().id("move-tree").flex_1().min_w_0().px(px(8.)).py(px(12.)).overflow_y_scroll().track_scroll(&dlg.scroll), "move-tree", 8.);
         if q.is_empty() {
-            list = list.child(
-                row("move-root".into(), dlg.target == Some(None))
-                    .pl(px(16.))
-                    .child(icon("folder", 16., Theme::icon()))
-                    .child(title(crate::settings::text("我的文档").into()))
-                    .on_click(cx.listener(|w, _, _, cx| {
-                        if let Some(d) = w.move_dlg.as_mut() {
-                            d.target = Some(None);
-                        }
-                        cx.notify();
-                    })),
-            );
+            // The top-level folders' rows (`top_row`) are the tree's first level.
             for (e, depth) in tree.rows(|id| dlg.expanded.contains(id)) {
                 if hidden.contains(&e.id) || e.meta.folder.is_none() {
                     continue;
@@ -453,7 +455,7 @@ impl Workspace {
             .relative()
             .w(px(828.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .title(crate::settings::text("从 我的文档 移动到"))
+            .title(match &from { Some(name) => crate::localized_format!("从「{}」移动到", "Move from {} to", name), None => crate::settings::text("移动到…").to_string() })
             .closable(cx.listener(|w, _, window, cx| w.close_move(window, cx)))
             .child(
                 div()
@@ -498,6 +500,29 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::Tree;
+
+    #[test]
+    fn move_source_is_one_top_folder() {
+        let k = |v: &[Option<&str>]| super::one_top(v.iter().map(|k| k.map(str::to_string)));
+        assert_eq!(k(&[Some("a"), Some("a")]).as_deref(), Some("a"));
+        // from several top-level folders, or one not known: the title names none
+        assert_eq!(k(&[Some("a"), Some("b")]), None);
+        assert_eq!(k(&[Some("a"), None]), None);
+        assert_eq!(k(&[None]), None);
+        assert_eq!(k(&[]), None);
+    }
+
+    #[test]
+    fn move_title_names_the_folder_in_every_language() {
+        use crate::settings::{localized, Lang};
+        for l in Lang::ALL {
+            let t = localized(l, "从「{}」移动到", || format!("从「{}」移动到", "Obsidian Vault"), || format!("Move from {} to", "Obsidian Vault"));
+            assert!(t.contains("Obsidian Vault") && !t.contains("{}"), "{l:?}: {t}");
+            if l != Lang::En { assert_ne!(t, "Move from Obsidian Vault to", "{l:?} falls back to English"); }
+            assert!(!crate::settings::translate("移动到…", l).is_empty());
+        }
+        assert_eq!(crate::settings::translate("移动到…", Lang::En), "Move to…");
+    }
     use std::collections::{HashMap, HashSet};
     use crate::store::Entry;
     use crate::folder_page::{PageSort, Order, SortDir};

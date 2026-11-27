@@ -22,7 +22,7 @@ use std::path::Path;
 pub const FORMAT: u32 = 2;
 
 const README: &str = "\
-Quiet.md 数据表。每张数据表就是一张同名的 SQL 表，列名就是字段名，值就是界面上看到的内容。
+Quiet.md 数据库文件。其中每张表就是一张同名的 SQL 表，列名就是字段名，值就是界面上看到的内容。
 - 每张表开头的七列：`id` 是记录的编号（主键），一个随机整数（小于 2^53）；`_order` 是手动排序的排序键，按字符串比较从小到大就是行的顺序（相同时按 id）；`_created_at`、`_updated_at` 是这条记录的创建、最后修改时间，UTC 的 ISO 8601，如 2027-01-15T00:02:03.123Z（也认 2027-01-15 08:02:03+08:00 这样带时区的写法，不带时区按 UTC）；`_created_by`、`_updated_by` 是谁建的、谁最后改的（`user` 是在 Quiet.md 里改的，`agent:名字` 是 Agent 写的），空表示不知道；`_auto` 是自动编号。
 - 表、字段、视图、选项的 id 也是随机整数，整个文件里不重复；新加的行不填 id 和 `_order` 也行，Quiet.md 读到时补上，排在最后；时间不填就按现在算，`_auto` 不填就发新号。
 - 单选存选项名；多选、人员存选项名的 JSON 数组；关联存对方表记录 id 的 JSON 数组；附件存 {path, name} 的 JSON 数组；笔记存那篇笔记相对这个文件所在文件夹的路径（如 `三体.xml`、`../别处/笔记.xml`）；日期是 2026-11-17 或 2026-11-17 09:30；复选框是 1 / 0；空格子是 NULL。
@@ -30,7 +30,7 @@ Quiet.md 数据表。每张数据表就是一张同名的 SQL 表，列名就是
 - 别的列可以直接改，也可以加行、删行、加列、加表：Quiet.md 下次读取时照单全收，没见过的选项名会加进选项。
 - 选项的颜色、数字和日期的显示格式、公式、是否唯一键（`unique`，只是标记，不阻止重复）在 `_fields.options`；视图（筛选、排序、分组、列宽等）在 `_views.config`；表的顺序在 `_tables`。
 
-A Quiet.md data table file. Every data table is a SQL table of the same name; its columns are the fields and its values are what the app shows.
+A Quiet.md database file. Each of its tables is a SQL table of the same name; its columns are the fields and its values are what the app shows.
 - Seven leading columns: `id` is the record's id (primary key), a random integer below 2^53; `_order` is its sort key in manual order: the rows sorted by it as strings are in order (equal keys by id); `_created_at` and `_updated_at` are when the record was made and last changed, UTC ISO 8601 such as 2027-01-15T00:02:03.123Z (2027-01-15 08:02:03+08:00, with an offset, reads too; no zone means UTC); `_created_by` and `_updated_by` say who made it and who changed it last (`user`: in Quiet.md; `agent:<name>`: an agent), empty when not known; `_auto` is its auto number.
 - Table, field, view and option ids are random integers too, each used once in the file. A row added without an id or `_order` is fine: Quiet.md fills them in when it reads it, and puts the row last; with no times it is taken as made now, with no `_auto` it gets a new number.
 - A single select holds the option's name; multi selects and people hold a JSON array of names; links hold a JSON array of the other table's record ids; attachments hold a JSON array of {path, name}; a note holds the path of its note relative to the folder this file is in (`三体.xml`, `../elsewhere/note.xml`); dates read 2026-11-17 or 2026-11-17 09:30; checkboxes are 1 / 0; an empty cell is NULL.

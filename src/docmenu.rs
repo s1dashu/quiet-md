@@ -1,5 +1,5 @@
 //! The header "…" menu: how the document is seen (page width, then the 阅读模式 and 打字机模式
-//! switches, 专注模式, then 显示引用列表 and 窗口保持在最前), find & replace, move, pin, 新建子文档, duplicate,
+//! switches, 专注模式, then 显示引用列表 and 窗口保持在最前), find & replace, move, pin, 新建子文档, 在新窗口中打开, duplicate,
 //! 下载为 PDF / Markdown, 复制为 Markdown, 打印, document info, 版本历史, delete, 快捷键.
 
 use crate::app::Workspace;
@@ -30,9 +30,9 @@ thread_local! {
 /// 窗口保持在最前 switches: the user's order, 2026-11-25; 打字机模式 and 专注模式, a document's only, after 阅读模式),
 /// then what is done to it.
 #[derive(Clone, Copy, PartialEq)]
-enum Item { Width, Read, Typewriter, Dim, Focus, Refs, OnTop, Find, Move, Pin, Child, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
+enum Item { Width, Read, Typewriter, Dim, Focus, Refs, OnTop, Find, Move, Pin, Child, Window, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
 
-/// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据表 file.
+/// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据库 file.
 #[derive(Clone, Copy, PartialEq)]
 enum Page { Doc, Board, BoardFile, Table }
 
@@ -43,13 +43,14 @@ fn items(page: Page, child: bool) -> Vec<Item> {
     let top: &[Item] = if crate::on_top::SUPPORTED { &[OnTop] } else { &[] };
     let top_rule: &[Item] = if crate::on_top::SUPPORTED { &[OnTop, Rule] } else { &[] };
     let list: Vec<&[Item]> = match page {
-        Page::Doc => vec![&[Width, Read, Typewriter, Dim, Focus, Refs], top, &[Rule, Find, Rule, Move, Pin, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
+        // 在新窗口中打开 where the sidebar row's menu has it: after 新建子文档, before 创建副本
+        Page::Doc => vec![&[Width, Read, Typewriter, Dim, Focus, Refs], top, &[Rule, Find, Rule, Move, Pin, Rule], child, &[Window, Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete, Rule, Shortcuts]],
         // a board isn't the page: no page width, no find in its text, its own shortcut help (`?`)
-        Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Rule], child, &[Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
+        Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Rule], child, &[Window, Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
         // a board file: no Markdown, no reading mode or references either
-        Page::BoardFile => vec![top_rule, &[Move, Pin, Rule, Copy, Download, Rule], print, &[Info, History, Rule, Delete]],
-        // a 数据表 file: the file's own things; finding, exporting and copying are the table's (its bar)
-        Page::Table => vec![top_rule, &[Move, Pin, Rule, Copy, Rule, History, Rule, Delete]],
+        Page::BoardFile => vec![top_rule, &[Move, Pin, Rule, Window, Copy, Download, Rule], print, &[Info, History, Rule, Delete]],
+        // a 数据库 file: the file's own things; finding, exporting and copying are the table's (its bar)
+        Page::Table => vec![top_rule, &[Move, Pin, Rule, Window, Copy, Rule, History, Rule, Delete]],
     };
     list.concat()
 }
@@ -121,7 +122,7 @@ impl Workspace {
         if self.store.file_task_busy() || self.file_history.busy { return; }
         let later = ids.to_vec();
         if self.after_tree_writes(move |w, window, cx| w.copy_docs(&later, open, label, window, cx)) { return; }
-        // What is copied is what is on disk: the open document and the 数据表 are written first.
+        // What is copied is what is on disk: the open document and the 数据库 are written first.
         crate::table::flush_all(cx);
         let retry = ids.to_vec();
         if !self.save_before(cx, move |w, window, cx| w.copy_docs(&retry, open, label, window, cx)) { return; }
@@ -233,6 +234,7 @@ impl Workspace {
         let child = matches!(page, Page::Doc | Page::Board) && self.takes_children(&id);
         let list = items(page, child);
         let child_id = id.clone();
+        let window_id = id.clone();
         let mut menu = Popover::new("doc-menu")
             .menu()
             .w(px(MENU_W))
@@ -242,7 +244,7 @@ impl Workspace {
                 }
             }));
         for item in &list {
-            let (pin_id, mv_id, del_id, dup_id, print_id, child_id) = (pin_id.clone(), mv_id.clone(), del_id.clone(), dup_id.clone(), print_id.clone(), child_id.clone());
+            let (pin_id, mv_id, del_id, dup_id, print_id, child_id, window_id) = (pin_id.clone(), mv_id.clone(), del_id.clone(), dup_id.clone(), print_id.clone(), child_id.clone(), window_id.clone());
             menu = menu.child(match item {
                 Item::Rule => divider().into_any_element(),
                 Item::Width => menu_item("dm-width", "page-width", crate::settings::text("页宽设置"), true, sub == Some(DocSub::Width))
@@ -295,6 +297,15 @@ impl Workspace {
                 Item::Child => menu_item("dm-child", "plus", crate::settings::tr("新建子文档", "New child page"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| { w.close_doc_menu(cx); w.new_child(&child_id, window, cx); })).into_any_element(),
+                // as the sidebar row's: from a main window a window of its own, sized and with the sidebar as
+                // this one; from a document's own window, the window showing it comes forward (`show_document`)
+                Item::Window => menu_item("dm-window", "copy", crate::settings::text("在新窗口中打开"), false, false)
+                    .on_hover(hover_sub(None))
+                    .on_click(cx.listener(move |w, _, window, cx| {
+                        w.close_doc_menu(cx);
+                        let (id, opener, main) = (window_id.clone(), w.opener(window), w.frame == crate::quick_note::Frame::Main);
+                        cx.defer(move |cx| if main { crate::quick_note::open_document(Some(id), opener, cx) } else { crate::quick_note::show_document(id, None, cx) });
+                    })).into_any_element(),
                 Item::Copy => menu_item("dm-copy", "copy", crate::settings::text("创建副本"), false, false)
                     .on_hover(hover_sub(None))
                     .on_click(cx.listener(move |w, _, window, cx| w.duplicate_doc(&dup_id, window, cx))).into_any_element(),

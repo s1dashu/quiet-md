@@ -141,9 +141,10 @@ pub fn check(manual: bool, cx: &mut App) {
 
 /// A toast in the front window: the version and the sidebar's 更新 pill.
 fn announce(version: &str, cx: &mut App) {
-    let msg = crate::localized_format!("Quiet.md {} 已发布，点侧栏顶部的「更新」安装", "Quiet.md {} is available. Click Update at the top of the sidebar.", version);
+    let t = crate::design::Toast::new(crate::ui::ToastKind::Info, crate::localized_format!("Quiet.md {} 已发布", "Quiet.md {} is available", version))
+        .description(crate::settings::tr("点侧栏顶部的「更新」安装", "Click Update at the top of the sidebar to install it"));
     let window = cx.active_window().or_else(|| cx.windows().first().copied()).and_then(|w| w.downcast::<crate::app::Workspace>());
-    if let Some(w) = window { let _ = w.update(cx, |ws, _, cx| ws.show_toast_kind(crate::ui::ToastKind::Info, &msg, cx)); }
+    if let Some(w) = window { let _ = w.update(cx, |ws, _, cx| ws.show_toast_with(t, cx)); }
 }
 
 /// How much of `m` has arrived, 0–1, read off the partial file.

@@ -144,7 +144,11 @@ impl Session {
         let tops = match library {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
-                if !Store::is_library(&dir) {
+                // A `.quiet` folder without its format file is a library Quiet.md
+                // began and never wrote into (an earlier version stopped at its
+                // first-launch pages): the app opens it, so does the CLI. A plain
+                // folder is no library, and the CLI never makes one of it.
+                if !Store::is_library(&dir) && !dir.join(fdl_core::store::INTERNAL).is_dir() {
                     return Err(fail("no_library", format!("{} is not a Quiet.md library", dir.display())).hint("pass a folder Quiet.md has open, or leave out --library to use every folder it has open"));
                 }
                 if Store::flat_at(&dir) {
@@ -846,7 +850,7 @@ impl Session {
                 (Some(c), _) => c.to_string(),
                 (None, Some(Value::Array(l))) => l.iter().filter_map(Value::as_str).map(|f| if f.contains([',', '"']) { format!("{:?}", f) } else { f.to_string() }).collect::<Vec<_>>().join(",") + "\n",
                 (None, Some(Value::String(f))) => format!("{f}\n"),
-                _ => return Err(fail("bad_args", "a new 数据表 needs its columns: csv (with a header row) or fields")),
+                _ => return Err(fail("bad_args", "a new 数据库 needs its columns: csv (with a header row) or fields")),
             };
             self.pending.push(Pending::CreateTable { top, title, folder, csv });
             return Ok(json!({ "path": path, "kind": "table", "new": true }));
@@ -1063,7 +1067,7 @@ impl Session {
         let rel = |id: &str| self.entry_by_id(id).map(|e| self.label(e)).unwrap_or_default();
         Some(match p {
             Pending::Create { .. } => return None,
-            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.full_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据表" }),
+            Pending::CreateTable { top, title, folder, .. } => json!({ "path": self.full_path(top, &join(folder.as_deref().unwrap_or(""), title)), "action": "would create 数据库" }),
             Pending::Mkdir { top, name, folder } => json!({ "path": self.full_path(top, &join(&self.folder_rel(folder.as_deref()), name)), "action": "would create folder" }),
             Pending::Rename { id, title } => json!({ "path": rel(id), "action": "would rename", "to": title }),
             Pending::Move { id, folder } => json!({ "path": rel(id), "action": "would move", "to": self.entry_by_id(id).map(|e| self.full_path(&e.top, &self.folder_rel(folder.as_deref()))).unwrap_or_default() }),

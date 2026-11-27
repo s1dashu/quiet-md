@@ -1,4 +1,4 @@
-//! 数据表's look: the table-only parts of the design system (grid sizes, option colours, the
+//! 数据库's look: the table-only parts of the design system (grid sizes, option colours, the
 //! selection's marks) and short forwards to its components (`crate::design`), under the names the
 //! table's code uses. Grid sizes the design system has no counterpart for (toolbar, record panel) stay
 //! 飞书 多维表格's (docs/design/feishu-research/REPORT.md).
@@ -9,7 +9,7 @@ use crate::table::FieldType;
 use fdl_core::table::RowHeight;
 use gpui::*;
 
-/// The 数据表's palette under the names its code uses (the app's `Theme` methods), drawn from the
+/// The 数据库's palette under the names its code uses (the app's `Theme` methods), drawn from the
 /// design system's semantic colours.
 pub struct Theme;
 impl Theme {
@@ -95,7 +95,7 @@ pub fn ring() -> Hsla { crate::theme::Theme::primary() }
 /// A range selection's fill over the cells.
 pub fn range_bg() -> Hsla { color::muted() }
 pub fn star() -> Hsla { crate::theme::c(crate::theme::craft::O350) }
-// 查找's hits and the current one: 飞书多维表格's two yellows, as the first 数据表 took them (4cf23b9).
+// 查找's hits and the current one: 飞书多维表格's two yellows, as the first 数据库 took them (4cf23b9).
 // The design system has no highlight token yet; these stay until it does.
 // In the dark both are the yellow as a dim tint under the page's ink (`theme::mark`), the current
 // one the stronger: mirrored, the current one stayed a bright yellow under white text (1.5:1).

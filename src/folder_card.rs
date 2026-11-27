@@ -785,7 +785,7 @@ pub(crate) struct FileDrop {
     paths: Vec<std::path::PathBuf>,
     md: usize,
     xml: usize,
-    /// CSV / TSV: each becomes a 数据表.
+    /// CSV / TSV: each becomes a 数据库.
     csv: usize,
     dirs: usize,
     other: usize,

@@ -1,12 +1,12 @@
 ---
 name: quiet-md
-description: Read, search, edit and organize the user's Quiet.md notes library (documents, Markdown notes, boards, 数据表 data tables) with the `quiet` command line tool. Use it whenever a task touches the user's notes or knowledge base — "my notes", "my library", "Quiet.md", 笔记, 笔记库, 文档库, 知识库, 周报, 会议纪要, 待办, 数据表 — to find or summarize something in them, write a new note, update or reorganize existing ones, collect todos, query or fill a data table, or draw a diagram on a board. Edit the library through `quiet`, not by writing its files directly.
+description: Read, search, edit and organize the user's Quiet.md notes library (documents, Markdown notes, boards, databases — 数据库) with the `quiet` command line tool. Use it whenever a task touches the user's notes or knowledge base — "my notes", "my library", "Quiet.md", 笔记, 笔记库, 文档库, 知识库, 周报, 会议纪要, 待办, 数据库 — to find or summarize something in them, write a new note, update or reorganize existing ones, collect todos, query or fill a data table, or draw a diagram on a board. Edit the library through `quiet`, not by writing its files directly.
 ---
 
 # Quiet.md: the user's notes library
 
 Quiet.md keeps notes as plain files in the folders the user opened in it:
-`.xml` documents, `.md` notes, `.excalidraw` boards and `.sqlite` 数据表. The
+`.xml` documents, `.md` notes, `.excalidraw` boards and `.sqlite` 数据库. The
 user edits them in the app; you work on the same files with `quiet`, which
 keeps them valid, rewrites links when a document moves, keeps every replaced
 text as a version, and refuses to overwrite a change made since you read.
@@ -55,7 +55,7 @@ a title only one document has works too. New content is Markdown;
 takes `--dry-run`. Use `quiet run` instead of many commands when the steps
 do not need your judgement in between.
 
-**数据表.** Rows have ids (`r12`); values are text as the app shows them and
+**数据库.** Rows have ids (`r12`); values are text as the app shows them and
 are written as if pasted.
 
 ```

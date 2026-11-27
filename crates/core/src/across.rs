@@ -273,7 +273,7 @@ impl Store {
                 let new = match moved(&target) { Some(r) => layout::relative(&now_dir, &r), None => crate::paths::portable(&src_top.join(&target), &dst_top.join(&now_dir))? };
                 (new != href).then_some(new)
             });
-            if let Err(e) = r { to.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+            if let Err(e) = r { to.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
         }
         // 版本历史 goes along, by id.
         let history: Vec<&String> = ids.iter().filter(|k| copy_history(&self.history_base(), &to.history_base(), k)).collect();
@@ -282,6 +282,7 @@ impl Store {
         // that pointed at what moved point there now.
         let gone: HashMap<String, Meta> = ids.iter().filter_map(|k| Some((k.clone(), self.index.remove(k)?))).collect();
         self.foreign.retain(|k, _| m.folder.is_none() || !k.starts_with(&prefix));
+        self.keep_emptied(m.parent.clone());
         for k in &ids { self.parsed.remove(k); self.loaded.borrow_mut().remove(k); }
         if !same_disk {
             // The originals out of every listing first (one rename), then removed.
@@ -328,7 +329,7 @@ impl Store {
                     let r = moved(&layout::resolve(&dir, href)?)?;
                     crate::paths::portable(&dst_top.join(r), &src_top.join(&dir)).filter(|n| n != href)
                 });
-                if let Err(e) = r { self.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+                if let Err(e) = r { self.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
             }
         }
         // The page is in the target already: an index not written here only lists it until the next `list` finds its file gone.
@@ -416,6 +417,18 @@ mod tests {
     }
     fn entry(s: &mut Store, id: &str) -> Option<Entry> { s.list().into_iter().find(|e| e.id == id) }
     fn moving_left(l: &Lib) -> usize { crate::vfs::read_dir(l.0.join(".quiet/moving")).map(|d| d.count()).unwrap_or(0) }
+
+    /// The folder a page moved out of to another top-level folder, left empty, still shows.
+    #[test]
+    fn the_folder_left_empty_stays() {
+        let (la, lb) = (Lib::new("left-a"), Lib::new("left-b"));
+        let (mut a, mut b) = (la.open(), lb.open());
+        crate::vfs::create_dir_all(la.0.join("夹")).unwrap();
+        crate::vfs::write(la.0.join("夹/甲.md"), "# 甲\n").unwrap();
+        let p = a.list().into_iter().find(|e| e.meta.rel == "夹/甲.md").unwrap().id;
+        a.move_across(&mut b, &p, None, Place::Before(None)).unwrap();
+        assert!(la.open().list().iter().any(|e| e.meta.rel == "夹" && e.meta.folder.is_some()));
+    }
 
     /// A folder with a page and a folder in it, from one top-level folder to the top of
     /// another: the files go, the ids and what the index says stay, pictures come along,

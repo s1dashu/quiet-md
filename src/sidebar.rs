@@ -815,10 +815,10 @@ impl Workspace {
             .child(
                 item("rm-window", "copy", crate::settings::text("在新窗口中打开"))
                     .on_hover(set_sub(false))
-                    .on_click(cx.listener(move |w, _, _, cx| {
+                    .on_click(cx.listener(move |w, _, window, cx| {
                         w.row_menu = None;
-                        let id = new_window.clone();
-                        cx.defer(move |cx| crate::quick_note::open_document(Some(id), cx));
+                        let (id, opener) = (new_window.clone(), w.opener(window));
+                        cx.defer(move |cx| crate::quick_note::open_document(Some(id), opener, cx));
                         cx.notify();
                     })),
             )
