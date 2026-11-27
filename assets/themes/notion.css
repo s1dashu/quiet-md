@@ -196,8 +196,8 @@ h3 {
 
 h4 {
   font-family: system-ui;
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 18px;
+  line-height: 27px;
   font-weight: 600;
   color: inherit;
   margin-top: 12px;
@@ -219,7 +219,7 @@ h6 {
   font-size: 16px;
   line-height: 24px;
   font-weight: 600;
-  color: inherit;
+  color: var(--notion-secondary);
   margin-top: 8px;
   margin-bottom: 4px;
 }
