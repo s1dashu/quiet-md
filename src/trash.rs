@@ -367,7 +367,7 @@ impl Workspace {
     /// What the unused-asset sweep (#237) reads besides the library: the
     /// sources every open editor holds — this window's and the others',
     /// quick notes included — that the disk does not (unsaved text, the
-    /// snapshots Undo can still bring back), and the 本机文件 and 本机文件夹,
+    /// snapshots Undo can still bring back), and the files opened on their own,
     /// whose pasted pictures are copied into the library's assets too.
     pub(crate) fn sweep_inputs(&self, window: &Window, cx: &Context<Self>) -> (Vec<String>, Vec<std::path::PathBuf>) {
         let mut live: Vec<String> = self.editor.as_ref().map(|e| e.read(cx).core.asset_refs()).unwrap_or_default();
@@ -529,7 +529,7 @@ impl Workspace {
                 let why = match reason {
                     ConsentReason::Synced(SyncService::Provider(p)) => crate::localized_format!("文档库在 {p} 同步的文件夹里。", "The library is in a folder synced by {p}. "),
                     ConsentReason::Synced(_) => crate::settings::tr("文档库在 iCloud 云盘里。", "The library is in iCloud Drive. ").to_string(),
-                    ConsentReason::OtherDevice(DeviceHint::MissingFile(p)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（打开过的本机文件 {p} 不在这台电脑上）。", "This library may also be used on another computer (a local file it opened, {p}, isn't on this one). "),
+                    ConsentReason::OtherDevice(DeviceHint::MissingFile(p)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（单独打开过的文件 {p} 不在这台电脑上）。", "This library may also be used on another computer (a file opened on its own, {p}, isn't on this one). "),
                     ConsentReason::OtherDevice(DeviceHint::SyncCopy(n)) => crate::localized_format!("这个文档库可能也在别的电脑上使用（同步留下了 {n}）。", "This library may also be used on another computer (sync left {n} behind). "),
                     ConsentReason::Restored => crate::settings::tr("你之前把文档库恢复成了原来的存放方式。", "You went back to the old layout before. ").to_string(),
                 };

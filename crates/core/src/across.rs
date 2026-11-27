@@ -126,7 +126,7 @@ impl Store {
         anyhow::ensure!(!self.flat && !to.flat, "旧格式的文档库没有真实文件夹");
         anyhow::ensure!(self.index_has(id), "文档或文件夹不存在");
         let m = self.index[id].clone();
-        anyhow::ensure!(!m.local(), "本机文件不能移入文档库的文件夹");
+        anyhow::ensure!(!m.local(), "单独打开的文件只能复制进文件夹");
         to.validate_folder(None, parent)?;
         if let Place::Before(Some(anchor)) = &place {
             anyhow::ensure!(to.index.get(anchor).is_some_and(|m| m.parent.as_deref() == parent) && to.index_has(anchor), "目标位置已改变，请重试");

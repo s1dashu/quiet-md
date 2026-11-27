@@ -2330,7 +2330,7 @@ impl Store {
         let mut dirs: Vec<(String, &str)> = vec![];
         for (id, to) in moves {
             let m = self.index.get(id).ok_or_else(|| anyhow::anyhow!("文档或文件夹不存在"))?;
-            anyhow::ensure!(!m.local(), "本机文件不能移入文档库的文件夹");
+            anyhow::ensure!(!m.local(), "单独打开的文件只能复制进文件夹");
             if m.folder.is_some() {
                 anyhow::ensure!(*to != m.rel && !to.starts_with(&format!("{}/", m.rel)), "不能移动到自身或后代文件夹中");
                 let prefix = format!("{}/", m.rel);

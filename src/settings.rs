@@ -1782,7 +1782,7 @@ impl Workspace {
                 row(tr("回收站", "Trash"), Some(crate::localized_format!("删除的文档保留 {} 天后自动清除。", "Deleted documents are kept for {} days.", self.store.trash_days()).into()),
                     button("open-trash", tr("打开", "Open")).on_click(cx.listener(|w, _, _, cx| w.show_view(View::Trash, cx)))).into_any_element(),
                 // #237: files no document (the Trash included) mentions.
-                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和本机文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and local files. Nothing is moved until you confirm.").into()),
+                row(tr("未使用资源", "Unused assets"), Some(tr("资源文件夹里没有任何文档（含回收站、版本历史和单独打开过的文件）引用的图片和文件。检查后确认才会移出。", "Images and files in the asset folder that no document mentions, including the Trash, version history and files opened on their own. Nothing is moved until you confirm.").into()),
                     button("sweep-assets", tr("检查", "Check")).on_click(cx.listener(|w, _, window, cx| {
                         let root = crate::store::Store::active_dir();
                         let (live, outside) = w.sweep_inputs(window, cx);
@@ -2216,8 +2216,6 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "文件不存在" => "File not found",
         "文件夹不存在" => "Folder not found",
         "这个文件夹在文档库里，它的内容已经在我的文档中" => "This folder is inside the library; its notes are already in My documents",
-        "这个文件夹里有文档库，不能作为本机文件夹打开" => "This folder holds the library, so it can't be opened as a folder on this computer",
-        "本机文件夹和文档库之间只能复制，不能移动" => "Between folders on this computer and the library, notes can be copied but not moved",
         "加载失败，" => "Could not load. ",
         "点击重试" => "Retry",
         "图片过小，请放大后重试" => "Image too small. Enlarge it and try again.",
@@ -2663,7 +2661,7 @@ fn diagnostic_for(message: &str, english: bool) -> String {
         ("已存在同名文件：{}", "A file with this name is already there: {}"),
         ("文档或文件夹不存在", "This page or folder is no longer here"),
         ("旧格式的文档库没有真实文件夹", "Move the library to real folders first"),
-        ("本机文件不能移入文档库的文件夹", "Files on this computer are copied into the library, not moved"),
+        ("单独打开的文件只能复制进文件夹", "A file opened on its own is copied into a folder, not moved"),
         ("目标位置已改变，请重试", "The folder changed. Try again."),
         ("目标文件夹里已有相同编号的文档", "That folder already has a page with this ID"),
     ];
