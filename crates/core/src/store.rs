@@ -409,6 +409,8 @@ pub struct Store {
     /// FORMAT 5: the library as `load_meta` last took it in or `save_meta`
     /// last wrote it (`None`: since then not known).
     synced: std::cell::RefCell<Option<Synced>>,
+    /// A 数据库 file as last found the same as its newest version (by name), or made into it.
+    tables_kept: std::cell::RefCell<HashMap<String, (meta::Seen, String)>>,
     /// `save_editor_naming_later` while it saves: whether the title asks for
     /// another file name, which it leaves to `follow_name` (`None`: every
     /// other save follows the title itself).
@@ -1474,7 +1476,7 @@ impl Store {
         let v5 = !flat && Self::format_at(&root) >= 5;
         let v6 = v5 && Self::format_at(&root) >= 6;
         let mut store = Store { file_changes: vec![], top_dir: root, index: HashMap::new(), foreign: DiskIndex::new(), trash, flat, warnings, migrated: None, loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(),
-            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+            v5, me, clock: Default::default(), seen: Default::default(), merged: Default::default(), key: key.to_string(), place_by_hand: true, v6, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), tables_kept: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         if flat {
             store.index = load_json(&base.join("index.json"), "文档索引", &mut store.warnings);
             store.index.values_mut().for_each(Meta::take_star);
@@ -3807,10 +3809,18 @@ impl Store {
     #[cfg(not(target_family = "wasm"))]
     pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> {
         anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据库");
-        let bytes = crate::vfs::read(self.path(id))?;
+        let path = self.path(id);
         let before = self.versions(id).first().map(|v| v.name.clone());
+        // The file and its newest version as they were when last found the same: nothing to
+        // read (a 数据库 of 24 MB and its version were read whole on every open, 90-150 ms).
+        if let Some(newest) = &before && self.tables_kept.borrow().get(id).is_some_and(|(seen, name)| name == newest && meta::still(&path, &Some(seen.clone()))) { return Ok(false) }
+        let seen = meta::seen_now(&path);
+        let bytes = crate::vfs::read(&path)?;
         crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;
-        Ok(self.versions(id).first().map(|v| v.name.clone()) != before)
+        let after = self.versions(id).first().map(|v| v.name.clone());
+        // Forced, the newest version is now the file as read: the same or just made from it.
+        if force && let (Some(seen), Some(name)) = (seen, &after) { self.tables_kept.borrow_mut().insert(id.to_string(), (seen, name.clone())); }
+        Ok(after != before)
     }
 
     /// The text a version's changes are counted on: a 数据表's rows as lines.
@@ -6358,7 +6368,7 @@ mod tests {
         let index = crate::vfs::read(trash.join("index.json")).unwrap();
         crate::vfs::rename(&trash, lib.0.join(".quiet/trash-away")).unwrap();
         crate::vfs::write(&trash, b"").unwrap();
-        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
+        let mut s = Store { file_changes: vec![], top_dir: lib.0.clone(), index: HashMap::new(), foreign: DiskIndex::new(), flat: false, migrated: None, trash: serde_json::from_slice(&index).unwrap(), warnings: vec![], loaded: Default::default(), copied: Default::default(), parsed: HashMap::new(), checked: HashMap::new(), inodes: Default::default(), inodes_due: Default::default(), writes: Default::default(), batch: Default::default(), view: Default::default(), v5: false, me: device(), clock: Default::default(), seen: Default::default(), merged: Default::default(), key: library_key(&lib.0), place_by_hand: true, v6: false, seen_trash: Default::default(), purging: Default::default(), synced: Default::default(), tables_kept: Default::default(), name_later: Default::default() , here: Default::default() , clean_due: None };
         assert_eq!(s.list_trash().len(), 1);
         assert_eq!(s.trash.len(), 1);
     }
@@ -7384,6 +7394,34 @@ mod tests {
         crate::vfs::create_dir_all(lib.0.join("板")).unwrap();
         crate::vfs::write(lib.0.join("板/板.excalidraw"), crate::whiteboard::Board::default().file_json()).unwrap();
         assert!(s.list().iter().find(|e| e.meta.rel == "板").unwrap().note.is_none());
+    }
+
+    /// Opening a 数据库 keeps the file as a version unless the newest is the same: a file
+    /// and newest version unchanged since they were found the same are not read again, and
+    /// anything that changes either (a write, the version removed) compares again.
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn a_table_unchanged_since_its_version_is_not_read_again() {
+        let lib = Lib::new("table-kept");
+        let mut s = lib.open();
+        let t = s.create_table_in("书单", &crate::table::Base::blank(0), None).unwrap();
+        let names = |s: &Store| s.versions(&t).into_iter().map(|v| v.name).collect::<Vec<_>>();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert!(!s.snapshot_table(&t, true).unwrap());
+        assert!(s.tables_kept.borrow().contains_key(&t));
+        // Written: compared again and kept as a new version.
+        let path = s.path(&t);
+        let mut bytes = crate::vfs::read(&path).unwrap();
+        bytes.extend_from_slice(b"changed");
+        crate::vfs::write(&path, &bytes).unwrap();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert_eq!(names(&s).len(), 2);
+        assert!(!s.snapshot_table(&t, true).unwrap());
+        // Its newest version removed: the file is kept again.
+        let newest = names(&s)[0].clone();
+        crate::versions::remove(&s.history_base(), &t, &newest, false).unwrap();
+        assert!(s.snapshot_table(&t, true).unwrap());
+        assert_eq!(names(&s).len(), 2);
     }
 
     /// A 数据表 with 笔记 columns lives in a folder of its name with its notes
