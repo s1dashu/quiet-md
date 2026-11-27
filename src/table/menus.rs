@@ -239,8 +239,11 @@ fn field_menu(v: &TableView, t: &Table, view: &View, fid: FieldId, pos: Point<Pi
             panels::open(v, panels::Kind::Filter, pos, window, cx);
         })))
         .child(menu_item("tb-fm-group", "view-list", label("按此字段分组"), false).on_click(cx.listener(move |v, _, window, cx| { v.edit_view(cx, |view| view.opts.groups = vec![SortBy { field: fid, desc: false }]); close(v, window, cx); })))
-        // with several columns selected (this one among them) hide and delete act on all of them but the title
-        .when(!picked.is_empty(), |d| { let (n, hide, del) = (picked.len(), picked.clone(), picked.clone()); d.child(menu_rule())
+        // with several columns selected (this one among them) hide and delete act on all of them but the title;
+        // the title alone: delete shows, dimmed, saying why
+        .child(menu_rule())
+        .when(picked.is_empty(), |d| d.child(menu_item("tb-fm-del", "bin", label("删除字段/列"), true).disabled(true).description(label("主字段作为记录标题保留"))))
+        .when(!picked.is_empty(), |d| { let (n, hide, del) = (picked.len(), picked.clone(), picked.clone()); d
             .child(menu_item("tb-fm-hide", "eye", if n > 1 { crate::localized_format!("隐藏 {n} 个字段", "Hide {n} fields") } else { label("隐藏字段/列") }, false)
                 .on_click(cx.listener(move |v, _, window, cx| { let ids = hide.clone(); v.edit_view(cx, |view| view.opts.hidden.extend(ids)); v.col_sel.clear(); close(v, window, cx); })))
             .child(menu_item("tb-fm-del", "bin", if n > 1 { crate::localized_format!("删除 {n} 个字段", "Delete {n} fields") } else { label("删除字段/列") }, true)

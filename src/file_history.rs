@@ -21,7 +21,7 @@ struct Across { id: String, from: String, to: String, before: FileState, after: 
 #[derive(Default)]
 pub(crate) struct FileHistory {
     undo: Vec<Record>, redo: Vec<Record>, next: u64,
-    pub prefer_files: bool, pub busy: bool,
+    pub busy: bool,
     requests: VecDeque<bool>,
 }
 impl Workspace {
@@ -121,7 +121,7 @@ impl Workspace {
         let token = self.file_history.next;
         self.file_history.undo.push(Record { token, label, changes, entries, across: vec![], tops: vec![] });
         if self.file_history.undo.len() > 100 { self.file_history.undo.remove(0); }
-        self.file_history.redo.clear(); self.file_history.prefer_files = true;
+        self.file_history.redo.clear();
         token
     }
 
@@ -149,9 +149,12 @@ impl Workspace {
         self.file_history.redo.retain(|r| r.token != token);
     }
 
+    /// ⌘Z / ⌘⇧Z, caught on the way down: the folders' history (创建副本, 移动, 删除…) only while the keys are
+    /// in the sidebar or a folder's page. With the open document holding them it is that document's own, even
+    /// with nothing left to undo there (as in Notion and 飞书: undo in a page never undoes the sidebar).
     pub(crate) fn capture_file_history(&mut self, redo: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.rename.is_some() || self.search_open || self.move_dlg.is_some()
-            || (!self.file_history.prefer_files && self.view == View::Doc) { return; }
+        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return; }
         cx.stop_propagation();
         self.file_history.requests.push_back(redo);
         self.run_file_history(window, cx);
@@ -270,10 +273,42 @@ impl Workspace {
                         w.show_toast_kind(crate::ui::ToastKind::Error, &e.to_string(), cx);
                     }
                 }
-                w.file_history.prefer_files = true; w.sort();
+                w.sort();
                 w.run_file_history(window, cx); cx.notify();
             });
         }).detach();
         cx.notify();
+    }
+}
+
+/// Whose ⌘Z it is: the folders', unless a field of the workspace's own (重命名, 搜索, 移动到) or the open
+/// document has the keys.
+fn files_take_undo(field: bool, doc_keys: bool) -> bool { !field && !doc_keys }
+
+#[cfg(test)]
+mod tests {
+    // (`test` here is GPUI's, through the glob)
+    use super::*;
+
+    /// The report (2026-11-27): 创建副本 of a 数据表 on a folder's page, the copy opened and a cell edited,
+    /// ⌘Z undid the 创建副本. Whatever the folders did last, the document's keys keep its ⌘Z, its own
+    /// history spent or not; back in the sidebar or a folder's page, ⌘Z is the folders' again.
+    #[core::prelude::v1::test]
+    fn the_folders_undo_only_without_the_document() {
+        let mut h = FileHistory::default();
+        h.undo.push(Record { token: 1, label: "创建副本", changes: vec![], entries: vec![], across: vec![], tops: vec![] });
+        let mut table = fdl_core::table::Doc::new(fdl_core::table::Base::blank_seeded(0, 2));
+        let (t, f) = (table.base.tables[0].id, table.base.tables[0].fields[0].id);
+        let r = table.base.tables[0].records[0].id;
+        assert!(table.set_cells(t, vec![(r, f, fdl_core::table::Value::Text("改过".into()))]));
+        // in the table: its ⌘Z, the cell back, the folders' step still there
+        assert!(!files_take_undo(false, true));
+        assert!(table.undo());
+        assert_eq!(h.undo.len(), 1);
+        // its history spent: still not the folders'
+        assert!(!files_take_undo(false, true) && !table.undo());
+        // the sidebar or the folder's page: the folders'; a field of the workspace's own keeps its keys
+        assert!(files_take_undo(false, false));
+        assert!(!files_take_undo(true, false));
     }
 }

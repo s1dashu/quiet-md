@@ -1539,4 +1539,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("单独打开的文件只能复制进文件夹", "Ayrı açılan bir dosya klasöre kopyalanır, taşınmaz"),
     ("目标位置已改变，请重试", "Klasör değişti. Yeniden deneyin."),
     ("目标文件夹里已有相同编号的文档", "Hedef klasörde bu kimliğe sahip bir sayfa zaten var"),
+    ("主字段作为记录标题保留", "Her kaydın başlığı olarak kalır"),
+    ("撤销可以恢复。", "Geri Al ile geri getirebilirsiniz."),
+    ("将删除该字段在 {n} 条记录中的数据。", "Bu alanın {n} kayıttaki verileri silinecek."),
+    ("将删除这 {k} 个字段在 {n} 条记录中的数据。", "Bu {k} alanın {n} kayıttaki verileri silinecek."),
 ];

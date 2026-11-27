@@ -2401,6 +2401,8 @@ pub(crate) fn localize(text: &str, english: bool) -> &str {
         "分组" => "Group",
         "创建于" => "Created",
         "删除字段/列" => "Delete field",
+        "主字段作为记录标题保留" => "Kept as each record’s title",
+        "撤销可以恢复。" => "Undo brings it back.",
         "删除数据表" => "Delete table",
         "删除视图" => "Delete view",
         "删除记录" => "Delete record",

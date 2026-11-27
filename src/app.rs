@@ -1027,7 +1027,6 @@ impl Workspace {
         editor.update(cx, |e, _| e.restore_top = top);
         self.editor_sub = Some(cx.subscribe_in(&editor, window, |this, _, ev: &EditorEvent, window, cx| match ev {
             EditorEvent::Changed => {
-                this.file_history.prefer_files = false;
                 // 阅读模式 put the document back: nothing to save.
                 let rejected = this.editor.clone().is_some_and(|ed| ed.update(cx, |e, cx| e.reject_read_only_edit(cx)));
                 if !rejected {

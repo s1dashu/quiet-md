@@ -824,4 +824,43 @@ mod tests {
         assert!(!d.set_unique(t, day, true));
         assert!(!d.base.tables[0].fields.last().unwrap().opts.unique);
     }
+
+    /// 删除字段/列 and its undo: the column, every cell and each view's use of it (order, width,
+    /// hidden, 筛选, 排序, 分组, 统计, 看板) come back as they were, in one step; the primary field stays.
+    #[test]
+    fn a_removed_field_comes_back_whole() {
+        let mut d = super::super::Doc::new(Base::blank_seeded(0, 3));
+        let t = d.base.tables[0].id;
+        let title = d.base.tables[0].fields[0].id;
+        let pick = d.add_field(t, None, "状态", FieldType::SingleSelect, FieldOpts::default()).unwrap();
+        let num = d.add_field(t, None, "数", FieldType::Number, FieldOpts::default()).unwrap();
+        let ids: Vec<RecId> = d.base.tables[0].records.iter().map(|r| r.id).collect();
+        assert!(d.set_cells(t, ids.iter().enumerate().map(|(i, r)| (*r, num, Value::Number(i as f64))).collect()));
+        let grid = d.base.tables[0].views[0].id;
+        assert!(d.edit_view(t, grid, |v| {
+            v.opts.widths.insert(num, 180.);
+            v.opts.hidden.insert(pick);
+            v.opts.sorts = vec![SortBy { field: num, desc: true }];
+            v.opts.groups = vec![SortBy { field: num, desc: false }];
+            v.opts.filter.conds.push(Cond { field: num, op: FilterOp::Contains, value: "1".into(), date: DateRef::Exact });
+            v.opts.stats.insert(num, Stat::Sum);
+        }));
+        let board = d.add_view(t, ViewKind::Kanban, "").unwrap();
+        assert!(d.edit_view(t, board, |v| v.opts.stack = Some(num)));
+        let before = d.base.clone();
+        assert!(d.remove_field(t, num));
+        let tb = &d.base.tables[0];
+        assert!(tb.field(num).is_none() && tb.records.iter().all(|r| !r.cells.contains_key(&num)));
+        let o = &tb.view(grid).unwrap().opts;
+        assert!(!o.widths.contains_key(&num) && o.sorts.is_empty() && o.groups.is_empty() && o.filter.conds.is_empty() && !o.stats.contains_key(&num));
+        assert_eq!(tb.view(board).unwrap().opts.stack, None);
+        // one undo: all of it
+        assert!(d.undo());
+        assert_eq!(d.base, before);
+        assert!(d.redo());
+        assert!(d.base.tables[0].field(num).is_none());
+        // the primary field can't go
+        assert!(!d.remove_field(t, title));
+        assert!(d.base.tables[0].field(title).is_some());
+    }
 }

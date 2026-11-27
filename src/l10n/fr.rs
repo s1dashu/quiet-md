@@ -1539,4 +1539,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("单独打开的文件只能复制进文件夹", "Un fichier ouvert seul se copie dans un dossier, sans être déplacé"),
     ("目标位置已改变，请重试", "Le dossier a changé. Réessayez."),
     ("目标文件夹里已有相同编号的文档", "Ce dossier contient déjà une page avec cet identifiant"),
+    ("主字段作为记录标题保留", "Conservé comme titre de chaque enregistrement"),
+    ("撤销可以恢复。", "Annuler le remet en place."),
+    ("将删除该字段在 {n} 条记录中的数据。", "Les données de ce champ seront supprimées dans {n|one:# enregistrement|other:# enregistrements}."),
+    ("将删除这 {k} 个字段在 {n} 条记录中的数据。", "Les données de ces {k} champs seront supprimées dans {n|one:# enregistrement|other:# enregistrements}."),
 ];

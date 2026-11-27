@@ -160,8 +160,7 @@ impl Editor {
     /// A board is open (in place of the document).
     pub fn board_open(&self) -> bool { self.boards.open.is_some() }
 
-    /// The open board's view (the harness drops files on it).
-    #[cfg(feature = "devtools")]
+    /// The open board's view (the harness drops files on it; `holds_focus` asks whether it has the keys).
     pub fn board_view(&self) -> Option<Entity<BoardView>> { self.boards.open.as_ref().map(|o| o.1.clone()) }
 
     /// The open board, filling the note pane under the app's header.

@@ -1528,4 +1528,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("单独打开的文件只能复制进文件夹", "Un archivo abierto por separado se copia a una carpeta, no se mueve"),
     ("目标位置已改变，请重试", "La carpeta ha cambiado. Inténtalo de nuevo."),
     ("目标文件夹里已有相同编号的文档", "Esa carpeta ya tiene una página con este ID"),
+    ("主字段作为记录标题保留", "Se mantiene como título de cada registro"),
+    ("撤销可以恢复。", "Deshacer lo recupera."),
+    ("将删除该字段在 {n} 条记录中的数据。", "Se eliminarán los datos de este campo en {n|one:# registro|other:# registros}."),
+    ("将删除这 {k} 个字段在 {n} 条记录中的数据。", "Se eliminarán los datos de estos {k} campos en {n|one:# registro|other:# registros}."),
 ];

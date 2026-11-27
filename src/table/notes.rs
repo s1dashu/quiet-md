@@ -502,12 +502,12 @@ pub(crate) fn remove_records(v: &mut TableView, ids: Vec<RecId>, window: &mut Wi
     cx.notify();
 }
 
-/// Delete fields; a 笔记 column's notes are asked about first.
-pub(crate) fn remove_fields(v: &mut TableView, ids: Vec<FieldId>, window: &mut Window, cx: &mut Context<TableView>) {
+/// Delete fields, asked first (as 飞书 and Notion do: the data in every record goes); a 笔记 column's
+/// notes are asked about in the same question.
+pub(crate) fn remove_fields(v: &mut TableView, ids: Vec<FieldId>, _: &mut Window, cx: &mut Context<TableView>) {
     if ids.is_empty() { return; }
     refresh(v, cx);
     let notes = owned(v, &[], &ids, cx);
-    if notes.is_empty() { return finish(v, vec![], ids, false, window, cx); }
     v.notes.ask = Some(Ask { records: vec![], fields: ids, notes });
     cx.notify();
 }
@@ -618,20 +618,34 @@ pub(crate) fn after_history(v: &mut TableView, before: HashSet<String>, cx: &mut
     }
 }
 
-/// 「同时删除笔记？」: the records or fields about to go have notes of the table's own.
+/// 「删除字段/列？」 with what goes (the field's data in so many records), and 「同时删除笔记？」 when the
+/// records or fields about to go have notes of the table's own.
 pub(crate) fn ask(v: &TableView, window: &mut Window, cx: &Context<TableView>) -> Option<AnyElement> {
     let a = v.notes.ask.as_ref()?;
-    let body = match &a.notes[..] {
+    let (n, k) = (v.state.read(cx).doc.base.table(v.table).map_or(0, |t| t.records.len()), a.fields.len());
+    let data = (k > 0 && n > 0).then(|| match (k, n) {
+        (1, 1) => crate::localized_format!("将删除该字段在 {n} 条记录中的数据。", "This deletes the field’s data in 1 record."),
+        (1, _) => crate::localized_format!("将删除该字段在 {n} 条记录中的数据。", "This deletes the field’s data in {n} records."),
+        (_, 1) => crate::localized_format!("将删除这 {k} 个字段在 {n} 条记录中的数据。", "This deletes the data of {k} fields in 1 record."),
+        _ => crate::localized_format!("将删除这 {k} 个字段在 {n} 条记录中的数据。", "This deletes the data of {k} fields in {n} records."),
+    });
+    let then = match &a.notes[..] {
+        [] => label("撤销可以恢复。"),
         [one] => crate::localized_format!("同时把笔记「{}」移进回收站？撤销可以恢复。", "Also move the note “{}” to the Trash? Undo brings it back.", one.1),
         many => crate::localized_format!("同时把这 {} 篇笔记移进回收站？撤销可以恢复。", "Also move these {} notes to the Trash? Undo brings them back.", many.len()),
     };
+    let gap = if matches!(crate::settings::lang(), crate::settings::Lang::Zh | crate::settings::Lang::ZhTw | crate::settings::Lang::Ja) { "" } else { " " };
+    let body = data.map_or(then.clone(), |d| format!("{d}{gap}{then}"));
     let (records, fields) = (a.records.clone(), a.fields.clone());
     let (r2, f2) = (records.clone(), fields.clone());
     let vp = window.viewport_size();
     let buttons = div().flex().items_center().justify_end().gap(px(8.))
         .child(crate::design::Button::outline("tb-note-ask-cancel").label(label("取消")).on_click(cx.listener(|v, _, _, cx| { v.notes.ask = None; cx.notify(); })))
-        .child(crate::design::Button::outline("tb-note-ask-keep").label(label("保留笔记")).on_click(cx.listener(move |v, _, window, cx| finish(v, r2.clone(), f2.clone(), false, window, cx))))
-        .child(crate::design::Button::destructive("tb-note-ask-all").label(label("一起删除")).on_click(cx.listener(move |v, _, window, cx| finish(v, records.clone(), fields.clone(), true, window, cx))));
+        // no notes: 删除 goes ahead; with notes, keep them or send them along
+        .child(if a.notes.is_empty() { crate::design::Button::destructive("tb-note-ask-del").label(label("删除")) } else { crate::design::Button::outline("tb-note-ask-keep").label(label("保留笔记")) }
+            .on_click(cx.listener(move |v, _, window, cx| finish(v, r2.clone(), f2.clone(), false, window, cx))))
+        .when(!a.notes.is_empty(), |d| d
+            .child(crate::design::Button::destructive("tb-note-ask-all").label(label("一起删除")).on_click(cx.listener(move |v, _, window, cx| finish(v, records.clone(), fields.clone(), true, window, cx)))));
     Some(deferred(anchored().position(point(px(0.), px(0.))).child(
         crate::design::scrim().id("tb-note-ask-scrim").occlude().relative().w(vp.width).h(vp.height)
             .on_mouse_down(MouseButton::Left, cx.listener(|v, _, _, cx| { v.notes.ask = None; cx.notify(); }))

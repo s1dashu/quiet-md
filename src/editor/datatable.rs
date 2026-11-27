@@ -185,6 +185,13 @@ impl Editor {
         self.datatables.views.values().any(|v| v.0.focus_handle(cx).contains_focused(window, cx))
     }
 
+    /// The page has the keys: its text, a 数据表 in it or full-pane, its 画板, or anything open over them
+    /// (a cell being edited, a dialog). ⌘Z / ⌘⇧Z are then this document's own, never the folders'.
+    pub fn holds_focus(&self, window: &Window, cx: &App) -> bool {
+        self.focus.contains_focused(window, cx) || self.tables_focused(window, cx)
+            || self.board_view().is_some_and(|b| b.read(cx).focus.contains_focused(window, cx))
+    }
+
     /// The page is about to be replaced by another copy of itself (a version previewed, or back to
     /// now): its views go, so the next ones read the file the new page points at.
     pub fn reset_tables(&mut self) {
