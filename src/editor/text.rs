@@ -299,7 +299,7 @@ pub struct TextSpec {
     pub italic: bool,
     /// Fonts by run instead (board text: Excalidraw's fonts, `board::fonts::runs`).
     pub font_runs: Option<FontRuns>,
-    /// Every line's ascent and descent in px instead of its fonts' (board
+    /// Every line's ascent and descent in px instead of the text font's (board
     /// text: the board's own, so the baseline sits where the board draws it).
     pub metrics: Option<(f32, f32)>,
     /// Rows cut where these say instead of at the wrap width (board text:
@@ -912,14 +912,18 @@ impl Element for RichTextElement {
         let state: Rc<RefCell<Option<Prepared>>> = Rc::new(RefCell::new(None));
         let font_size = px(self.spec.size);
         let line_height = px(self.spec.line_height);
-        // Lines' ascent and descent when fixed: Linux fallback fonts change during IME
-        // composition, so the title keeps its font's; board text takes the board's (`TextSpec::metrics`).
-        let metrics = if cfg!(target_os = "linux") && self.id == crate::editor::core::TITLE {
+        // Lines' ascent and descent, which place the baseline in the line box: board text takes the
+        // board's (`TextSpec::metrics`), other text its own font's, as a CSS strut does under a fixed
+        // line-height. Shaping takes the largest of every run's font: a full-width comma (set in
+        // `CJK_PUNCT_FONT`), inline code or a fallback face (Windows, Linux) moved the whole line by
+        // 0.3–0.5pt, up or down by the family, as it was typed and deleted.
+        let fixed = self.spec.metrics.is_some();
+        let metrics = self.spec.metrics.map(|(a, d)| (px(a), px(d))).unwrap_or_else(|| {
             let ts = window.text_system();
             let id = ts.resolve_font(&font_for(&self.spec, &Marks::default()));
-            // GPUI Linux font metrics use a signed descent; shaped line layouts use a positive distance.
-            Some((ts.ascent(id, font_size), px(f32::from(ts.descent(id, font_size)).abs())))
-        } else { self.spec.metrics.map(|(a, d)| (px(a), px(d))) };
+            // Font metrics' descent is signed (below the baseline); shaped line layouts' is a distance.
+            (ts.ascent(id, font_size), px(f32::from(ts.descent(id, font_size)).abs()))
+        });
         let mut eq_src: Vec<(usize, ObjSrc)> = vec![];
         let (text, runs) = if self.text.is_empty() {
             match &self.placeholder {
@@ -1042,8 +1046,10 @@ impl Element for RichTextElement {
                 } else if custom {
                     adjust_line(&mut l, spacing, &line_eqs, start, wrap_width);
                 }
-                if let Some((ascent, descent)) = metrics {
-                    let src = &l.unwrapped_layout;
+                let (ascent, descent) = metrics;
+                // A line in the text's font alone keeps its own (the same, to rounding).
+                let src = &l.unwrapped_layout;
+                if fixed || (src.ascent - ascent).abs() > px(0.01) || (src.descent - descent).abs() > px(0.01) {
                     let layout = LineLayout { font_size: src.font_size, width: src.width, ascent, descent, runs: src.runs.clone(), len: src.len };
                     let wrapped = WrappedLineLayout { unwrapped_layout: std::sync::Arc::new(layout), wrap_boundaries: l.wrap_boundaries().into(), wrap_width: l.wrap_width };
                     let target: &mut std::sync::Arc<WrappedLineLayout> = &mut l;
