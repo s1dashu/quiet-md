@@ -273,7 +273,7 @@ impl Store {
                 let new = match moved(&target) { Some(r) => layout::relative(&now_dir, &r), None => crate::paths::portable(&src_top.join(&target), &dst_top.join(&now_dir))? };
                 (new != href).then_some(new)
             });
-            if let Err(e) = r { to.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+            if let Err(e) = r { to.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
         }
         // 版本历史 goes along, by id.
         let history: Vec<&String> = ids.iter().filter(|k| copy_history(&self.history_base(), &to.history_base(), k)).collect();
@@ -329,7 +329,7 @@ impl Store {
                     let r = moved(&layout::resolve(&dir, href)?)?;
                     crate::paths::portable(&dst_top.join(r), &src_top.join(&dir)).filter(|n| n != href)
                 });
-                if let Err(e) = r { self.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+                if let Err(e) = r { self.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
             }
         }
         // The page is in the target already: an index not written here only lists it until the next `list` finds its file gone.

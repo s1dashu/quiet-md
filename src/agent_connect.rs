@@ -112,7 +112,7 @@ pub(crate) fn page(cx: &mut Context<Workspace>) -> AnyElement {
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     let platform: Option<AnyElement> = None;
     let cli_body = platform.into_iter().chain([code("copy-cli", tr("quiet ls\nquiet read 文件夹/文档\nquiet help", "quiet ls\nquiet read Folder/Note\nquiet help").into(), cx).into_any_element()]).collect();
-    let cli = part("CLI", None, tr("Skill 配套的命令行工具：在终端里用 quiet 命令列出、读写、搜索文档和数据表。", "The command the skill uses: list, read, write and search documents and databases with quiet."), cli_body);
+    let cli = part("CLI", None, tr("Skill 配套的命令行工具：在终端里用 quiet 命令列出、读写、搜索文档和数据库。", "The command the skill uses: list, read, write and search documents and databases with quiet."), cli_body);
     let card = |id: &'static str, part: AnyElement| crate::design::Card::new(id).w_full().overflow_hidden().child(part).into_any_element();
     div().w_full().flex().flex_col().gap(px(geo().section_gap))
         .child(card("agents-skill", skill)).child(card("agents-ask", ask)).child(card("agents-cli", cli))

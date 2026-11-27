@@ -96,7 +96,7 @@ Checked 2026-11-24 against the official packages `nucleo-ui-outline-18` 1.5.0 an
 | `star.svg` | UI Outline 18 | Star | identical to the package |
 | `sticky-note.svg` | UI Outline 18 | Note3 | identical to the package (taken from `nucleo-ui-outline-18` 1.5.0, 2026-11-27, for the board's chrome) |
 | `strikethrough.svg` | UI Outline 18 | TextStrikethrough | identical to the package |
-| `table-import.svg` | UI Outline 18 | TableDownload | identical to the package (taken from `nucleo-ui-outline-18` 1.5.0, 2026-11-26); 从 CSV 新建数据表 |
+| `table-import.svg` | UI Outline 18 | TableDownload | identical to the package (taken from `nucleo-ui-outline-18` 1.5.0, 2026-11-26); 从 CSV 新建数据库 |
 | `text-search.svg` | UI Outline 18 | TextASparkle | identical to the package |
 | `todo-check.svg` | UI Outline 18 | Check | identical to the package |
 | `tree-triangle.svg` | UI Fill 18 | CaretRight | Fill 18 CaretRight; not checked against a package (no UI Fill 18 package was available); the header and the comma path style match the other Nucleo 1.5.1 files. |

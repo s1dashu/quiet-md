@@ -32,7 +32,7 @@ thread_local! {
 #[derive(Clone, Copy, PartialEq)]
 enum Item { Width, Read, Typewriter, Dim, Focus, Refs, OnTop, Find, Move, Pin, Child, Window, Copy, Download, CopyMd, Print, Info, History, Delete, Shortcuts, Rule }
 
-/// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据表 file.
+/// The page open: a document, one with a 画板 opened in its place, a 画板 file, a 数据库 file.
 #[derive(Clone, Copy, PartialEq)]
 enum Page { Doc, Board, BoardFile, Table }
 
@@ -49,7 +49,7 @@ fn items(page: Page, child: bool) -> Vec<Item> {
         Page::Board => vec![&[Read, Refs], top, &[Rule, Move, Pin, Rule], child, &[Window, Copy, Download, CopyMd, Rule], print, &[Info, History, Rule, Delete]],
         // a board file: no Markdown, no reading mode or references either
         Page::BoardFile => vec![top_rule, &[Move, Pin, Rule, Window, Copy, Download, Rule], print, &[Info, History, Rule, Delete]],
-        // a 数据表 file: the file's own things; finding, exporting and copying are the table's (its bar)
+        // a 数据库 file: the file's own things; finding, exporting and copying are the table's (its bar)
         Page::Table => vec![top_rule, &[Move, Pin, Rule, Window, Copy, Rule, History, Rule, Delete]],
     };
     list.concat()
@@ -122,7 +122,7 @@ impl Workspace {
         if self.store.file_task_busy() || self.file_history.busy { return; }
         let later = ids.to_vec();
         if self.after_tree_writes(move |w, window, cx| w.copy_docs(&later, open, label, window, cx)) { return; }
-        // What is copied is what is on disk: the open document and the 数据表 are written first.
+        // What is copied is what is on disk: the open document and the 数据库 are written first.
         crate::table::flush_all(cx);
         let retry = ids.to_vec();
         if !self.save_before(cx, move |w, window, cx| w.copy_docs(&retry, open, label, window, cx)) { return; }

@@ -1140,7 +1140,7 @@ impl Store {
             #[cfg(not(target_family = "wasm"))]
             return crate::table::sqlite::all_text(path);
             #[cfg(target_family = "wasm")]
-            anyhow::bail!("{} is a 数据表, not readable here", path.display())
+            anyhow::bail!("{} is a 数据库, not readable here", path.display())
         }
         let flat = Self::flat_at(&root);
         let internal = if flat { root.clone() } else { root.join(INTERNAL) };
@@ -2487,7 +2487,7 @@ impl Store {
                     let new = layout::relative(to, &moved(&target).unwrap_or(target));
                     (new != href).then_some(new)
                 });
-                if let Err(e) = r { self.warnings.push(format!("未能更新数据表中的笔记路径（{now}）：{e}")); }
+                if let Err(e) = r { self.warnings.push(format!("未能更新数据库中的笔记路径（{now}）：{e}")); }
             }
         }
         #[cfg(unix)]
@@ -2938,7 +2938,7 @@ impl Store {
     fn read_doc_text(&self, id: &str) -> Result<String> {
         let p = self.path(id);
         // a 数据表 is not text: the table reads its own file
-        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据表文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
+        if self.kind(id) == DocKind::Table { anyhow::ensure!(p.fs_exists(), "数据库文件已不在原处，可能已被移动或删除"); return Ok(String::new()); }
         anyhow::ensure!(!crate::vfs::is_dataless(&p), NOT_DOWNLOADED);
         match crate::vfs::read_to_string(&p) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && layout::placeholder(&p).is_some_and(|ph| ph.fs_exists()) => {
@@ -3245,7 +3245,7 @@ impl Store {
     /// `base` (`Base::blank_named`, or an imported CSV). Only in the folder layout.
     #[cfg(not(target_family = "wasm"))]
     pub fn create_table_in(&mut self, title: &str, base: &crate::table::Base, parent: Option<&str>) -> Result<String> {
-        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据表");
+        anyhow::ensure!(!self.flat, "旧格式的文档库不能新建数据库");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -3263,7 +3263,7 @@ impl Store {
     /// 创建副本 of a 数据表 (`duplicate`): its file copied under `title` into folder `parent`.
     #[cfg(not(target_family = "wasm"))]
     pub(super) fn copy_table_in(&mut self, src: &str, title: &str, parent: Option<&str>) -> Result<String> {
-        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据库");
         let id = uuid::Uuid::new_v4().to_string();
         let lock = self.begin_write()?;
         self.validate_folder(None, parent)?;
@@ -3283,7 +3283,7 @@ impl Store {
     /// 另存副本 of a 数据表's version: the snapshot's file as a new 数据表 named `title`, beside the original.
     #[cfg(not(target_family = "wasm"))]
     pub fn copy_table_version(&mut self, src: &str, name: &str, title: &str) -> Result<String> {
-        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据表");
+        anyhow::ensure!(!self.flat && self.kind(src) == DocKind::Table, "不是数据库");
         let bytes = crate::versions::read_bytes(&self.history_base(), src, name, false)?;
         let parent = self.index.get(src).and_then(|m| m.parent.clone());
         let id = uuid::Uuid::new_v4().to_string();
@@ -3796,7 +3796,7 @@ impl Store {
     /// the same file as the newest version still adds nothing).
     #[cfg(not(target_family = "wasm"))]
     pub fn snapshot_table(&self, id: &str, force: bool) -> Result<bool> {
-        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据表");
+        anyhow::ensure!(self.kind(id) == DocKind::Table, "不是数据库");
         let bytes = crate::vfs::read(self.path(id))?;
         let before = self.versions(id).first().map(|v| v.name.clone());
         crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;

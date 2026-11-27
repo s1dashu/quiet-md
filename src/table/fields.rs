@@ -301,7 +301,7 @@ fn type_box(f: &FieldForm, cx: &Context<TableView>) -> Div {
                 // 笔记 needs a table that is a file of the library: greyed, with why, in one kept inside a page
                 let no_notes = ty == FieldType::Note && !f.notes_ok && ty != f.ty;
                 let ok = (!f.primary || title_ok(ty)) && !no_notes;
-                list = list.child(menu_row(("tb-ff-ty", i)).when(no_notes, |d| { use crate::ui::TipExt; d.tip("独立的数据表才能加笔记列", None) })
+                list = list.child(menu_row(("tb-ff-ty", i)).when(no_notes, |d| { use crate::ui::TipExt; d.tip("独立的数据库才能加笔记列", None) })
                     .child(icon(field_glyph(ty), 15., if ok { Theme::icon() } else { Theme::text_disabled() }))
                     .child(div().flex_1().min_w_0().text_color(if ok { Theme::text() } else { Theme::text_disabled() }).child(label(ty.label())))
                     .when(ty == f.ty, |d| d.child(icon("check", 14., crate::design::color::foreground())))
@@ -427,8 +427,8 @@ fn settings(f: &FieldForm, base: &Base, t: &Table, problem: &Option<String>, cx:
         Formula => formula_blocks(f, t, problem, cx),
         // a file is one table now: 关联 and 查找引用 from an older file keep working, their settings shown, not changed
         Link => {
-            let name = o.link_table.and_then(|id| base.table(id)).map(|x| x.name.clone()).unwrap_or_else(|| label("已删除的数据表"));
-            vec![block("关联的数据表", fixed(name)), block("允许关联多条记录", fixed(label(if o.single { "否" } else { "是" }))), legacy_note()]
+            let name = o.link_table.and_then(|id| base.table(id)).map(|x| x.name.clone()).unwrap_or_else(|| label("已删除的数据库"));
+            vec![block("关联的数据库", fixed(name)), block("允许关联多条记录", fixed(label(if o.single { "否" } else { "是" }))), legacy_note()]
         }
         Lookup => {
             let via = o.via.and_then(|id| t.field(id));
@@ -445,7 +445,7 @@ fn fixed(value: String) -> crate::design::Field {
 }
 
 fn legacy_note() -> Div {
-    div().flex_none().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_placeholder()).child(label("这个字段来自有多张数据表的旧文件：它照常显示，设置不能再修改。"))
+    div().flex_none().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_placeholder()).child(label("这个字段来自有多张表的旧文件：它照常显示，设置不能再修改。"))
 }
 
 pub(crate) fn render(_v: &TableView, base: &Base, t: &Table, form: &FieldForm, cx: &Context<TableView>) -> AnyElement {

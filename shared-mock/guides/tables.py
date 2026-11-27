@@ -147,7 +147,7 @@ INDEX_ZH = [
     ("Markdown", "markdown", "Markdown 文件", "文档", 5, 4, "", "Markdown"),
     ("一个 Markdown 文件", "md-example", "Markdown 文件", "Markdown 文件", 6, 1, "", "Markdown"),
     ("画板", "boards", "画板", "文档", 7, 8, "", "画板"),
-    ("数据表", "data-tables", "数据表", "文档", 8, 3, "", "数据表"),
+    ("数据库", "data-tables", "数据库", "文档", 8, 3, "", "数据库"),
     ("整理与查找", "organize", "日常使用", "文档", 9, 7, "", "文件夹、搜索"),
     ("导入与备份", "data", "日常使用", "文档", 10, 5, "", "导入、备份"),
     ("主题与快捷键", "personalize", "日常使用", "文档", 11, 4, "", "主题、快捷键"),
@@ -157,7 +157,7 @@ index(here / "src" / "07b-guide-index.sqlite", "Guide index", "All guides",
       ["Home", "Documents", "Markdown files", "Boards", "Databases", "Everyday use"], ["Document", "Markdown file"], INDEX_EN)
 index(here / "src" / "zh" / "07b-guide-index.sqlite", "指南目录", "全部",
       ["主题", "指南", "文件夹", "类型", "顺序", "分钟", "已读", "内容"],
-      ["主页", "文档", "Markdown 文件", "画板", "数据表", "日常使用"], ["文档", "Markdown 文件"], INDEX_ZH)
+      ["主页", "文档", "Markdown 文件", "画板", "数据库", "日常使用"], ["文档", "Markdown 文件"], INDEX_ZH)
 
 # The small table the 数据表 guide shows inside its page.
 make(here / "assets" / "tables" / "reading-week.sqlite", "This week", "All sessions",

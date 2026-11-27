@@ -45,7 +45,7 @@ assert FORMAT == 6, f"store::FORMAT is {FORMAT}: teach build.py that layout (doc
 DEVICE = "guides"
 # Folders in the guide library: key -> title, a folder on disk. The guides
 # name a folder with {{folder:key}}, so renaming one is done here.
-FOLDERS = ({"documents": "文档", "markdown-files": "Markdown 文件", "boards-folder": "画板", "data-tables-folder": "数据表", "everyday": "日常使用"} if zh else
+FOLDERS = ({"documents": "文档", "markdown-files": "Markdown 文件", "boards-folder": "画板", "data-tables-folder": "数据库", "everyday": "日常使用"} if zh else
            {"documents": "Documents", "markdown-files": "Markdown files", "boards-folder": "Boards", "data-tables-folder": "Databases", "everyday": "Everyday use"})
 # The top level, in order; every entry gets its place, so the sidebar and
 # Home's manual order (the default) read the same. Only Welcome is not in a folder.

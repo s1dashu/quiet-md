@@ -114,7 +114,7 @@ pub fn exit_button(id: impl Into<ElementId>) -> crate::design::Button {
 }
 
 impl Workspace {
-    /// Whether 专注模式 can start here: a document's own page (not a 数据表 or 画板 file).
+    /// Whether 专注模式 can start here: a document's own page (not a 数据库 or 画板 file).
     pub fn can_focus(&self, cx: &App) -> bool {
         self.view == crate::app::View::Doc && self.current.is_some()
             && self.editor.as_ref().is_none_or(|e| { let e = e.read(cx); !e.table_file && !e.board_file })

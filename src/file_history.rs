@@ -308,7 +308,7 @@ mod tests {
     // (`test` here is GPUI's, through the glob)
     use super::*;
 
-    /// The report (2026-11-27): 创建副本 of a 数据表 on a folder's page, the copy opened and a cell edited,
+    /// The report (2026-11-27): 创建副本 of a 数据库 on a folder's page, the copy opened and a cell edited,
     /// ⌘Z undid the 创建副本. Whatever the folders did last, the document's keys keep its ⌘Z, its own
     /// history spent or not; back in the sidebar or a folder's page, ⌘Z is the folders' again.
     #[core::prelude::v1::test]

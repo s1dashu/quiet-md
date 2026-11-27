@@ -297,16 +297,16 @@ fn open_paths(cx: &mut App) -> impl std::future::Future<Output = Option<Vec<Path
     }
 }
 
-/// A CSV or TSV file, imported as a 数据表 (only while they are offered).
+/// A CSV or TSV file, imported as a 数据库 (only while they are offered).
 pub(crate) fn is_csv_path(p: &Path) -> bool { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv") || x.eq_ignore_ascii_case("tsv")) }
 
-/// A CSV or TSV file as a new 数据表 file named after it: the first row
+/// A CSV or TSV file as a new 数据库 file named after it: the first row
 /// names the columns, each column's type is guessed from its cells.
 pub(crate) fn import_csv(store: &mut crate::store::Store, path: &Path, parent: Option<&str>) -> anyhow::Result<String> {
     let bytes = crate::store::read_bounded(path, IMPORT_FILE_LIMIT)?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.trim_start_matches('\u{feff}');
-    let name = path.file_stem().and_then(|s| s.to_str()).filter(|s| !s.trim().is_empty()).unwrap_or(crate::settings::text("未命名数据表"));
+    let name = path.file_stem().and_then(|s| s.to_str()).filter(|s| !s.trim().is_empty()).unwrap_or(crate::settings::text("未命名数据库"));
     let mut base = crate::table::Base::default();
     let t = crate::table::csv::import(&mut base, name, text);
     base.tables.push(t);
@@ -774,7 +774,7 @@ impl Workspace {
             },
             item("import-xml", "doc", crate::settings::tr("导入 DocxXML…", "Import DocxXML…"), ImportKind::DocxXml),
         ];
-        out.push(item("import-csv", "table-import", crate::settings::tr("从 CSV 新建数据表…", "New Database from CSV…"), ImportKind::Csv));
+        out.push(item("import-csv", "table-import", crate::settings::tr("从 CSV 新建数据库…", "New Database from CSV…"), ImportKind::Csv));
         out
     }
 

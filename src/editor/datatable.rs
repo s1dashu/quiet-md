@@ -1,4 +1,4 @@
-//! 数据表 block: the table drawn in the page itself (`crate::table::TableView`,
+//! 数据库 block: the table drawn in the page itself (`crate::table::TableView`,
 //! editable where it is, as tall as its rows), and 全屏 over
 //! the whole note pane the way a 画板 opens. The block only names its file;
 //! the view reads and writes it (`crate::table::BaseState`). A standalone
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct DataTablesUi {
-    /// A view per 数据表 block of the page.
+    /// A view per 数据库 block of the page.
     views: HashMap<BlockId, (Entity<TableView>, Subscription)>,
     /// The block shown over the whole pane.
     open: Option<BlockId>,
@@ -35,7 +35,7 @@ impl R<'_> {
         let Some(view) = self.ed.datatables.views.get(&id).map(|v| v.0.clone()).filter(|_| !self.ghost) else {
             return frame().h(px(t.height.min(160.))).border_1().border_color(Theme::line_border()).flex().items_center().justify_center()
                 .text_size(px(13.)).text_color(Theme::text_placeholder())
-                .child(crate::settings::label("数据表")).into_any_element();
+                .child(crate::settings::label("数据库")).into_any_element();
         };
         let covered = self.ed.datatables.open == Some(id);
         // the view is as tall as its rows (`TableView::render`); while it is full-pane, a gap of its height stays
@@ -80,9 +80,9 @@ impl R<'_> {
 use gpui::prelude::FluentBuilder;
 
 impl Editor {
-    /// A view for every 数据表 block of the page; views of blocks that are gone are dropped.
+    /// A view for every 数据库 block of the page; views of blocks that are gone are dropped.
     pub(super) fn sync_tables(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // a build without 数据表: no view ever opens its file; the block stays a placeholder
+        // a build without 数据库: no view ever opens its file; the block stays a placeholder
         let mut blocks: Vec<(BlockId, TableRef)> = vec![];
         self.core.doc.for_each_block(|b| if let BlockKind::DataTable(t) = &b.kind { blocks.push((b.id, t.clone())) });
         if blocks.is_empty() && self.datatables.views.is_empty() { return; }
@@ -130,14 +130,14 @@ impl Editor {
         self.set_table_width(id, ((w - content).abs() > 4.).then_some(w.round()), window, cx);
     }
 
-    /// A 数据表 block's width (None: the text column's), as one undo step.
+    /// A 数据库 block's width (None: the text column's), as one undo step.
     fn set_table_width(&mut self, id: BlockId, width: Option<f32>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(BlockKind::DataTable(old)) = self.core.block(id).map(|b| b.kind.clone()) else { return };
         if self.core.set_table_ref(id, TableRef { width, ..old }) { self.changed(window, cx); }
         cx.notify();
     }
 
-    /// A standalone 数据表: its one table fills the pane at once.
+    /// A standalone 数据库: its one table fills the pane at once.
     pub fn open_table_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.table_file || self.datatables.open.is_some() { return }
         self.sync_tables(window, cx);
@@ -185,7 +185,7 @@ impl Editor {
         self.datatables.views.values().any(|v| v.0.focus_handle(cx).contains_focused(window, cx))
     }
 
-    /// The page has the keys: its text, a 数据表 in it or full-pane, its 画板, or anything open over them
+    /// The page has the keys: its text, a 数据库 in it or full-pane, its 画板, or anything open over them
     /// (a cell being edited, a dialog). ⌘Z / ⌘⇧Z are then this document's own, never the folders'.
     pub fn holds_focus(&self, window: &Window, cx: &App) -> bool {
         self.focus.contains_focused(window, cx) || self.tables_focused(window, cx)

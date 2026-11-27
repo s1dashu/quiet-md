@@ -119,7 +119,7 @@ impl Workspace {
         }
         self.tree_writes.pending.push_back(write);
         self.save_next_tree_write(cx);
-        // A 数据表 writes its file as it is edited, by path: the open one's move lands before the next cell does.
+        // A 数据库 writes its file as it is edited, by path: the open one's move lands before the next cell does.
         if self.editor.as_ref().is_some_and(|e| e.read(cx).table_file) && self.current.clone().is_some_and(|c| self.awaits_tree_write(&c)) { self.settle_tree_writes(cx); }
     }
 

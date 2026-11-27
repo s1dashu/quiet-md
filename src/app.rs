@@ -991,7 +991,7 @@ impl Workspace {
         }) {
             return false;
         }
-        // 版本历史 of a 数据表 (written as it is edited): the file as it is left and as it is
+        // 版本历史 of a 数据库 (written as it is edited): the file as it is left and as it is
         // opened is kept as a version; a file unchanged since the newest version adds nothing
         let table = |w: &Self, i: &str| w.entries.iter().any(|e| e.id == i && e.meta.kind == crate::store::DocKind::Table);
         if let Some(cur) = self.current.clone() && table(self, &cur) { let _ = self.store.snapshot_table(&cur, true); }
@@ -1028,7 +1028,7 @@ impl Workspace {
                 e.created = m.created;
                 e.info = m.info;
                 if !e.board_file && !e.table_file { e.set_read_only(m.reading, cx); }
-                // a build without 数据表 shows a table file's page as a placeholder, not to be edited
+                // a build without 数据库 shows a table file's page as a placeholder, not to be edited
             }
             e
         });
@@ -1082,7 +1082,7 @@ impl Workspace {
                 }
             }
             EditorEvent::Leave => cx.defer_in(window, |this, window, cx| this.leave_board(window, cx)),
-            // a 数据表's 笔记 cells (`table::notes`) work on the library directly: the lists follow
+            // a 数据库's 笔记 cells (`table::notes`) work on the library directly: the lists follow
             EditorEvent::LibraryChanged => {
                 this.entries.set(this.store.list());
                 this.sort();
@@ -1124,7 +1124,7 @@ impl Workspace {
             && self.document_peers(previous, window, cx).is_empty() { self.store.forget_loaded(previous); }
         self.editor = Some(editor);
         self.current = Some(id.to_string());
-        // Pasted images, 数据表 and 画板 belong to this document's top-level folder, and it has its own look.
+        // Pasted images, 数据库 and 画板 belong to this document's top-level folder, and it has its own look.
         if self.store.set_active(id) { cx.defer(crate::settings::top_switched); }
         // Web images pasted earlier whose download landed after it closed (#220).
         if let Some(e) = self.editor.clone() { e.update(cx, |e, cx| e.adopt_remote(cx)); }
@@ -1598,7 +1598,7 @@ impl Workspace {
     /// the top bar shows the error.
     pub fn flush(&mut self, cx: &mut Context<Self>) -> bool {
         self.save_task = None;
-        // 数据表 write their own files; a cell still being edited goes in first (leaving the page drops its view)
+        // 数据库 write their own files; a cell still being edited goes in first (leaving the page drops its view)
         if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); }
         crate::table::flush_all(cx);
         // 版本历史 preview: the editor holds an older snapshot, so writing it
@@ -1654,7 +1654,7 @@ impl Workspace {
                         if let Some(ed) = peer.read(cx).editor.clone() { ed.update(cx, |e, cx| e.files_changed(cx)); }
                     }
                 }
-                // a renamed 数据表's file moved with its title
+                // a renamed 数据库's file moved with its title
                 let moved = (meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&id)).flatten();
                 ed.update(cx, |e, cx| {
                     e.modified = meta.modified;
@@ -1945,7 +1945,7 @@ impl Workspace {
                     .into_any_element(),
             );
             crumbs.push(sep());
-            title = crate::settings::tr("数据表", "Database").to_string();
+            title = crate::settings::tr("数据库", "Database").to_string();
         }
         // Too narrow for the path: it folds into one "…" (the path on hover),
         // and the title keeps the room. Left: the sidebar's buttons when it is
@@ -2011,7 +2011,7 @@ impl Workspace {
                                     .whitespace_nowrap()
                                     .text_ellipsis()
                                     .child(ui_text(title).optical())
-                                    // a 数据表 file has no title in its page: double-click its name here to rename it
+                                    // a 数据库 file has no title in its page: double-click its name here to rename it
                                     .when(table_file, |d| d.no_drag().on_click(cx.listener(|w, ev: &ClickEvent, window, cx| if ev.click_count() >= 2 && let Some(id) = w.current.clone() { w.start_rename(&id, window, cx); }))),
                             ),
 
@@ -2091,7 +2091,7 @@ impl Render for Workspace {
         if self.view != View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).focus.is_focused(window)) { window.focus(&self.focus, cx); }
         self.sync_confirm_focus(window, cx);
         crate::editor::image::frame_drawn(window, cx);
-        // a 数据表 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
+        // a 数据库 file renamed or moved (the sidebar, 移动到): its view writes where the file now is
         if let (Some(id), Some(ed)) = (&self.current, &self.editor) && ed.read(cx).table_file && let Some(p) = self.store.file_path(id) { ed.update(cx, |e, cx| e.table_file_at(&p, cx)); }
         // Full screen: the sidebar is solid (`Theme::window`) and the native glass stays hidden.
         crate::theme::set_fullscreen(window.is_fullscreen());

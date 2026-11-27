@@ -67,7 +67,7 @@ impl Store {
     /// none yet: its first 笔记 column asks for this. The folder takes the
     /// table's place and shows as the table; the move is recorded for 撤销.
     pub fn table_folder(&mut self, id: &str) -> Result<String> {
-        anyhow::ensure!(!self.flat && self.index.get(id).is_some_and(|m| m.folder.is_none() && !m.local() && m.kind == DocKind::Table), "不是文档库里的数据表");
+        anyhow::ensure!(!self.flat && self.index.get(id).is_some_and(|m| m.folder.is_none() && !m.local() && m.kind == DocKind::Table), "不是文档库里的数据库");
         match self.folder_of_note(id) { Some(f) => Ok(f), None => self.wrap_in_folder(id) }
     }
 

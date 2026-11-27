@@ -31,7 +31,7 @@ const BUNDLED_DEVICE: &str = "guides";
 
 /// A guide document (not an asset or the index).
 fn is_doc(name: &str) -> bool { !name.starts_with('.') && name.ends_with(".xml") }
-/// A page of the guides: a document, the Markdown example, the 画板 or the 数据表.
+/// A page of the guides: a document, the Markdown example, the 画板 or the 数据库.
 #[cfg(test)]
 fn is_page(name: &str) -> bool { !name.starts_with('.') && fdl_core::store::DocKind::of_name(name).is_some() }
 
@@ -232,7 +232,7 @@ mod tests {
         let links: Vec<_> = docs.iter().flat_map(|e| e.links.iter()).collect();
         assert!(!links.is_empty());
         for l in links { assert!(ids.contains(l.target.as_str()), "unresolved link {}", l.target); }
-        // So are the 数据表's 笔记 cells (the guide index's): each one a guide.
+        // So are the 数据库's 笔记 cells (the guide index's): each one a guide.
         use fdl_core::table::{field, FieldType, Value};
         let mut notes = 0;
         for e in docs.iter().filter(|e| e.meta.kind == DocKind::Table) {

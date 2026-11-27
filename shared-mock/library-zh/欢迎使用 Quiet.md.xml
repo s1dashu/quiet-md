@@ -20,14 +20,14 @@
 <h1>三种书写方式</h1>
 <grid><column width-ratio="0.3333"><h3>斜杠命令</h3><p>在空行输入 <code>/</code> 插入一个块。继续输入可以筛选，试试 <code>/表格</code> 或 <code>/代码</code>。</p></column><column width-ratio="0.3333"><h3>Markdown</h3><p>输入 <code># </code> 得到标题，输入 <code>- </code> 得到列表。用 <code>**粗体**</code> 把文字包起来，输完结尾的符号就会变成<b>粗体</b>。</p></column><column width-ratio="0.3334"><h3>快捷键</h3><p>用 <code>⌘ B</code> 设为粗体，用 <code>⌘ ⌥ 1</code> 设为标题。按 <code>⌘ /</code> 可以查看所有快捷键。</p></column></grid>
 <h1>浏览指南</h1>
-<p>可以按顺序读，也可以直接跳到需要的那一篇。在侧栏里，它们分在“文档”“Markdown 文件”“画板”“数据表”和“日常使用”几个文件夹中；“Markdown 文件”“画板”“数据表”里各放着一个可以动手试的真实文件。</p>
+<p>可以按顺序读，也可以直接跳到需要的那一篇。在侧栏里，它们分在“文档”“Markdown 文件”“画板”“数据库”和“日常使用”几个文件夹中；“Markdown 文件”“画板”“数据库”里各放着一个可以动手试的真实文件。</p>
 <table><colgroup><col width="300"/><col width="390"/></colgroup><thead><tr><th><p>指南</p></th><th><p>你会学到</p></th></tr></thead><tbody>
 <tr><td><p><cite type="doc" href="文档/书写：文字、列表与高亮块.xml" file-type="docx">书写：文字、列表与高亮块</cite></p></td><td><p>标题、文字样式、颜色、链接、列表、任务、引用、高亮块、提醒和按钮</p></td></tr>
 <tr><td><p><cite type="doc" href="文档/表格、分栏、代码与公式.xml" file-type="docx">表格、分栏、代码与公式</cite></p></td><td><p>表格、分栏、代码块和 LaTeX 公式</p></td></tr>
 <tr><td><p><cite type="doc" href="文档/图片、附件与封面.xml" file-type="docx">图片、附件与封面</cite></p></td><td><p>图片、裁剪、附件、文档图标和封面</p></td></tr>
 <tr><td><p><cite type="doc" href="Markdown 文件/Quiet.md 里的 Markdown.xml" file-type="docx">Quiet.md 里的 Markdown</cite></p></td><td><p>原位编辑 Markdown 文件、Markdown 快捷写法和导出 Markdown</p></td></tr>
 <tr><td><p><cite type="doc" href="画板/画板：图表与草图.xml" file-type="docx">画板：图表与草图</cite></p></td><td><p>在画板上画图形、连接箭头、便签和草图</p></td></tr>
-<tr><td><p><cite type="doc" href="数据表/数据表：记录、字段与筛选.xml" file-type="docx">数据表：记录、字段与筛选</cite></p></td><td><p>带类型字段的记录、筛选、排序和分组</p></td></tr>
+<tr><td><p><cite type="doc" href="数据库/数据库：记录、字段与筛选.xml" file-type="docx">数据库：记录、字段与筛选</cite></p></td><td><p>带类型字段的记录、筛选、排序和分组</p></td></tr>
 <tr><td><p><cite type="doc" href="日常使用/整理与查找笔记.xml" file-type="docx">整理与查找笔记</cite></p></td><td><p>文件夹、置顶、反向链接、搜索、阅读模式和回收站</p></td></tr>
 <tr><td><p><cite type="doc" href="日常使用/导入、导出与备份.xml" file-type="docx">导入、导出与备份</cite></p></td><td><p>导入、导出、打印、备份和迁移文档</p></td></tr>
 <tr><td><p><cite type="doc" href="日常使用/个性化：主题与快捷键.xml" file-type="docx">个性化：主题与快捷键</cite></p></td><td><p>主题、自定义 CSS、快捷键、快速笔记和界面语言</p></td></tr>

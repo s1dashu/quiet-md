@@ -288,9 +288,9 @@ impl Workspace {
 
     pub fn restore_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((id, name)) = self.history.as_ref().and_then(|h| h.selected.clone().map(|n| (h.id.clone(), n))) else { return };
-        // a 数据表 writes as it is edited: nothing of the present may be pending when its file is replaced
+        // a 数据库 writes as it is edited: nothing of the present may be pending when its file is replaced
         let table = self.is_table(&id);
-        // a build without 数据表 leaves its file as it is
+        // a build without 数据库 leaves its file as it is
         if table { if let Some(ed) = self.editor.clone() { ed.update(cx, |e, cx| e.commit_tables(cx)); } crate::table::flush_all(cx); }
         let doc = match self.store.restore_version(&id, &name) {
             Ok(d) => d,

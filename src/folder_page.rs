@@ -57,11 +57,11 @@ const COLS: [Col; 3] = [Col::Modified, Col::Created, Col::Visited];
 
 /// Bounded document trees retain formatting without retaining a whole long document.
 type EquationNumbers = HashMap<crate::model::BlockId, u32>;
-/// `tables`: the 数据表 files the page shows (their rows drawn in the card), saved apart from the page.
+/// `tables`: the 数据库 files the page shows (their rows drawn in the card), saved apart from the page.
 struct ThumbContent { blocks: Vec<crate::model::Block>, eqnos: EquationNumbers, has_subpages: bool, tables: Vec<String> }
 type Thumb = Rc<ThumbContent>;
 
-/// The files of the 数据表 blocks in `blocks`, at any depth.
+/// The files of the 数据库 blocks in `blocks`, at any depth.
 fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
     for b in blocks {
         match &b.kind {
@@ -122,7 +122,7 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                 kind
             }
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
-            // a 数据表 (a table file's card, or one in a page): its first rows and columns as a table, header first
+            // a 数据库 (a table file's card, or one in a page): its first rows and columns as a table, header first
             BlockKind::DataTable(r) => {
                 let grid = fdl_core::table::block_grid(&crate::store::Store::active_dir(), r);
                 let (nr, nc) = (grid.len().min(9), grid.first().map_or(0, |h| h.len().min(5)));
@@ -630,7 +630,7 @@ impl Workspace {
         let mut stamp = rustc_hash::FxHasher::default();
         e.meta.modified.hash(&mut stamp);
         crate::settings::feishu().hash(&mut stamp);
-        // a 数据表's rows live in its file, saved apart from the index: its time is the card's too
+        // a 数据库's rows live in its file, saved apart from the index: its time is the card's too
         let file_time = (e.meta.kind == crate::store::DocKind::Table).then(|| self.store.file_path(&e.id).and_then(|p| std::fs::metadata(p).ok()?.modified().ok())).flatten();
         file_time.hash(&mut stamp);
         // and a page's embedded tables: a row changed there redraws the card

@@ -20,7 +20,7 @@ pub fn is_markdown_path(p: &std::path::Path) -> bool {
 /// A file Quiet.md edits where it is, by the one list of what it opens
 /// (`shown::LIBRARY_FILES`): Markdown. `Store::open_local` keeps a 本机文件 as
 /// Markdown only: a DocxXML page's file is named by its title and its links and
-/// pictures are read from the library, a 数据表 is found by its place there, and a
+/// pictures are read from the library, a 数据库 is found by its place there, and a
 /// 画板 keeps its pictures there, so those are not opened in place.
 pub fn opens_here(p: &std::path::Path) -> bool {
     p.file_name().and_then(|n| n.to_str()).and_then(fdl_core::shown::kind_of_name).is_some_and(|(kind, markdown)| kind.is_doc() && markdown)

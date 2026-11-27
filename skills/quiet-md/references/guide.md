@@ -1,7 +1,7 @@
 # quiet: the Quiet.md library for agents
 
 `quiet` reads, searches and edits a Quiet.md library: a folder of documents
-(`.xml` DocxXML and `.md` Markdown), boards (`.excalidraw`) and 数据表
+(`.xml` DocxXML and `.md` Markdown), boards (`.excalidraw`) and 数据库
 (`.sqlite`). `quiet guide` prints this guide as the installed `quiet` knows
 it; `quiet help COMMAND` shows one command in detail.
 
@@ -93,7 +93,7 @@ quiet history DOC [VERSION]  versions kept (1 = newest), or what changed since o
 quiet restore DOC VERSION    put DOC back as it was (undoable: the current text is kept first)
 quiet trash                  what is in the trash
 quiet untrash NAME           bring a document back
-quiet import FILE… [--in FOLDER]   .md/.txt, .xml, .csv/.tsv (as a 数据表), .excalidraw
+quiet import FILE… [--in FOLDER]   .md/.txt, .xml, .csv/.tsv (as a 数据库), .excalidraw
 
 quiet run [FILE|-] [-e CODE] [--timeout SECS]
 quiet call OP [JSON]         any operation by name, as run's lib calls it
@@ -132,7 +132,7 @@ Kinds of blocks: text, h1…h9, bullet, ordered, todo, code, quote, callout,
 divider, image, table, grid, column, file, board, datatable, countdown,
 subpages, raw:TAG (kept verbatim).
 
-**数据表.** Rows have lasting ids (`r12`). Values are text as the app shows
+**数据库.** Rows have lasting ids (`r12`). Values are text as the app shows
 them and are written as if pasted: numbers, dates, `true`/`false` for
 checkboxes, select options (missing ones are added), several options joined
 with commas, a link (关联) as the other table's first-field text or `r12`.
@@ -231,7 +231,7 @@ The script runs in a sandbox: no files, network or processes, only `lib`
 (so no `import`; run `quiet import` from the shell). It stops after 60 s
 (`--timeout`). A document or board made with `lib.create` can be read and
 edited in the same script; it is written when the script ends (so it cannot
-be mentioned with `[[…]]` until the next run). A new 数据表 can be filled from
+be mentioned with `[[…]]` until the next run). A new 数据库 can be filled from
 the next run. Renames, moves and trashing also take effect when the script
 ends, so later reads in the same script see the old paths.
 
@@ -273,7 +273,7 @@ for (const t of doc.blocks({ kind: "todo", done: false, grep: "导出" })) doc.s
 return doc.blocks({ kind: "todo", done: false }).map(t => t.text);
 ```
 
-Mark finished books in a 数据表 and count what is left:
+Mark finished books in a 数据库 and count what is left:
 
 ```js
 const books = lib.doc("书单");
@@ -281,7 +281,7 @@ books.updateWhere("进度 = 100%", { 状态: "读完" });
 return books.table({ where: "状态 != 读完", limit: 0 }).total;
 ```
 
-Give a 数据表 a 看板 of what is being read, with a score column:
+Give a 数据库 a 看板 of what is being read, with a score column:
 
 ```sh
 quiet table field add 书单 评分 --type rating --format stars=5

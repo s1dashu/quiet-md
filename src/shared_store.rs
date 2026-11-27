@@ -144,7 +144,7 @@ impl SharedStore {
     pub fn folder_of_path(&self, path: &Path) -> Option<String> { self.0.borrow().tops.folder_of_path(path).map(|r| r.key.clone()) }
 
     /// The document in front is `id`: new ones without a folder go to its
-    /// top-level folder, and images, 数据表 and 画板 resolve against it.
+    /// top-level folder, and images, 数据库 and 画板 resolve against it.
     /// True when that is another top-level folder than before (its look should take over).
     pub fn set_active(&self, id: &str) -> bool {
         let key = self.top_of(id);
@@ -275,7 +275,7 @@ impl SharedStore {
         self.with_top_rows(all)
     }
     /// The rows as last listed, each top-level folder's under its key, without reading the
-    /// disk: for a view that only looks documents up (数据表's 笔记 cells).
+    /// disk: for a view that only looks documents up (数据库's 笔记 cells).
     pub fn listed<R>(&self, f: impl FnOnce(&[(String, Vec<Entry>)]) -> R) -> R { f(&self.0.borrow().entries) }
     /// Bring a listed row up to date after a save made outside a window's own list, for `listed`'s readers.
     pub fn update_listed(&self, id: &str, f: impl FnOnce(&mut Entry)) {

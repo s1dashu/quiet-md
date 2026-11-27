@@ -68,13 +68,13 @@ impl Workspace {
         cx.notify();
     }
 
-    /// 新建 › 数据表: a standalone `.sqlite` file in `parent`, opened at once.
+    /// 新建 › 数据库: a standalone `.sqlite` file in `parent`, opened at once.
     pub(crate) fn create_table(&mut self, parent: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.create_menu = None;
         let p = parent.clone();
         if !self.save_before(cx, move |w, window, cx| w.create_table(p.clone(), window, cx)) { return; }
         let file_before = self.store.track_file_changes();
-        match self.store.create_table_in(crate::settings::text("未命名数据表"), &crate::table::blank_base(), parent.as_deref()) {
+        match self.store.create_table_in(crate::settings::text("未命名数据库"), &crate::table::blank_base(), parent.as_deref()) {
             Ok(id) => {
                 self.search_open = false;
                 self.doc_info = None;
@@ -86,7 +86,7 @@ impl Workspace {
             }
             Err(e) => self.status = crate::app::SaveStatus::Failed(crate::localized_format!("新建失败：{}", "Could not create document: {}", crate::settings::diagnostic(&e.to_string()))),
         }
-        self.remember_files(file_before, tr("新建数据表", "New database"));
+        self.remember_files(file_before, tr("新建数据库", "New database"));
         cx.notify();
     }
 
@@ -167,8 +167,8 @@ impl Workspace {
             row("create-document", "doc", tr("文档", "Document")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_doc(false, doc_parent.clone(), window, cx) })),
             row("create-markdown", "markdown", "Markdown").on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_doc(true, md_parent.clone(), window, cx) })),
         ];
-        // 数据表 above 画板 (the maintainer, 2026-11-25: the more finished of the two first).
-        out.push(row("create-table", "datatable", crate::settings::text("数据表")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_table(table_parent.clone(), window, cx) })));
+        // 数据库 above 画板 (the maintainer, 2026-11-25: the more finished of the two first).
+        out.push(row("create-table", "datatable", crate::settings::text("数据库")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_table(table_parent.clone(), window, cx) })));
         out.push(row("create-board", "board", crate::settings::text("画板")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.create_board(board_parent.clone(), window, cx) })));
         out.push(row("create-folder", "folder", tr("文件夹", "Folder")).on_click(cx.listener(move |w, _, window, cx| { w.row_menu = None; w.new_folder(folder_parent.clone(), window, cx) })));
         out
