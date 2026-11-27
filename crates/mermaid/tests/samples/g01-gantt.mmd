@@ -1,0 +1,13 @@
+gantt
+    title 0.2.1 发布
+    dateFormat YYYY-MM-DD
+    axisFormat %m-%d
+    excludes weekends
+    section 开发
+    渲染器          :done, r1, 2026-11-23, 5d
+    状态图与类图    :active, r2, after r1, 3d
+    甘特图          :crit, r3, after r2, 2d
+    section 发布
+    检查            :until rel
+    发布            :milestone, rel, 2026-12-10, 0d
+    回顾            :vert, 2026-12-12, 1d

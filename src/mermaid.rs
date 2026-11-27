@@ -393,6 +393,7 @@ mod tests {
         ("class", "classDiagram\n  class 订单 {\n    <<entity>>\n    +String id\n    +total() Money\n  }\n  客户 \"1\" --> \"*\" 订单 : 下单\n  订单 *-- 明细\n  支付 <|.. 卡支付\n  订单 ..> 支付"),
         ("er", "erDiagram\n  客户 ||--o{ 订单 : 下单\n  订单 ||--|{ 明细 : 包含\n  客户 {\n    string id PK \"编号\"\n    string 姓名\n  }\n  商品 }|..|{ 明细 : 出现在"),
         ("mindmap", "mindmap\n  root((笔记))\n    写作\n      Markdown\n      id[DocxXML]\n    图表\n      流程图\n      id2)时序图(\n    工具"),
+        ("gantt", "gantt\n  title 发布\n  dateFormat YYYY-MM-DD\n  excludes weekends\n  section 开发\n  设计 :done, a, 2026-11-23, 3d\n  实现 :active, b, after a, 5d\n  测试 :crit, after b, 2d\n  section 发布\n  上线 :milestone, 2026-12-10, 0d"),
         ("pie", "pie showData title 来源\n  \"搜索\" : 42.5\n  \"直接访问\" : 30\n  \"推荐\" : 12"),
     ];
 }

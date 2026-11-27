@@ -1,7 +1,7 @@
 //! Mermaid diagrams drawn as SVG, written for Quiet.md instead of a port of
 //! mermaid.js: flowcharts (`graph` / `flowchart`), state diagrams (read into
 //! the flowchart model, as are class and ER diagrams), sequence diagrams,
-//! pie charts and mind maps,
+//! pie charts, mind maps and Gantt charts,
 //! parsed here, laid out in layers (flowcharts, `layout.rs`) or in lanes
 //! (sequence diagrams) and written as plain SVG that resvg draws: no CSS, no
 //! foreignObject, no markers. Colours come from the host (`Palette`) and text
@@ -12,6 +12,7 @@
 mod class;
 mod er;
 mod flow;
+mod gantt;
 mod layout;
 mod mindmap;
 mod pie;
@@ -113,6 +114,7 @@ pub enum Kind {
     Class,
     Er,
     Mindmap,
+    Gantt,
 }
 
 /// A source line: its 1-based number and its text, trimmed.
@@ -166,6 +168,7 @@ pub fn kind(src: &str) -> Option<Kind> {
         "classDiagram" | "classDiagram-v2" => Some(Kind::Class),
         "erDiagram" => Some(Kind::Er),
         "mindmap" => Some(Kind::Mindmap),
+        "gantt" => Some(Kind::Gantt),
         _ => None,
     }
 }
@@ -182,6 +185,7 @@ pub fn render(src: &str, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
         Some(Kind::Class) => class::render(&lines, title, style, m),
         Some(Kind::Er) => er::render(&lines, title, style, m),
         Some(Kind::Mindmap) => mindmap::render(&lines, src, title, style, m),
+        Some(Kind::Gantt) => gantt::render(&lines, title, style, m),
         None => {
             let word = first.text.split(|c: char| c.is_whitespace() || c == ';' || c == ':').next().unwrap_or("");
             err(first.no, format!("“{word}” diagrams aren't supported yet"))
