@@ -984,6 +984,7 @@ impl Workspace {
     /// Show `id`; false when it could not be opened (or the open document
     /// could not be saved first, see [`Self::save_before`]).
     pub fn try_open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let _s = crate::devtools::span("try-open");
         // A snapshot is on screen: back to the live document before anything
         // else touches the editor.
         if self.history.is_some() { self.close_history(cx); }

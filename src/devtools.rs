@@ -400,6 +400,7 @@ pub fn start(window: &mut Window, cx: &mut App) {
                 );
                 continue;
             }
+            if frames_on() && matches!(cmd, "click" | "dclick" | "key") { *STEP.lock().unwrap() = Some((format!("{cmd} {}", rest.trim()), Instant::now())); }
             let quit = cmd == "quit";
             if cmd == "record" || (quit && recording.is_some()) {
                 if let Some(stop) = recording.take() {
@@ -641,6 +642,11 @@ fn flush_frames() {
     if !lines.is_empty() { use std::io::Write; let _ = std::io::stderr().write_all((lines.join("\n") + "\n").as_bytes()); }
 }
 
+/// A click or key just sent (`FDL_FRAMES`): the next frame logs how long after it it was
+/// painted (`devtools: step <step> to frame <ms>`), the handler's work included.
+static STEP: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+static FIRST_FRAME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 /// Called first thing in the root's render.
 pub fn frame_begin() {
     if frames_on() { FRAME_INSTR.with(|i| i.set(instructions())); FRAME.with(|f| f.set((Some(Instant::now()), f.get().1))); }
@@ -653,6 +659,12 @@ pub fn frame_probe() -> Option<AnyElement> {
         let (Some(t0), last) = f.get() else { return };
         let gap = last.map_or(0., |l| t0.duration_since(l).as_secs_f64() * 1e3);
         let instr = instructions().saturating_sub(FRAME_INSTR.with(|i| i.get())) as f64 / 1e6;
+        // The first frame at once, with the wall clock, for timing a launch from outside.
+        if FIRST_FRAME.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0., |d| d.as_secs_f64() * 1e3);
+            eprintln!("devtools: first-frame epoch-ms {epoch:.1} draw {:.2}", t0.elapsed().as_secs_f64() * 1e3);
+        }
+        if let Some((step, at)) = STEP.lock().unwrap().take() { frame_log(format!("devtools: step {step} to frame {:.2}", at.elapsed().as_secs_f64() * 1e3)); }
         frame_log(format!("devtools: frame-time {:.4} draw {:.2} gap {gap:.2} minstr {instr:.2}", since_launch(t0), t0.elapsed().as_secs_f64() * 1e3));
         f.set((None, Some(t0)));
     })).absolute().size_0().into_any_element())
