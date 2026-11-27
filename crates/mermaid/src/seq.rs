@@ -12,9 +12,15 @@ use crate::{Error, Line, Measure, Style, Svg, err};
 pub struct Actor {
     pub id: String,
     pub label: String,
-    /// A stick figure (`actor`) rather than a box.
+    /// A figure over the name rather than a box: `actor`, or a
+    /// participant `@{ "type": … }` (`Icon`).
     pub person: bool,
+    pub icon: Icon,
 }
+
+/// The figure a participant is drawn as.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Icon { Person, Boundary, Control, Entity, Database, Collections, Queue }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(clippy::enum_variant_names)]
@@ -90,7 +96,7 @@ impl P {
     fn actor(&mut self, id: &str) -> usize {
         let id = id.trim();
         if let Some(i) = self.s.actors.iter().position(|a| a.id == id) { return i }
-        self.s.actors.push(Actor { id: id.into(), label: text::label(id), person: false });
+        self.s.actors.push(Actor { id: id.into(), label: text::label(id), person: false, icon: Icon::Person });
         if let Some(b) = self.open_box { self.s.boxes[b].actors.push(self.s.actors.len() - 1); }
         self.s.actors.len() - 1
     }
@@ -100,10 +106,16 @@ impl P {
         let rest = rest.trim();
         let (id, label) = match rest.split_once(" as ") { Some((a, b)) => (a.trim(), Some(b.trim())), None => (rest, None) };
         let (id, meta) = match id.split_once("@{") { Some((a, m)) => (a.trim(), Some(m)), None => (id, None) };
-        let person = person || meta.is_some_and(|m| m.contains("actor"));
+        // `@{ "type": "database" }`
+        let kind = meta.and_then(|m| m.split_once("type").map(|(_, r)| r.trim_start_matches(['"', '\'', ' ', ':']).split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("").to_ascii_lowercase()));
+        let icon = match kind.as_deref() {
+            Some("boundary") => Some(Icon::Boundary), Some("control") => Some(Icon::Control), Some("entity") => Some(Icon::Entity), Some("database") => Some(Icon::Database),
+            Some("collections") => Some(Icon::Collections), Some("queue") => Some(Icon::Queue), Some("actor") => Some(Icon::Person), _ => None,
+        };
         let i = self.actor(id);
         if let Some(l) = label { self.s.actors[i].label = text::label(l); }
-        self.s.actors[i].person = person;
+        self.s.actors[i].person = person || icon.is_some();
+        self.s.actors[i].icon = icon.unwrap_or(Icon::Person);
         i
     }
 
@@ -310,12 +322,39 @@ fn draw(s: &Seq, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
         if s.actors[i].person {
             let p = Paint::new(&col.node_fill, &col.node_border, 1.5);
             let top = cy_top + 2.;
-            d.circle(cx, top + 7., 7., &p);
             let q = line(&col.node_border, 1.5);
-            d.line((cx, top + 14.), (cx, top + 25.), &q);
-            d.line((cx - 10., top + 18.), (cx + 10., top + 18.), &q);
-            d.line((cx, top + 25.), (cx - 8., top + 33.), &q);
-            d.line((cx, top + 25.), (cx + 8., top + 33.), &q);
+            // each figure fits a 34-high box over the name, centred on the lane
+            let (my, r) = (top + 17., 12.);
+            match s.actors[i].icon {
+                Icon::Person => {
+                    d.circle(cx, top + 7., 7., &p);
+                    d.line((cx, top + 14.), (cx, top + 25.), &q);
+                    d.line((cx - 10., top + 18.), (cx + 10., top + 18.), &q);
+                    d.line((cx, top + 25.), (cx - 8., top + 33.), &q);
+                    d.line((cx, top + 25.), (cx + 8., top + 33.), &q);
+                }
+                Icon::Boundary => {
+                    d.circle(cx + 5., my, r, &p);
+                    d.line((cx - 16., my - r), (cx - 16., my + r), &q);
+                    d.line((cx - 16., my), (cx + 5. - r, my), &q);
+                }
+                Icon::Control => {
+                    d.circle(cx, my + 2., r, &p);
+                    d.path(&format!("M{},{} L{},{} L{},{}", n(cx + 5.), n(my - r - 3.), n(cx), n(my - r + 2.), n(cx + 5.), n(my - r + 6.)), &q);
+                }
+                Icon::Entity => { d.circle(cx, my - 2., r, &p); d.line((cx - r, my + r + 2.), (cx + r, my + r + 2.), &q); }
+                Icon::Database => {
+                    let (l, rr, t, b) = (n(cx - 14.), n(cx + 14.), n(top + 6.), n(top + 30.));
+                    d.path(&format!("M{l},{t} A14,5 0 0 1 {rr},{t} L{rr},{b} A14,5 0 0 1 {l},{b} Z"), &p);
+                    d.path(&format!("M{l},{t} A14,5 0 0 0 {rr},{t}"), &Paint { fill: "none".into(), ..p.clone() });
+                }
+                Icon::Collections => { d.rect(cx - 11., top + 3., 24., 24., 0., &p); d.rect(cx - 14., top + 7., 24., 24., 0., &p); }
+                Icon::Queue => {
+                    let (l, rr, t, b) = (n(cx - 16.), n(cx + 12.), n(top + 7.), n(top + 27.));
+                    d.path(&format!("M{l},{t} L{rr},{t} A4,10 0 0 1 {rr},{b} L{l},{b} A4,10 0 0 1 {l},{t} Z"), &p);
+                    d.path(&format!("M{rr},{t} A4,10 0 0 0 {rr},{b}"), &Paint { fill: "none".into(), ..p.clone() });
+                }
+            }
             d.text(&heads[i], cx, top + figure + heads[i].h / 2. + 2., Anchor::Middle, &col.text);
         } else {
             d.rect(cx - w / 2., cy_top, w, bh, 4., &Paint::new(&col.node_fill, &col.node_border, 1.));
@@ -506,6 +545,9 @@ mod tests {
         assert_eq!(s.actors.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["A", "B", "C", "John Doe", "Jane"]);
         assert_eq!(s.actors[0].label, "Alice");
         assert!(s.actors[1].person);
+        let t = p("sequenceDiagram\nparticipant D@{ \"type\" : \"database\" }\nparticipant Q@{ \"type\": \"queue\" } as Jobs\nD->>Q: x");
+        assert_eq!((t.actors[0].icon, t.actors[0].person), (Icon::Database, true));
+        assert_eq!((t.actors[1].icon, t.actors[1].label.as_str()), (Icon::Queue, "Jobs"));
         let arrows: Vec<(Arrow, bool)> = s.events.iter().filter_map(|e| match e { Event::Message { arrow, dotted, .. } => Some((*arrow, *dotted)), _ => None }).collect();
         assert_eq!(arrows, [(Arrow::Arrow, false), (Arrow::Arrow, true), (Arrow::Async, false), (Arrow::Cross, true), (Arrow::Line, false), (Arrow::Both, false), (Arrow::Arrow, false), (Arrow::Arrow, false)]);
         assert_eq!(s.actors.len(), 5);

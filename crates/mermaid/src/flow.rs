@@ -12,7 +12,12 @@ use std::collections::HashMap;
 pub enum Dir { TB, BT, LR, RL }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Shape { Rect, Round, Stadium, Subroutine, Cylinder, Circle, DoubleCircle, Asym, Rhombus, Hexagon, LeanR, LeanL, Trap, TrapAlt }
+pub enum Shape {
+    Rect, Round, Stadium, Subroutine, Cylinder, Circle, DoubleCircle, Asym, Rhombus, Hexagon, LeanR, LeanL, Trap, TrapAlt,
+    // Mermaid 11's `@{ shape: … }` set
+    Doc, Docs, LinDoc, TagDoc, Delay, HCyl, LinCyl, CurvTrap, DivRect, Tri, FlipTri, Fork, WinPane, Dot, FDot, FrDot,
+    LinRect, NotchPent, SlRect, StRect, Flag, BowRect, CrossCirc, TagRect, NotchRect, Hourglass, Bolt, Text, BraceL, BraceR, Braces, Datastore,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Stroke { Normal, Thick, Dotted, Invisible }
@@ -162,9 +167,19 @@ const SHAPES: [(&str, &str, Shape); 14] = [
 fn shape_named(s: &str) -> Shape {
     match s {
         "rounded" | "event" => Shape::Round, "stadium" | "pill" | "terminal" => Shape::Stadium, "subroutine" | "subproc" | "fr-rect" | "framed-rectangle" => Shape::Subroutine,
-        "cyl" | "cylinder" | "db" | "database" => Shape::Cylinder, "circle" | "circ" | "sm-circ" | "small-circle" | "start" => Shape::Circle, "dbl-circ" | "double-circle" | "fr-circ" | "stop" => Shape::DoubleCircle,
+        "cyl" | "cylinder" | "db" | "database" => Shape::Cylinder, "circle" | "circ" => Shape::Circle, "dbl-circ" | "double-circle" => Shape::DoubleCircle,
         "diam" | "diamond" | "decision" | "question" => Shape::Rhombus, "hex" | "hexagon" | "prepare" => Shape::Hexagon, "lean-r" | "lean-right" | "in-out" => Shape::LeanR, "lean-l" | "lean-left" | "out-in" => Shape::LeanL,
         "trap-b" | "trapezoid" | "priority" | "trapezoid-bottom" => Shape::Trap, "trap-t" | "inv-trapezoid" | "manual" | "trapezoid-top" => Shape::TrapAlt, "odd" => Shape::Asym,
+        "doc" | "document" => Shape::Doc, "docs" | "documents" | "st-doc" | "stacked-document" => Shape::Docs, "lin-doc" | "lined-document" => Shape::LinDoc, "tag-doc" | "tagged-document" => Shape::TagDoc,
+        "delay" | "half-rounded-rectangle" => Shape::Delay, "h-cyl" | "das" | "horizontal-cylinder" => Shape::HCyl, "lin-cyl" | "disk" | "lined-cylinder" => Shape::LinCyl,
+        "curv-trap" | "curved-trapezoid" | "display" => Shape::CurvTrap, "div-rect" | "div-proc" | "divided-process" | "divided-rectangle" => Shape::DivRect,
+        "tri" | "extract" | "triangle" => Shape::Tri, "flip-tri" | "flipped-triangle" | "manual-file" => Shape::FlipTri, "fork" | "join" => Shape::Fork,
+        "win-pane" | "internal-storage" | "window-pane" => Shape::WinPane, "sm-circ" | "small-circle" | "start" => Shape::Dot, "f-circ" | "filled-circle" | "junction" => Shape::FDot, "fr-circ" | "framed-circle" | "stop" => Shape::FrDot,
+        "lin-rect" | "lin-proc" | "lined-process" | "lined-rectangle" | "shaded-process" => Shape::LinRect, "notch-pent" | "loop-limit" | "notched-pentagon" => Shape::NotchPent,
+        "sl-rect" | "manual-input" | "sloped-rectangle" => Shape::SlRect, "st-rect" | "processes" | "procs" | "stacked-rectangle" => Shape::StRect, "flag" | "paper-tape" => Shape::Flag,
+        "bow-rect" | "bow-tie-rectangle" | "stored-data" => Shape::BowRect, "cross-circ" | "crossed-circle" | "summary" => Shape::CrossCirc, "tag-rect" | "tag-proc" | "tagged-process" | "tagged-rectangle" => Shape::TagRect,
+        "notch-rect" | "card" | "notched-rectangle" => Shape::NotchRect, "hourglass" | "collate" => Shape::Hourglass, "bolt" | "com-link" | "lightning-bolt" => Shape::Bolt, "text" => Shape::Text,
+        "brace" | "brace-l" | "comment" => Shape::BraceL, "brace-r" => Shape::BraceR, "braces" => Shape::Braces, "datastore" | "data-store" => Shape::Datastore,
         _ => Shape::Rect,
     }
 }
@@ -569,6 +584,25 @@ fn size(shape: Shape, t: &Block) -> (f32, f32) {
         Shape::Hexagon => (w + h / 2., h),
         Shape::LeanR | Shape::LeanL | Shape::Trap | Shape::TrapAlt => (w + h * 0.8, h),
         Shape::Asym => (w + h / 4., h),
+        Shape::Doc | Shape::LinDoc | Shape::TagDoc => (w + if shape == Shape::LinDoc { 8. } else { 0. }, h * 1.15),
+        Shape::Docs | Shape::StRect => (w + 10., h * if shape == Shape::Docs { 1.15 } else { 1. } + 10.),
+        Shape::Delay | Shape::CurvTrap | Shape::NotchPent | Shape::BowRect => (w + h * 0.5, h),
+        Shape::HCyl => (w + h * 0.5, h),
+        Shape::LinCyl => { let (w, h) = size(Shape::Cylinder, t); (w, h + 6.) }
+        Shape::DivRect => (w, h + 10.),
+        Shape::Tri | Shape::FlipTri => { let s = (tw + 2. * PAD.0) * 1.8; (s, (th + 2. * PAD.1) * 1.8) }
+        Shape::Fork => (70., 10.),
+        Shape::WinPane | Shape::LinRect => (w + 8., h + if shape == Shape::WinPane { 8. } else { 0. }),
+        Shape::Dot | Shape::FDot | Shape::FrDot => (14., 14.),
+        Shape::CrossCirc => (30., 30.),
+        Shape::Bolt => (24., 36.),
+        Shape::SlRect => (w, h + 10.),
+        Shape::Flag => (w, h * 1.3),
+        Shape::TagRect | Shape::NotchRect | Shape::Text | Shape::Datastore => (w, h),
+        // a small hourglass with its label under it
+        Shape::Hourglass => (tw.max(30.), 34. + th),
+        Shape::BraceL | Shape::BraceR => (w + 10., h),
+        Shape::Braces => (w + 20., h),
     }
 }
 
@@ -586,6 +620,45 @@ fn outline(shape: Shape, cx: f32, cy: f32, w: f32, h: f32) -> Vec<(f32, f32)> {
         Shape::Trap => { let k = h * 0.4; vec![(l + k, t), (r - k, t), (r, b), (l, b)] }
         Shape::TrapAlt => { let k = h * 0.4; vec![(l, t), (r, t), (r - k, b), (l + k, b)] }
         Shape::Asym => { let k = h / 4.; vec![(l, t), (r, t), (r, b), (l, b), (l + k, cy)] }
+        Shape::Doc | Shape::LinDoc | Shape::TagDoc => { let mut p = vec![(l, t), (r, t)]; p.extend(wave(r, l, b - h * 0.08, h * 0.08)); p }
+        Shape::Flag => { let a = h * 0.08; let mut p = wave(l, r, t + a, a); p.extend(wave(r, l, b - a, a)); p }
+        Shape::Delay => {
+            let rr = h / 2.;
+            let mut p = vec![(l, t)];
+            for i in 0..=8 { let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((r - rr + rr * a.cos(), cy + rr * a.sin())); }
+            p.push((l, b));
+            p
+        }
+        Shape::HCyl => {
+            let rx = h / 4.;
+            let mut p = Vec::new();
+            for i in 0..=8 { let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((r - rx + rx * a.cos(), cy + h / 2. * a.sin())); }
+            for i in 0..=8 { let a = std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((l + rx + rx * a.cos(), cy + h / 2. * a.sin())); }
+            p
+        }
+        Shape::CurvTrap => {
+            let k = h * 0.25;
+            let mut p = vec![(l + k, t)];
+            for i in 0..=8 { let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((r - k + k * a.cos(), cy + h / 2. * a.sin())); }
+            p.extend([(l + k, b), (l, cy)]);
+            p
+        }
+        Shape::BowRect => {
+            let k = h * 0.2;
+            let mut p = vec![(l + k, t), (r, t)];
+            for i in 1..8 { let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((r - k * a.cos(), cy + h / 2. * a.sin())); }
+            p.push((r, b));
+            p.push((l + k, b));
+            for i in 1..8 { let a = std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 8.; p.push((l + k + k * a.cos(), cy + h / 2. * a.sin())); }
+            p
+        }
+        Shape::Tri => vec![(cx, t), (r, b), (l, b)],
+        Shape::FlipTri => vec![(l, t), (r, t), (cx, b)],
+        Shape::NotchPent => { let k = h * 0.3; vec![(l + k, t), (r - k, t), (r, t + k), (r, b), (l, b), (l, t + k)] }
+        Shape::SlRect => vec![(l, t + 10.), (r, t), (r, b), (l, b)],
+        Shape::NotchRect => vec![(l + 12., t), (r, t), (r, b), (l, b), (l, t + 12.)],
+        Shape::Bolt => vec![(l + w * 0.55, t), (l, cy + h * 0.08), (cx, cy + h * 0.08), (l + w * 0.4, b), (r, cy - h * 0.08), (cx, cy - h * 0.08)],
+        Shape::Dot | Shape::FDot | Shape::FrDot | Shape::CrossCirc => ellipse(w / 2., h / 2.),
         Shape::Stadium => {
             let rr = h / 2.;
             let mut p = Vec::new();
@@ -595,6 +668,11 @@ fn outline(shape: Shape, cx: f32, cy: f32, w: f32, h: f32) -> Vec<(f32, f32)> {
         }
         _ => vec![(l, t), (r, t), (r, b), (l, b)],
     }
+}
+
+/// A wave from `x0` to `x1` about `y`: one period, `amp` high.
+fn wave(x0: f32, x1: f32, y: f32, amp: f32) -> Vec<(f32, f32)> {
+    (0..=16).map(|i| { let u = i as f32 / 16.; (x0 + (x1 - x0) * u, y + amp * (u * std::f32::consts::TAU).sin()) }).collect()
 }
 
 /// Where the segment from `inside` to `outside` leaves `poly`.
@@ -805,10 +883,65 @@ fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measure) -> Resu
             }
             Shape::Circle => doc.circle(cx, cy, w / 2., &p),
             Shape::DoubleCircle => { doc.circle(cx, cy, w / 2., &p); doc.circle(cx, cy, w / 2. - 5., &Paint { fill: "none".into(), ..p.clone() }); }
+            Shape::Docs | Shape::StRect => {
+                // two sheets behind the front one
+                let s = if nd.shape == Shape::Docs { Shape::Doc } else { Shape::Rect };
+                for k in [10., 5., 0.] { doc.polygon(&outline(s, cx - 5. + k, cy + 5. - k, w - 10., h - 10.), &p); }
+            }
+            Shape::LinCyl => {
+                let rx = w / 2.;
+                let ry = rx / (2.5 + w / 50.);
+                let (a, b, c, d, e) = (n(l), n(l + w), n(t + ry), n(t + h - ry), n(t + ry + 6.));
+                let (rxs, rys) = (n(rx), n(ry));
+                doc.path(&format!("M{a},{c} A{rxs},{rys} 0 0 1 {b},{c} L{b},{d} A{rxs},{rys} 0 0 1 {a},{d} Z"), &p);
+                doc.path(&format!("M{a},{c} A{rxs},{rys} 0 0 0 {b},{c} M{a},{e} A{rxs},{rys} 0 0 0 {b},{e}"), &Paint { fill: "none".into(), ..p.clone() });
+            }
+            Shape::FDot => doc.circle(cx, cy, w / 2., &Paint::new(&p.stroke, &p.stroke, p.width)),
+            Shape::FrDot => { doc.circle(cx, cy, w / 2., &p); doc.circle(cx, cy, w / 2. - 3., &Paint::new(&p.stroke, "none", 0.)); }
+            Shape::Fork => doc.rect(l, t, w, h, 0., &Paint::new(&p.stroke, &p.stroke, p.width)),
+            Shape::Text => {}
+            Shape::Hourglass => doc.polygon(&[(cx - 15., t), (cx + 15., t), (cx - 15., t + 30.), (cx + 15., t + 30.)], &p),
+            Shape::Datastore => {
+                doc.rect(l, t, w, h, 0., &Paint::new(&p.fill, "none", 0.));
+                let q = Paint::new("none", &p.stroke, p.width);
+                doc.line((l, t), (l + w, t), &q);
+                doc.line((l, t + h), (l + w, t + h), &q);
+            }
+            Shape::BraceL | Shape::BraceR | Shape::Braces => {
+                let q = Paint::new("none", &p.stroke, p.width.max(1.));
+                let brace = |x: f32, k: f32| format!("M{},{} Q{},{} {},{} L{},{} Q{},{} {},{} Q{},{} {},{} L{},{} Q{},{} {},{}",
+                    n(x + 8. * k), n(t), n(x), n(t), n(x), n(t + 8.), n(x), n(cy - 6.), n(x), n(cy), n(x - 5. * k), n(cy), n(x), n(cy), n(x), n(cy + 6.), n(x), n(t + h - 8.), n(x), n(t + h), n(x + 8. * k), n(t + h));
+                if nd.shape != Shape::BraceR { doc.path(&brace(l + 5., 1.), &q); }
+                if nd.shape != Shape::BraceL { doc.path(&brace(l + w - 5., -1.), &q); }
+            }
             _ => doc.polygon(&outline(nd.shape, cx, cy, w, h), &p),
         }
-        let dx = match nd.shape { Shape::Asym => h / 8., _ => 0. };
-        doc.text(&blocks[i], cx + dx, cy, Anchor::Middle, lk.color.as_deref().unwrap_or(&col.text));
+        // the lines some shapes carry over their body
+        let q = Paint::new("none", &p.stroke, p.width);
+        match nd.shape {
+            Shape::LinDoc | Shape::LinRect => doc.line((l + 8., t), (l + 8., t + h * if nd.shape == Shape::LinDoc { 0.9 } else { 1. }), &q),
+            Shape::DivRect => doc.line((l, t + 10.), (l + w, t + 10.), &q),
+            Shape::WinPane => { doc.line((l, t + 8.), (l + w, t + 8.), &q); doc.line((l + 8., t), (l + 8., t + h), &q); }
+            Shape::HCyl => {
+                let rx = h / 4.;
+                doc.path(&format!("M{},{} A{},{} 0 0 0 {},{}", n(l + w - rx), n(t), n(rx), n(h / 2.), n(l + w - rx), n(t + h)), &q);
+            }
+            Shape::TagDoc | Shape::TagRect => {
+                let (x, y) = (l + w, t + h * if nd.shape == Shape::TagDoc { 0.85 } else { 1. });
+                doc.polygon(&[(x, y - 14.), (x, y), (x - 14., y)], &Paint::new(&p.stroke, &p.stroke, p.width));
+            }
+            Shape::CrossCirc => {
+                let r = w / 2. * std::f32::consts::FRAC_1_SQRT_2;
+                doc.line((cx - r, cy - r), (cx + r, cy + r), &q);
+                doc.line((cx - r, cy + r), (cx + r, cy - r), &q);
+            }
+            _ => {}
+        }
+        let (dx, dy) = match nd.shape { Shape::Asym => (h / 8., 0.), Shape::Tri => (0., h / 6.), Shape::FlipTri => (0., -h / 6.), Shape::Doc | Shape::TagDoc => (0., -h * 0.05), Shape::LinDoc => (4., -h * 0.05), Shape::Docs | Shape::StRect => (-5., 5.), Shape::DivRect | Shape::SlRect => (0., 5.), Shape::WinPane => (4., 4.), Shape::LinRect => (4., 0.), Shape::Hourglass => (0., 17.), _ => (0., 0.) };
+        // the small marks carry no text
+        if !matches!(nd.shape, Shape::Dot | Shape::FDot | Shape::FrDot | Shape::Fork | Shape::Bolt | Shape::CrossCirc) {
+            doc.text(&blocks[i], cx + dx, cy + dy, Anchor::Middle, lk.color.as_deref().unwrap_or(&col.text));
+        }
     }
     Ok(Svg { svg: doc.finish(width, height, ""), width, height })
 }
