@@ -493,12 +493,14 @@ impl Workspace {
             )
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |w, ev: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, ev: &MouseDownEvent, window, cx| {
                     let batch = in_lib && w.batch.is_some();
                     if batch && !w.batch.as_ref().is_some_and(|b| b.contains(&id2)) && !w.toggle_check(&id2) {
                         return;
                     }
                     w.row_menu = Some(RowMenu { id: id2.clone(), pos: ev.position, corner: Anchor::TopLeft, sub: false, batch, from: None });
+                    // the keys go to the sidebar: ⌘Z after what the menu does undoes that, not the page's typing
+                    window.focus(&w.focus, cx);
                     cx.notify();
                 }),
             )
@@ -525,7 +527,7 @@ impl Workspace {
             .child(canvas(move |b, _, _| record.borrow_mut().insert(slot.clone(), b), |_, _, _, _| {}).absolute().inset_0())
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |w, _: &MouseDownEvent, _, cx| {
+                cx.listener(move |w, _: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     // The row menu's outside-click handler has already closed it on this press, so
                     // a press on its own button closes it rather than reopening it (see `open`).
@@ -535,6 +537,7 @@ impl Workspace {
                     let menu_h = row_menu_height(ROW_ITEMS + usize::from(w.takes_children(&id)), ROW_DIVIDERS);
                     let (pos, corner) = crate::design::hang(b, crate::design::Align::Start, Some(menu_h));
                     w.row_menu = Some(RowMenu { id: id.clone(), pos, corner, sub: false, batch: false, from: Some(from.clone()) });
+                    window.focus(&w.focus, cx);
                     cx.notify();
                 }),
             )

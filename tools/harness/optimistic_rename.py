@@ -100,6 +100,7 @@ def rename_twice():
 
 
 def edit_during():
+    # After the rename the keys stay on the sidebar (as in VS Code's Explorer): a click on the page (here the backlinks' blank) gives them back.
     code, lib, log = run("edit_during", "row Project\nwait 400\nrow Alpha\nwait 600\nclick 700 330\nkey cmd-down\ntype  one\n" + RENAME.format("Project", "Renamed") + "wait 100\nclick 700 330\nkey cmd-down\ntype  two\nwait 5000\nshot saved\n", library(work / "src-edit"))
     assert code == 0, log[-600:]
     text = (lib / "Renamed" / "Alpha.xml").read_text()

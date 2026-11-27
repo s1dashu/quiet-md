@@ -149,6 +149,24 @@ impl Workspace {
         self.file_history.redo.retain(|r| r.token != token);
     }
 
+    /// 撤销 / 重做 in the Edit menu: the folders' next steps by name while ⌘Z is theirs (`capture_file_history`);
+    /// none (plain 撤销 / 重做) while it is a page's, whose steps have no names.
+    pub(crate) fn undo_menu_names(&self, window: &Window, cx: &App) -> (Option<String>, Option<String>) {
+        let doc_keys = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).holds_focus(window, cx));
+        if !files_take_undo(self.rename.is_some() || self.search_open || self.move_dlg.is_some(), doc_keys) { return (None, None) }
+        let name = |r: &Record, redo: bool| {
+            // one page or folder: its title too
+            let title = match &r.entries[..] { [(a, b)] => b.as_ref().or(a.as_ref()).map(|e| crate::settings::display_title(&e.title)), _ => None };
+            match (title, redo) {
+                (Some(t), false) => crate::localized_format!("撤销{}「{}」", "Undo {} “{}”", r.label, t),
+                (Some(t), true) => crate::localized_format!("重做{}「{}」", "Redo {} “{}”", r.label, t),
+                (None, false) => crate::localized_format!("撤销{}", "Undo {}", r.label),
+                (None, true) => crate::localized_format!("重做{}", "Redo {}", r.label),
+            }
+        };
+        (self.file_history.undo.last().map(|r| name(r, false)), self.file_history.redo.last().map(|r| name(r, true)))
+    }
+
     /// ⌘Z / ⌘⇧Z, caught on the way down: the folders' history (创建副本, 移动, 删除…) only while the keys are
     /// in the sidebar or a folder's page. With the open document holding them it is that document's own, even
     /// with nothing left to undo there (as in Notion and 飞书: undo in a page never undoes the sidebar).

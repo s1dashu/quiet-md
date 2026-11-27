@@ -187,10 +187,11 @@ impl TableView {
             FieldType::Note => if typed.is_none() { notes::open_cell(self, cell, under.unwrap_or_default(), window, cx); },
             FieldType::Rating => if let Some(n) = typed.and_then(|s| s.parse::<f64>().ok()) { let tid = self.table; self.edit(cx, |d| d.set_cells(tid, vec![(cell.0, cell.1, Value::Number(n))])); },
             _ => {
-                let text = typed.map_or(text, str::to_string);
                 // text wraps in the cell, which grows down while it is edited (`edit_overlay`), ⇧⏎ breaking
                 // the line; a number stays on its line, right-aligned
-                self.input.update(cx, |t, cx| { t.align = if ty.numeric() { crate::model::Align::Right } else { crate::model::Align::Left }; t.wrap = ty.textual(); t.shift_newline = ty == FieldType::Text; t.font = Some(crate::theme::DOC_UI_FONT); t.set_text(&text, cx); });
+                self.input.update(cx, |t, cx| { t.align = if ty.numeric() { crate::model::Align::Right } else { crate::model::Align::Left }; t.wrap = ty.textual(); t.shift_newline = ty == FieldType::Text; t.font = Some(crate::theme::DOC_UI_FONT);
+                    // typed over: ⌘Z in the field goes back to what the cell held
+                    match typed { Some(s) => t.set_text_typed_over(&text, s, cx), None => t.set_text(&text, cx) } });
                 window.focus(&self.input.focus_handle(cx), cx);
                 self.editing = Some(cell);
             }

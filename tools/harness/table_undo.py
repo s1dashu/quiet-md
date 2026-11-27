@@ -7,6 +7,11 @@ still leaves the copy; back on the sidebar (a click on a row's blank), ⌘Z is t
 undoes 创建副本. Then a column's menu: the title field's 删除字段/列 is there, dimmed; another
 column's asks first (the records it holds data in) and goes; ⌘Z brings it back with its cells.
 
+Then: ⌘Z / ⌘⇧Z while a cell is being edited undo and redo the typing in it, and with none left do
+nothing (the table's own steps wait until the cell is left); 创建副本 opens the copy as soon as it is
+written; and, as in VS Code's Explorer, a page open and typed into, 创建副本 from a row's right-click
+menu leaves the keys on the sidebar, so ⌘Z undoes the copy and the page keeps its words.
+
 Build with --release --features devtools, then run this file. FDL_BIN selects another build;
 TABLE_UNDO_SHOTS a folder to copy the screenshots to.
 """
@@ -33,6 +38,7 @@ CREATE TABLE _views (id INTEGER PRIMARY KEY, table_id INTEGER, table_name TEXT, 
 CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT); INSERT INTO _meta VALUES ('format', '2'), ('app', 'Quiet.md');""")
 db.commit()
 db.close()
+(source / "阅读清单.md").write_text("三体\n")
 
 PROBE = os.environ.get("TABLE_UNDO_PROBE")
 SHOTS = os.environ.get("TABLE_UNDO_SHOTS")
@@ -134,5 +140,54 @@ lib = run("undelete", DELETE + "key cmd-z\nwait 1200\nshot undeleted\n", source)
 assert column(lib, "Sources.sqlite", "作者") == ["刘慈欣", "刘慈欣", "斯蒂芬森"], column(lib, "Sources.sqlite", "作者")
 lib = run("cancel", f"row Sources\nwait 1500\nrclick {AUTHOR_HEAD}\nwait 500\nrow 删除字段/列\nwait 600\nclick 754 464\nwait 600\n", source)
 assert column(lib, "Sources.sqlite", "作者") == ["刘慈欣", "刘慈欣", "斯蒂芬森"]
+
+
+# 4. ⌘Z in the cell being edited: its typing, back and forth; with none left, nothing (not the table's steps)
+ROW_2 = "460 185"
+FIELD = f"""row Sources
+wait 1500
+click {ROW_2}
+wait 300
+type 球
+key enter
+wait 600
+click {TITLE_1}
+wait 300
+type 改过
+wait 300
+"""
+lib = run("field-undo", FIELD + "key cmd-z\nwait 300\nmove 1200 800\nshot field-undone\nkey cmd-z\nwait 300\nkey cmd-z\nwait 300\nkey enter\nwait 800\n", source)
+assert column(lib, "Sources.sqlite", "名称") == ["三体", "球", "雪崩"], column(lib, "Sources.sqlite", "名称")
+lib = run("field-redo", FIELD + "key cmd-z\nwait 300\nkey cmd-shift-z\nwait 300\nkey enter\nwait 800\n", source)
+assert column(lib, "Sources.sqlite", "名称") == ["改过", "球", "雪崩"], column(lib, "Sources.sqlite", "名称")
+# left, the table's ⌘Z again: the committed 改过 goes, then 球
+lib = run("field-left", FIELD + "key enter\nwait 600\nkey cmd-z\nwait 600\nkey cmd-z\nwait 800\n", source)
+assert column(lib, "Sources.sqlite", "名称") == ["三体", "球状闪电", "雪崩"], column(lib, "Sources.sqlite", "名称")
+
+# 5. 创建副本 opens the copy once it is written: at once, no 「文档不存在」
+lib = run("copy-opens", "rrow Sources\nwait 500\nrow 创建副本\nwait 1500\nmove 1200 800\nshot copy-opened\nshowing Sources 副本\n", source)
+assert files(lib) == ["Sources 副本.sqlite", "Sources.sqlite"], files(lib)
+
+# 6. a page typed into, 创建副本 of it from the sidebar's right-click menu: ⌘Z undoes the copy, the page keeps its words
+PAGE = """row 阅读清单
+wait 1200
+click 700 187
+key cmd-down
+type  黑暗森林
+wait 1500
+rrow 阅读清单
+wait 500
+row 创建副本
+wait 3000
+move 1200 800
+shot page-copied
+key cmd-z
+wait 2500
+shot page-copy-undone
+"""
+lib = run("page-copy", PAGE, source)
+pages = sorted(p.name for p in lib.glob("*.md"))
+assert pages == ["阅读清单.md"], pages
+assert "黑暗森林" in (lib / "阅读清单.md").read_text(), (lib / "阅读清单.md").read_text()
 
 print("table_undo: all passed", work)

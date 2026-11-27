@@ -205,14 +205,14 @@ assert (more / "已有的笔记.xml").read_text() == "<title>已有的笔记</ti
 
 # 6. the note renamed in the sidebar while the table is open: the cell follows, and the undo of another
 #    edit (the table's own ↶), then of the cell following, leaves the note where it is
-# 「书单 · 笔记」's icon (its fold on hover) is the first row under 「lib」, its 三体 under it
-kept = run("rename", OPEN + ADD_COLUMN + WRITE + f"""move 30 90
+# 「书单 · 笔记」's icon (its fold on hover) is the first row under 「lib」; its 三体 and the menu's 重命名 found by name
+kept = run("rename", OPEN + ADD_COLUMN + WRITE + f"""hoverrow 书单 · 笔记
 wait 700
 click 30 90
 wait 1000
-rclick 100 121
+rrow 三体
 wait 700
-click 157 405
+row 重命名
 wait 500
 key cmd-a
 type 黑暗森林

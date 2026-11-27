@@ -543,7 +543,11 @@ impl Editor {
                 .pt(px(8.))
                 .rounded(px(CARD))
                 .bg(Theme::bg_overlay())
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                // the caret stays where it is; the keys, though, come back to the page (from the sidebar, say)
+                .on_mouse_down(MouseButton::Left, cx.listener(|e, _, window, cx| {
+                    cx.stop_propagation();
+                    if !e.holds_focus(window, cx) { window.focus(&e.focus, cx); }
+                }))
                 .child(tabs)
                 .child(list)
                 .into_any_element(),

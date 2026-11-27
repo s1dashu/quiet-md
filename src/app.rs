@@ -31,12 +31,16 @@ actions!(confirm, [ConfirmOk, ConfirmCancel]);
 thread_local! {
     /// The menu bar is for a Markdown file: 插入 / 格式 leave out what it can't hold.
     static MENU_MARKDOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// 撤销 / 重做 as the menu names them: what the folders' next step is while the keys are on the
+    /// sidebar or a folder's page (「撤销移动「阅读清单」」, as macOS's own apps say); else plain.
+    static MENU_UNDO: std::cell::RefCell<(Option<String>, Option<String>)> = const { std::cell::RefCell::new((None, None)) };
 }
 
 /// The menu bar follows the document in the window in front; rebuilt only
-/// when that changes between a Markdown file and anything else.
-pub fn menus_follow(markdown: bool, cx: &mut App) {
-    if MENU_MARKDOWN.replace(markdown) != markdown { set_menus(cx); }
+/// when that changes between a Markdown file and anything else, or 撤销 / 重做 name another step.
+pub fn menus_follow(markdown: bool, undo: (Option<String>, Option<String>), cx: &mut App) {
+    let new_undo = MENU_UNDO.with(|u| if *u.borrow() != undo { *u.borrow_mut() = undo; true } else { false });
+    if (MENU_MARKDOWN.replace(markdown) != markdown) | new_undo { set_menus(cx); }
 }
 
 /// The menu bar, in the interface language.
@@ -88,8 +92,8 @@ fn menu_bar(markdown: bool) -> Vec<Menu> {
             items: {
                 use crate::editor::keymap as k;
                 vec![
-                    MenuItem::os_action(tr("撤销", "Undo"), k::Undo, OsAction::Undo),
-                    MenuItem::os_action(tr("重做", "Redo"), k::Redo, OsAction::Redo),
+                    MenuItem::os_action(MENU_UNDO.with(|u| u.borrow().0.clone()).unwrap_or_else(|| tr("撤销", "Undo").into()), k::Undo, OsAction::Undo),
+                    MenuItem::os_action(MENU_UNDO.with(|u| u.borrow().1.clone()).unwrap_or_else(|| tr("重做", "Redo").into()), k::Redo, OsAction::Redo),
                     MenuItem::separator(),
                     MenuItem::os_action(tr("剪切", "Cut"), k::Cut, OsAction::Cut),
                     MenuItem::os_action(tr("拷贝", "Copy"), k::Copy, OsAction::Copy),
@@ -950,6 +954,20 @@ impl Workspace {
         self.try_open(id, window, cx);
     }
 
+    /// `open` after an operation on the sidebar or a folder's page (创建副本, 删除): with the keys there
+    /// (`sidebar_keys`), they stay, as in VS Code's Explorer: ⌘Z undoes that operation until the page is clicked.
+    pub(crate) fn open_beside(&mut self, id: &str, sidebar_keys: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.open(id, window, cx);
+        if sidebar_keys { window.focus(&self.focus, cx); }
+    }
+
+    /// The keys are on the sidebar or a folder's page (the window itself), not in a page or a field.
+    /// Under a confirmation (删除), where they were before it.
+    pub(crate) fn sidebar_keys(&self, window: &Window) -> bool {
+        self.focus.is_focused(window)
+            || (self.confirm_focus.is_focused(window) && matches!(&self.confirm_return, Some(Some(f)) if f.upgrade().is_some_and(|f| f == self.focus)))
+    }
+
     /// Shows 正在从 iCloud 下载, reads `path` in the background (the system
     /// downloads it to answer) and opens `id` once it is here, unless another
     /// document was opened meanwhile. No retry when the read fails.
@@ -1236,6 +1254,7 @@ impl Workspace {
                 None => if let Some(w) = self.store.top_writer(&key) { writers.push((key, w, vec![g])); },
             }
         }
+        let keys = self.sidebar_keys(window);
         let task = cx.background_executor().spawn(async move {
             let (mut done, mut listed) = (DeletedDocs { deleted: vec![], errors: vec![], changes: vec![] }, vec![]);
             for (key, mut writer, groups) in writers {
@@ -1284,7 +1303,7 @@ impl Workspace {
                 if w.current.is_none() && w.view != View::Folder {
                     let view = w.view;
                     match w.entries.first().map(|e| e.id.clone()) {
-                        Some(next) => { w.open(&next, window, cx); w.view = view; }
+                        Some(next) => { w.open_beside(&next, keys, window, cx); w.view = view; }
                         None => w.view = if view == View::Doc { View::Default } else { view },
                     }
                 }
@@ -1443,10 +1462,8 @@ impl Workspace {
                 self.rename_ahead(&row, &r.id, &title, cx);
             }
         }
-        if refocus
-            && let Some(ed) = &self.editor {
-                { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
-            }
+        // the keys back to the sidebar, as VS Code's Explorer keeps them: ⌘Z right away undoes the rename
+        if refocus { window.focus(&self.focus, cx); }
         self.sync_sub_pages(cx);
         cx.notify();
     }
@@ -2161,7 +2178,8 @@ impl Render for Workspace {
         // The menu bar is the front window's: a Markdown file's 插入 / 格式 leave out what it can't hold.
         if window.is_window_active() {
             let markdown = self.view == View::Doc && self.editor.as_ref().is_some_and(|e| e.read(cx).markdown);
-            cx.defer(move |cx| menus_follow(markdown, cx));
+            let undo = self.undo_menu_names(window, cx);
+            cx.defer(move |cx| menus_follow(markdown, undo, cx));
         }
         // Clicks no longer take focus from the editor (see the root's mouse
         // down), so leaving the document hands it back to the window's keys.
@@ -2322,6 +2340,12 @@ impl Render for Workspace {
         });
         let note = div().id("note").relative().flex_1().min_w_0().h_full().pt(px(inset_top)).flex().bg(page).shadow(crate::design::shadow::plane()).child(main)
             .when_some(swipe, |d, p| d.left(px(p * vw_now)))
+            // A click on the page, the keys on the sidebar and nothing in the page taking them itself (its
+            // margins, the backlinks): the page has them again, its caret where it was (VS Code's editor
+            // group, clicked after the Explorer).
+            .on_mouse_down(MouseButton::Left, cx.listener(|w, _, window, cx| {
+                if w.view == View::Doc && w.sidebar_keys(window) && let Some(ed) = &w.editor { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
+            }))
             // Files from the Finder dropped on a folder's page are imported there.
             .when(matches!(self.view, View::Default | View::Folder), |d| d
                 .on_drag_move(cx.listener(|w, ev: &DragMoveEvent<ExternalPaths>, _, cx| w.file_drag_move(ev, cx)))

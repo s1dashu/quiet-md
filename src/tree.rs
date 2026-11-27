@@ -269,11 +269,8 @@ impl Workspace {
 
     fn close_move(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.move_dlg = None;
-        // Back to the page (a folder's page: the window), so ⌘Z reaches 撤销 right away.
-        match &self.editor {
-            Some(ed) => { let f = ed.read(cx).focus.clone(); window.focus(&f, cx); }
-            None => window.focus(&self.focus, cx),
-        }
+        // The keys back to the window, not the page: ⌘Z right away undoes the move (`capture_file_history`).
+        window.focus(&self.focus, cx);
         cx.notify();
     }
 

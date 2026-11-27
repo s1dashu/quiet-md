@@ -13,7 +13,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 actions!(
     field,
-    [Backspace, DeleteToHome, Delete, Left, Right, SelectLeft, SelectRight, WordLeft, WordRight, SelectWordLeft, SelectWordRight, Home, End, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Swallow, Tab, ShiftTab]
+    [Backspace, DeleteToHome, Delete, Left, Right, SelectLeft, SelectRight, WordLeft, WordRight, SelectWordLeft, SelectWordRight, Home, End, SelectAll, Copy, Cut, Paste, Submit, ShiftSubmit, Cancel, Up, Down, Undo, Redo, Tab, ShiftTab]
 );
 
 pub fn bind_keys(cx: &mut App) {
@@ -48,8 +48,9 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-n", Down, c),
         KeyBinding::new("tab", Tab, c),
         KeyBinding::new("shift-tab", ShiftTab, c),
-        KeyBinding::new("cmd-z", Swallow, c),
-        KeyBinding::new("cmd-shift-z", Swallow, c),
+        // the field's own typing, as any native field (飞书's cell editor too); `undo`
+        KeyBinding::new("cmd-z", Undo, c),
+        KeyBinding::new("cmd-shift-z", Redo, c),
     ]);
 }
 
@@ -119,6 +120,43 @@ pub struct TextField {
     pointer_hidden: bool,
     /// Horizontal scroll of a single-line field, shared with its text element.
     scroll: Rc<Cell<Pixels>>,
+    /// What ⌘Z / ⌘⇧Z go back and forth through.
+    history: History,
+}
+
+/// The text and selection a field had before (or after) one step.
+#[derive(Clone, Debug, PartialEq)]
+struct Snapshot { text: String, sel: Range<usize>, reversed: bool }
+
+/// Steps a field remembers.
+const UNDO_DEPTH: usize = 100;
+
+/// A field's steps: the state before each, and those undone.
+#[derive(Default)]
+struct History {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    /// Where the caret was left by typing: the next character typed there joins that step.
+    typing_at: Option<usize>,
+}
+
+impl History {
+    /// `now` is about to change at `at` (an insertion when `insert`): a new step, unless it carries on
+    /// the typing just before it.
+    fn remember(&mut self, now: Snapshot, at: usize, insert: bool) {
+        if insert && self.typing_at == Some(at) { return; }
+        self.undo.push(now);
+        if self.undo.len() > UNDO_DEPTH { self.undo.remove(0); }
+        self.redo.clear();
+    }
+
+    /// ⌘Z (`back`) or ⌘⇧Z from `now`: the state to show, none with nothing to go to.
+    fn step(&mut self, back: bool, now: Snapshot) -> Option<Snapshot> {
+        let to = if back { self.undo.pop() } else { self.redo.pop() }?;
+        if back { self.redo.push(now) } else { self.undo.push(now) }
+        self.typing_at = None;
+        Some(to)
+    }
 }
 
 impl EventEmitter<TextFieldEvent> for TextField {}
@@ -162,6 +200,7 @@ impl TextField {
             selecting: false,
             pointer_hidden: false,
             scroll: Rc::new(Cell::new(px(0.))),
+            history: History::default(),
         }
     }
 
@@ -170,11 +209,38 @@ impl TextField {
         cx.notify();
     }
 
+    /// New text from outside (a cell opened, a field reset): what was typed before is no longer undone.
     pub fn set_text(&mut self, s: &str, cx: &mut Context<Self>) {
         self.text = s.to_string();
         self.sel = self.text.len()..self.text.len();
         self.marked = None;
+        self.forget_history();
         cx.notify();
+    }
+
+    /// `text` as the field's start, then `typed` over all of it as typing: ⌘Z goes back to `text` (a cell
+    /// typed over without opening it first).
+    pub fn set_text_typed_over(&mut self, text: &str, typed: &str, cx: &mut Context<Self>) {
+        self.set_text(text, cx);
+        self.replace(0..self.text.len(), typed, cx);
+        self.history.typing_at = Some(self.sel.end);
+    }
+
+    fn forget_history(&mut self) { self.history = History::default(); }
+
+    fn snapshot(&self) -> Snapshot { Snapshot { text: self.text.clone(), sel: self.sel.clone(), reversed: self.reversed } }
+
+    fn remember(&mut self, at: usize, insert: bool) { let now = self.snapshot(); self.history.remember(now, at, insert); }
+
+    /// ⌘Z (`back`) or ⌘⇧Z: false with nothing to go to.
+    fn step(&mut self, back: bool, cx: &mut Context<Self>) -> bool {
+        let now = self.snapshot();
+        let Some(to) = self.history.step(back, now) else { return false };
+        (self.text, self.sel, self.reversed) = (to.text, to.sel, to.reversed);
+        self.marked = None;
+        cx.emit(TextFieldEvent::Changed);
+        cx.notify();
+        true
     }
 
     pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
@@ -206,12 +272,14 @@ impl TextField {
     }
 
     fn move_to(&mut self, o: usize, cx: &mut Context<Self>) {
+        self.history.typing_at = None;
         self.sel = o..o;
         self.reversed = false;
         cx.notify();
     }
 
     fn select_to(&mut self, o: usize, cx: &mut Context<Self>) {
+        self.history.typing_at = None;
         if self.reversed {
             self.sel.start = o;
         } else {
@@ -232,7 +300,13 @@ impl TextField {
         self.text.grapheme_indices(true).find_map(|(i, _)| (i > o).then_some(i)).unwrap_or(self.text.len())
     }
 
-    fn replace(&mut self, range: Range<usize>, s: &str, cx: &mut Context<Self>) {
+    fn replace(&mut self, range: Range<usize>, s: &str, cx: &mut Context<Self>) { self.replace_as(range, s, true, cx) }
+
+    /// `replace`, a step of its own or joined to the typing before it; not `record`ed: a composition's
+    /// end (its start was).
+    fn replace_as(&mut self, range: Range<usize>, s: &str, record: bool, cx: &mut Context<Self>) {
+        let typed = range.is_empty() && !s.is_empty() && !s.contains(['\n', '\r']);
+        if record { self.remember(range.start, typed); }
         let mut s = if self.multiline { s.replace("\r\n", "\n").replace('\r', "\n") } else { s.replace(['\n', '\r'], " ") };
         if self.digits {
             s.retain(|c| c.is_ascii_digit());
@@ -247,6 +321,7 @@ impl TextField {
         let o = range.start + s.len();
         self.sel = o..o;
         self.reversed = false;
+        self.history.typing_at = (typed || !record).then_some(o);
         cx.emit(TextFieldEvent::Changed);
         cx.notify();
     }
@@ -378,10 +453,14 @@ impl TextField {
         cx.emit(TextFieldEvent::ShiftSubmit);
     }
 
-    fn swallow(&mut self, _: &Swallow, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.multiline {
-            cx.propagate();
-        }
+    /// ⌘Z / ⌘⇧Z: the field's own steps. With none left a single-line field lets the keys go on (a table's
+    /// cell: nowhere, its table waits until the cell is left), a multi-line one keeps them.
+    fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.step(true, cx) && !self.multiline { cx.propagate(); }
+    }
+
+    fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.step(false, cx) && !self.multiline { cx.propagate(); }
     }
 
     fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) {
@@ -523,8 +602,9 @@ impl EntityInputHandler for TextField {
     fn replace_text_in_range(&mut self, range: Option<Range<usize>>, s: &str, _: &mut Window, cx: &mut Context<Self>) {
         self.pointer_hidden = true;
         let r = range.map(|r| self.range8(&r)).or(self.marked.clone()).unwrap_or(self.sel.clone());
-        self.marked = None;
-        self.replace(r, s, cx);
+        // a composition ends: its step began with it
+        let composed = self.marked.take().is_some();
+        self.replace_as(r, s, !composed, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -537,6 +617,8 @@ impl EntityInputHandler for TextField {
     ) {
         self.pointer_hidden = true;
         let r = range.map(|r| self.range8(&r)).or(self.marked.clone()).unwrap_or(self.sel.clone());
+        // a composition begins: one step for all of it
+        if self.marked.is_none() { self.remember(r.start, r.is_empty()); }
         self.text.replace_range(r.clone(), s);
         self.marked = (!s.is_empty()).then(|| r.start..r.start + s.len());
         let sel = new_sel
@@ -641,7 +723,8 @@ impl Render for TextField {
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
-            .on_action(cx.listener(Self::swallow))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::shift_tab))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_down))
@@ -672,5 +755,37 @@ impl Render for TextField {
                 .absolute()
                 .size_full(),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // (`test` here is GPUI's, through the glob)
+    use super::*;
+
+    fn at(text: &str) -> Snapshot { Snapshot { text: text.into(), sel: text.len()..text.len(), reversed: false } }
+
+    /// Typing is one step until the caret moves or something else changes the text; undo and redo
+    /// go back and forth through the steps; a new step drops what was undone.
+    #[core::prelude::v1::test]
+    fn typing_joins_one_step() {
+        let mut h = History::default();
+        // 「三体」 typed over with 「改过」, then 「了」 typed on: one step, back to 「三体」
+        h.remember(at("三体"), 0, false);
+        h.typing_at = Some(6);
+        h.remember(at("改过"), 6, true);
+        h.typing_at = Some(9);
+        assert_eq!(h.undo.len(), 1);
+        // the caret moved, then typed: a step of its own
+        h.typing_at = None;
+        h.remember(at("改过了"), 3, true);
+        assert_eq!(h.undo.len(), 2);
+        assert_eq!(h.step(true, at("改x过了")), Some(at("改过了")));
+        assert_eq!(h.step(true, at("改过了")), Some(at("三体")));
+        assert_eq!(h.step(true, at("三体")), None);
+        assert_eq!(h.step(false, at("三体")), Some(at("改过了")));
+        // a new step: the redo is gone
+        h.remember(at("改过了"), 0, false);
+        assert_eq!(h.step(false, at("")), None);
     }
 }

@@ -1511,4 +1511,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("拷贝链接", "Bağlantıyı kopyala"),
     ("在“文件”中打开", "Dosyalar’da aç"),
     ("分享…", "Paylaş…"),
+    ("撤销{}「{}」", "Geri al: {} “{}”"),
+    ("重做{}「{}」", "Yinele: {} “{}”"),
+    ("撤销{}", "Geri al: {}"),
+    ("重做{}", "Yinele: {}"),
 ];

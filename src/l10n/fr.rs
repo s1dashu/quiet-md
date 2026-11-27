@@ -1511,4 +1511,8 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("拷贝链接", "Copier le lien"),
     ("在“文件”中打开", "Ouvrir dans Fichiers"),
     ("分享…", "Partager…"),
+    ("撤销{}「{}」", "Annuler {} « {} »"),
+    ("重做{}「{}」", "Rétablir {} « {} »"),
+    ("撤销{}", "Annuler {}"),
+    ("重做{}", "Rétablir {}"),
 ];

@@ -127,22 +127,24 @@ impl Workspace {
         if !self.save_before(cx, move |w, window, cx| w.copy_docs(&retry, open, label, window, cx)) { return; }
         let ids = crate::tree::Tree::new(&self.entries).outermost(ids);
         let current = self.current.clone().zip(self.editor.as_ref().map(|e| e.read(cx).core.doc.title.text.clone()));
-        let mut writers: Vec<(String, crate::store::Store, Vec<(String, String)>)> = vec![];
+        let mut writers: Vec<(String, u64, crate::store::Store, Vec<(String, String)>)> = vec![];
         for id in ids.iter().filter(|id| crate::shared_store::top_of_row(id).is_none()) {
             // the editor's title for the open document: the list may not have caught up with it
             let title = match &current { Some((c, t)) if c == id => t.clone(), _ => self.entries.iter().find(|e| &e.id == id).map(|e| e.title.clone()).unwrap_or_default() };
             let job = (id.clone(), crate::localized_format!("{} 副本", "{} copy", display_title(&title)));
             let Some(key) = self.store.top_of(id) else { continue };
-            match writers.iter_mut().find(|(k, _, _)| *k == key) {
-                Some((_, _, v)) => v.push(job),
-                None => if let Some(w) = self.store.top_writer(&key) { writers.push((key, w, vec![job])); },
+            match writers.iter_mut().find(|(k, _, _, _)| *k == key) {
+                Some((_, _, _, v)) => v.push(job),
+                // with the window's count of writes: the window's library takes the writer over afterwards
+                None => if let Some((k, n, w)) = self.store.writers(std::slice::from_ref(&key)).pop() { writers.push((k, n, w, vec![job])); },
             }
         }
         if writers.is_empty() { return; }
         let Some(task_guard) = self.store.begin_file_task() else { return };
+        let keys = self.sidebar_keys(window);
         let task = cx.background_executor().spawn(async move {
             let (mut made, mut errors, mut changes, mut listed) = (vec![], vec![], vec![], vec![]);
-            for (key, mut writer, jobs) in writers {
+            for (key, n, mut writer, jobs) in writers {
                 let journal = writer.track_file_changes();
                 for (id, title) in jobs {
                     match writer.duplicate(&id, &title) {
@@ -151,8 +153,9 @@ impl Workspace {
                     }
                 }
                 errors.extend(writer.take_warnings().iter().map(|s| crate::settings::diagnostic(s)));
-                listed.push((key, writer.list()));
+                let list = writer.list();
                 changes.extend(journal.take());
+                listed.push((key, n, writer, list));
             }
             (made, errors, changes, listed)
         });
@@ -160,11 +163,12 @@ impl Workspace {
         self.row_menu = None;
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let _task_guard = task_guard;
             let (made, errors, changes, listed) = task.await;
-            let _ = this.update_in(cx, |w, window, cx| {
+            let _ = this.update_in(cx, move |w, window, cx| {
                 let mut entries = None;
-                for (key, list) in listed { entries = Some(w.store.merge_entries(&key, list)); }
+                // the window's library takes the writer over (as a move's or an undo's): the copy opens
+                // from its row at once, not only after the library is next read
+                for (key, n, writer, list) in listed { entries = Some(w.store.adopt_written(&key, n, writer, list)); }
                 if let Some(entries) = entries {
                     w.sync_peers(cx, &entries, None);
                     w.entries.set(entries);
@@ -177,7 +181,9 @@ impl Workspace {
                     w.show_toast_kind(crate::ui::ToastKind::Error, &msg, cx);
                     w.status = crate::app::SaveStatus::Failed(msg);
                 }
-                if open && let [new] = &made[..] { w.open(new, window, cx); }
+                // the copy is on disk and the window's: the task is over, so opening it (`save_before`) isn't held back
+                drop(task_guard);
+                if open && let [new] = &made[..] { w.open_beside(new, keys, window, cx); }
                 cx.notify();
             });
         }).detach();
