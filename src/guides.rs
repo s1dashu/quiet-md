@@ -54,7 +54,7 @@ const WINDOWS_TEXT: &[(&str, &str)] = &[
     // ⌃⌘D is Ctrl+Shift+D there (Ctrl+Alt reads as AltGr, #290); this entry serves the Chinese guides too
     ("<code>⌃ ⌘ D</code>", "<code>Ctrl+Shift+D</code>"),
     // The system-wide quick-note shortcut exists on macOS only.
-    ("<p>A global shortcut can open a small note window while you are using another app. Write the thought down, then close the window; it is saved with your documents.</p><ul><li>Enable the global quick-note shortcut in Settings › Shortcuts.</li><li>The default is <code>⌥ Space</code>. If another app already uses it, choose another combination, such as <code>⌥ ⇧ Space</code>. Registration failures are shown in settings.</li>",
+    ("<p>A global shortcut can open a small note window while you are using another app. Write the thought down, then close the window; it is saved with your documents.</p><ul><li>The global shortcut is on from the start: <code>⌥ Space</code>. If another app already uses it, choose another combination in Settings › Shortcuts, such as <code>⌥ ⇧ Space</code>, or clear it there to turn it off. Registration failures are shown in settings.</li>",
      "<p>A note window is a small window of its own for writing a thought down. Close it when you are done; the note is saved with your documents.</p><ul>"),
 ];
 
@@ -75,7 +75,7 @@ const WINDOWS_TEXT_ZH: &[(&str, &str)] = &[
     ("按下新的组合键，需包含 Command、Control 或 Option。", "按下新的组合键，需包含 Ctrl 或 Alt。"),
     ("按住 <code>⌥</code> 点击，可以一并展开或收起里面的所有文件夹。", "按住 <code>Alt</code> 点击，可以一并展开或收起里面的所有文件夹。"),
     // The system-wide quick-note shortcut exists on macOS only.
-    ("<p>使用全局快捷键，即使正在用别的应用，也能随时打开一个小笔记窗口。记下想法后关闭窗口即可，笔记会和你的文档保存在一起。</p><ul><li>在 设置 › 快捷键 中开启“全局快速新建笔记窗口”。</li><li>默认快捷键是 <code>⌥ Space</code>。如果已被其他应用占用，可以换一个组合，比如 <code>⌥ ⇧ Space</code>。注册失败时，设置中会显示提示。</li>", "<p>笔记窗口是一个独立的小窗口，用来随手记下想法。写完关闭即可，笔记会和你的文档保存在一起。</p><ul>"),
+    ("<p>使用全局快捷键，即使正在用别的应用，也能随时打开一个小笔记窗口。记下想法后关闭窗口即可，笔记会和你的文档保存在一起。</p><ul><li>全局快捷键默认就开着：<code>⌥ Space</code>。如果已被其他应用占用，可以在 设置 › 快捷键 中换一个组合，比如 <code>⌥ ⇧ Space</code>；不需要时也可以在那里清除。注册失败时，设置中会显示提示。</li>", "<p>笔记窗口是一个独立的小窗口，用来随手记下想法。写完关闭即可，笔记会和你的文档保存在一起。</p><ul>"),
 ];
 
 /// A guide document as the Windows build seeds it: Ctrl / Alt keys, no Mac-only steps.
