@@ -10,7 +10,7 @@
 <tr><td><p>Tables, task lists, strikethrough</p></td><td><p>GFM, the extensions GitHub made common</p></td></tr>
 <tr><td><p>Front matter</p></td><td><p>A convention: a YAML block between <code>---</code> lines at the top. Quiet.md keeps it exactly as it was and does not show it on the page.</p></td></tr>
 <tr><td><p>Equations</p></td><td><p>A convention: LaTeX between <code>$</code> or <code>$$</code></p></td></tr>
-<tr><td><p>Mermaid diagrams</p></td><td><p>A convention: a code block whose language is <code>mermaid</code>. Quiet.md draws it as a diagram, as GitHub and Obsidian do; in the file it is still a standard code block, and an editor that does not draw Mermaid shows the code.</p></td></tr>
+<tr><td><p>Mermaid diagrams</p></td><td><p>A convention: a code block whose language is <code>mermaid</code>. Quiet.md shows it as an ordinary code block and saves it unchanged; GitHub and Obsidian draw it as a diagram.</p></td></tr>
 </tbody></table>
 <h1>Type Markdown in any page</h1><p>In every page, Markdown or not, these markers format as you type. At the start of a line, type the marker followed by a space unless noted otherwise.</p>
 <table><colgroup><col width="310"/><col width="380"/></colgroup><tbody>

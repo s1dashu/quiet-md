@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="Une longue note ouverte dans Quiet.md, avec des titres, des formules en ligne et un tableau de concentrations ioniques.">
 </p>
 
-Titres, listes, tâches, citations, encadrés, colonnes, tableaux avec cellules fusionnées, code avec coloration syntaxique, formules LaTeX, images, fichiers et couvertures. Les raccourcis Markdown fonctionnent pendant la frappe, et le menu `/` propose tout le reste. Mentionnez une autre note pour y faire un lien ; elle affichera ses rétroliens. Les blocs de code Mermaid s'affichent en diagrammes. Les bases de données rangent des fiches avec des champs de choix, date, nombre, formule, recherche et lien, dans des vues que vous filtrez, triez et groupez ; chaque cellule d'une colonne Notes est une vraie note. Le menu … propose Mode concentration, Mode machine à écrire et Focus sur le paragraphe, et Présentation › Zoom avant agrandit le texte seul.
+Titres, listes, tâches, citations, encadrés, colonnes, tableaux avec cellules fusionnées, code avec coloration syntaxique, formules LaTeX, images, fichiers et couvertures. Les raccourcis Markdown fonctionnent pendant la frappe, et le menu `/` propose tout le reste. Mentionnez une autre note pour y faire un lien ; elle affichera ses rétroliens. Les bases de données rangent des fiches avec des champs de choix, date, nombre, formule, recherche et lien, dans des vues que vous filtrez, triez et groupez ; chaque cellule d'une colonne Notes est une vraie note. Le menu … propose Mode concentration, Mode machine à écrire et Focus sur le paragraphe, et Présentation › Zoom avant agrandit le texte seul.
 
 ### Dessiner
 

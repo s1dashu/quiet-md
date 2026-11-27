@@ -22,14 +22,3 @@ tags: [示例, markdown]
 def greet(name):
     return f"你好，{name}！"
 ```
-
-## 图表
-
-语言写成 `mermaid` 的代码块会画成图，和 GitHub、Obsidian 一样。文件里它仍是一个普通的代码块，在不画 Mermaid 的编辑器里显示为代码。
-
-```mermaid
-flowchart LR
-    A[用 Markdown 写] --> B{需要图吗？}
-    B -- 需要 --> C[加一个 mermaid 代码块]
-    B -- 不需要 --> D[继续写]
-```

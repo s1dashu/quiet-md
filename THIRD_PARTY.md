@@ -4,7 +4,7 @@ Quiet.md is distributed under the [MIT license](LICENSE). The following third-pa
 
 ## Rust dependencies
 
-This table lists 772 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
+This table lists 721 packages from `cargo metadata` and their declared licenses, including MPL-2.0. Consult each component's license text for its terms.
 
 Run `scripts/licences.sh` to regenerate the table from the full dependency list.
 
@@ -30,10 +30,8 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 |
 | android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 |
-| approx | 0.5.1 | Apache-2.0 |
 | arbitrary | 1.5.0 | MIT OR Apache-2.0 |
 | arg_enum_proc_macro | 0.3.4 | MIT |
-| arraydeque | 0.5.1 | MIT/Apache-2.0 |
 | arrayref | 0.3.9 | BSD-2-Clause |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |
 | as-raw-xcb-connection | 1.0.1 | MIT OR Apache-2.0 |
@@ -62,7 +60,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | avif-serialize | 0.8.9 | BSD-3-Clause |
 | backtrace | 0.3.77 | MIT OR Apache-2.0 |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
-| base64 | 0.23.1 | MIT OR Apache-2.0 |
 | bit-set | 0.10.0 | Apache-2.0 OR MIT |
 | bit-vec | 0.9.1 | Apache-2.0 OR MIT |
 | bit_field | 0.10.3 | Apache-2.0/MIT |
@@ -71,7 +68,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | bitstream-io | 4.10.0 | MIT/Apache-2.0 |
 | block | 0.1.6 | MIT |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 |
-| block-buffer | 0.12.1 | MIT OR Apache-2.0 |
 | block-padding | 0.3.3 | MIT OR Apache-2.0 |
 | block2 | 0.5.1 | MIT |
 | block2 | 0.6.2 | MIT |
@@ -80,7 +76,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | bon-macros | 3.10.2 | MIT OR Apache-2.0 |
 | built | 0.8.1 | MIT |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
-| by_address | 1.2.1 | MIT OR Apache-2.0 |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT |
 | bytemuck_derive | 1.12.1 | Zlib OR Apache-2.0 OR MIT |
 | byteorder | 1.5.0 | Unlicense OR MIT |
@@ -103,7 +98,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | color_quant | 1.1.0 | MIT |
 | concurrent-queue | 2.5.0 | Apache-2.0 OR MIT |
 | console_error_panic_hook | 0.1.7 | Apache-2.0/MIT |
-| const-oid | 0.10.3 | Apache-2.0 OR MIT |
 | const-random | 0.1.18 | MIT OR Apache-2.0 |
 | const-random-macro | 0.1.16 | MIT OR Apache-2.0 |
 | convert_case | 0.10.0 | MIT |
@@ -120,7 +114,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | core_maths | 0.1.1 | MIT |
 | cosmic-text | 0.19.0 | MIT OR Apache-2.0 |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
-| cpufeatures | 0.3.1 | MIT OR Apache-2.0 |
 | crc32fast | 1.5.2 | MIT OR Apache-2.0 |
 | crossbeam-channel | 0.5.17 | MIT OR Apache-2.0 |
 | crossbeam-deque | 0.8.8 | MIT OR Apache-2.0 |
@@ -128,21 +121,16 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | crossbeam-utils | 0.8.23 | MIT OR Apache-2.0 |
 | crunchy | 0.2.4 | MIT |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 |
-| crypto-common | 0.2.2 | MIT OR Apache-2.0 |
-| cssparser | 0.38.0 | MPL-2.0 |
-| cssparser-macros | 0.7.1 | MPL-2.0 |
 | ctor | 1.0.14 | Apache-2.0 OR MIT |
 | darling | 0.24.1 | MIT |
 | darling_core | 0.24.1 | MIT |
 | darling_macro | 0.24.1 | MIT |
-| data-encoding | 2.11.1 | MIT |
 | data-url | 0.3.2 | MIT OR Apache-2.0 |
 | deranged | 0.5.9 | MIT OR Apache-2.0 |
 | derive_more | 2.1.1 | MIT |
 | derive_more-impl | 2.1.1 | MIT |
 | derive_refineable | 0.1.0 | Apache-2.0 |
 | digest | 0.10.7 | MIT OR Apache-2.0 |
-| digest | 0.11.3 | MIT OR Apache-2.0 |
 | dirs | 5.0.1 | MIT OR Apache-2.0 |
 | dirs | 7.0.0 | MIT OR Apache-2.0 |
 | dirs-sys | 0.4.1 | MIT OR Apache-2.0 |
@@ -153,10 +141,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | dlib | 0.5.3 | MIT |
 | document-features | 0.2.12 | MIT OR Apache-2.0 |
 | downcast-rs | 1.2.1 | MIT/Apache-2.0 |
-| dtoa | 1.0.11 | MIT OR Apache-2.0 |
-| dtoa-short | 0.3.5 | MPL-2.0 |
-| dugong | 0.11.0 | MIT OR Apache-2.0 |
-| dugong-graphlib | 0.11.0 | MIT OR Apache-2.0 |
 | dunce | 1.0.5 | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | dwrote | 0.11.5 | MPL-2.0 |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 |
@@ -234,7 +218,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | gpui_web | 0.1.0 | Apache-2.0 |
 | gpui_wgpu | 0.1.0 | Apache-2.0 |
 | gpui_windows | 0.1.0 | Apache-2.0 |
-| granit-parser | 2.2.0 | MIT OR Apache-2.0 |
 | guillotiere | 0.7.0 | MIT/Apache-2.0 |
 | half | 2.7.1 | MIT OR Apache-2.0 |
 | harfrust | 0.5.2 | MIT |
@@ -251,12 +234,9 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | hkdf | 0.12.4 | MIT OR Apache-2.0 |
 | hmac | 0.12.1 | MIT OR Apache-2.0 |
 | html5ever | 0.27.0 | MIT OR Apache-2.0 |
-| html5ever | 0.40.1 | MIT OR Apache-2.0 |
-| htmlize | 1.1.0 | MIT OR Apache-2.0 |
 | http | 1.5.0 | MIT OR Apache-2.0 |
 | http-body | 1.1.0 | MIT |
 | http_client | 0.1.0 | Apache-2.0 |
-| hybrid-array | 0.4.15 | MIT OR Apache-2.0 |
 | iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
 | iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
 | icu_collections | 2.4.0 | Unicode-3.0 |
@@ -294,13 +274,11 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | jobserver | 0.1.35 | MIT OR Apache-2.0 |
 | jpeg-decoder | 0.3.2 | MIT OR Apache-2.0 |
 | js-sys | 0.3.106 | MIT OR Apache-2.0 |
-| json5 | 1.3.8 | MIT |
 | katex-rs | 0.3.0 | MIT |
 | khronos-egl | 6.0.0 | MIT/Apache-2.0 |
 | khronos_api | 3.1.0 | Apache-2.0 |
 | kurbo | 0.11.3 | Apache-2.0 OR MIT |
 | kurbo | 0.13.1 | Apache-2.0 OR MIT |
-| lalrpop-util | 0.23.2 | Apache-2.0 OR MIT |
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | lebe | 0.5.3 | BSD-3-Clause |
 | libc | 0.2.191 | MIT OR Apache-2.0 |
@@ -324,25 +302,13 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | mac-notification-sys | 0.6.15 | MIT/Apache-2.0 |
 | mach2 | 0.6.0 | BSD-2-Clause OR MIT OR Apache-2.0 |
 | malloc_buf | 0.0.6 | MIT |
-| manatee | 0.11.0 | MIT OR Apache-2.0 |
 | markup5ever | 0.12.1 | MIT OR Apache-2.0 |
-| markup5ever | 0.40.0 | MIT OR Apache-2.0 |
 | markup5ever_rcdom | 0.3.0 | MIT OR Apache-2.0 |
 | maybe-rayon | 0.1.1 | MIT |
 | md-5 | 0.10.6 | MIT OR Apache-2.0 |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memmap2 | 0.9.11 | MIT OR Apache-2.0 |
 | memoffset | 0.9.1 | MIT |
-| merman | 0.11.0 | MIT OR Apache-2.0 |
-| merman-analysis | 0.11.0 | MIT OR Apache-2.0 |
-| merman-ascii | 0.11.0 | MIT OR Apache-2.0 |
-| merman-core | 0.11.0 | MIT OR Apache-2.0 |
-| merman-editor-core | 0.11.0 | MIT OR Apache-2.0 |
-| merman-markup | 0.11.0 | MIT OR Apache-2.0 |
-| merman-model | 0.11.0 | MIT OR Apache-2.0 |
-| merman-render | 0.11.0 | MIT OR Apache-2.0 |
-| merman-theme-contract | 0.11.0 | MIT OR Apache-2.0 |
-| merman-unicode-linebreak | 0.11.0 | Apache-2.0 |
 | minisign-verify | 0.3.0 | MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
@@ -403,9 +369,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | ordered-channel | 1.2.0 | MIT OR Apache-2.0 |
 | ordered-float | 5.5.1 | MIT |
 | ordered-stream | 0.2.0 | MIT OR Apache-2.0 |
-| palette | 0.7.7 | MIT OR Apache-2.0 |
-| palette_derive | 0.7.7 | MIT OR Apache-2.0 |
-| palette_math | 0.7.7 | MIT OR Apache-2.0 |
 | parking | 2.2.1 | Apache-2.0 OR MIT |
 | parking_lot | 0.12.5 | MIT OR Apache-2.0 |
 | parking_lot_core | 0.9.12 | MIT OR Apache-2.0 |
@@ -420,7 +383,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | phf | 0.13.1 | MIT |
 | phf | 0.14.0 | MIT |
 | phf_codegen | 0.11.3 | MIT |
-| phf_codegen | 0.13.1 | MIT |
 | phf_codegen | 0.14.0 | MIT |
 | phf_generator | 0.11.3 | MIT |
 | phf_generator | 0.13.1 | MIT |
@@ -453,7 +415,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | proc-macro2 | 1.0.107 | MIT OR Apache-2.0 |
 | profiling | 1.0.18 | MIT OR Apache-2.0 |
 | profiling-procmacros | 1.0.18 | MIT OR Apache-2.0 |
-| pulldown-cmark | 0.13.6 | MIT |
 | pulp | 0.22.3 | MIT |
 | pulp-wasm-simd-flag | 0.1.1 | MIT |
 | pxfm | 0.1.30 | BSD-3-Clause OR Apache-2.0 |
@@ -461,7 +422,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | quick-error | 2.0.1 | MIT/Apache-2.0 |
 | quick-xml | 0.37.5 | MIT |
 | quick-xml | 0.41.0 | MIT |
-| quick-xml | 0.42.0 | MIT |
 | quote | 1.0.47 | MIT OR Apache-2.0 |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
@@ -498,7 +458,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | resvg | 0.45.1 | Apache-2.0 OR MIT |
 | resvg | 0.46.0 | Apache-2.0 OR MIT |
 | rgb | 0.8.53 | MIT |
-| roughr-merman | 0.12.6 | MIT |
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | roxmltree | 0.21.2 | MIT OR Apache-2.0 |
 | rquickjs | 0.14.0 | MIT |
@@ -514,7 +473,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | rustybuzz | 0.20.1 | MIT |
 | ryu | 1.0.23 | Apache-2.0 OR BSL-1.0 |
-| ryu-js | 1.0.4 | Apache-2.0 OR BSL-1.0 |
 | same-file | 1.0.6 | Unlicense/MIT |
 | scheduler | 0.1.0 | Apache-2.0 |
 | schemars | 1.2.3 | MIT |
@@ -532,14 +490,12 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 |
 | serde_derive_internals | 0.30.0 | MIT OR Apache-2.0 |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 |
-| serde_json_canonicalizer | 0.4.1 | MIT |
 | serde_repr | 0.1.21 | MIT OR Apache-2.0 |
 | serde_spanned | 0.6.9 | MIT OR Apache-2.0 |
 | serde_spanned | 1.1.2 | MIT OR Apache-2.0 |
 | serde_urlencoded | 0.7.1 | MIT/Apache-2.0 |
 | sha1_smol | 1.0.1 | BSD-3-Clause |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 |
-| sha2 | 0.11.2 | MIT OR Apache-2.0 |
 | shlex | 2.0.1 | MIT OR Apache-2.0 |
 | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 |
 | simd-adler32 | 0.3.10 | MIT |
@@ -563,9 +519,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
 | string_cache | 0.8.9 | MIT OR Apache-2.0 |
-| string_cache | 0.11.0 | MIT OR Apache-2.0 |
 | string_cache_codegen | 0.5.4 | MIT OR Apache-2.0 |
-| string_cache_codegen | 0.11.2 | MIT OR Apache-2.0 |
 | strsim | 0.11.1 | MIT |
 | strum | 0.28.0 | MIT |
 | strum_macros | 0.28.0 | MIT |
@@ -585,7 +539,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | tauri-winrt-notification | 0.8.1 | MIT OR Apache-2.0 |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 |
 | tendril | 0.4.3 | MIT/Apache-2.0 |
-| tendril | 0.5.1 | MIT OR Apache-2.0 |
 | termcolor | 1.4.1 | Unlicense OR MIT |
 | thiserror | 1.0.69 | MIT OR Apache-2.0 |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 |
@@ -615,9 +568,7 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | tracing-core | 0.1.36 | MIT |
 | ttf-parser | 0.25.1 | MIT OR Apache-2.0 |
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
-| ucd-trie | 0.1.8 | MIT OR Apache-2.0 |
 | uds_windows | 1.2.1 | MIT |
-| unicase | 2.10.0 | MIT OR Apache-2.0 |
 | unicode-bidi | 0.3.18 | MIT OR Apache-2.0 |
 | unicode-bidi-mirroring | 0.4.0 | MIT/Apache-2.0 |
 | unicode-ccc | 0.4.0 | MIT/Apache-2.0 |
@@ -662,7 +613,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | wayland-sys | 0.31.11 | MIT |
 | web-sys | 0.3.106 | MIT OR Apache-2.0 |
 | web-time | 1.1.0 | MIT OR Apache-2.0 |
-| web_atoms | 0.3.0 | MIT OR Apache-2.0 |
 | webview2-com | 0.38.2 | MIT |
 | webview2-com-macros | 0.8.1 | MIT |
 | webview2-com-sys | 0.38.2 | MIT |
@@ -740,7 +690,6 @@ GPUI and its Zed dependencies (the `gpui*`, `collections`, `refineable`, `derive
 | x11rb-protocol | 0.13.2 | MIT OR Apache-2.0 |
 | xcb | 1.7.1 | MIT |
 | xcursor | 0.3.11 | MIT |
-| xim-ctext | 0.3.0 | MIT |
 | xim-parser | 0.2.2 | MIT |
 | xkbcommon | 0.8.0 | MIT |
 | xkeysym | 0.2.1 | MIT OR Apache-2.0 OR Zlib |
@@ -830,18 +779,6 @@ SOFTWARE.
 ```
 
 rough.js, hachure-fill, points-on-curve, points-on-path, path-data-parser, perfect-freehand and nanoid use the same MIT terms. Copyright holders are listed in the table.
-
-## Mermaid renderer
-
-Mermaid code blocks are drawn by [merman](https://github.com/Latias94/merman) 0.11.0 (MIT OR Apache-2.0; `merman*` packages in the table above), a Rust implementation of [Mermaid](https://github.com/mermaid-js/mermaid). It is built without its default features, so the Eclipse Layout Kernel port (EPL-2.0) is not included. merman's renderer ports code and behaviour from the projects below; their license texts ship in each `merman*` crate's `THIRD_PARTY_LICENSES` directory, listed in its `THIRD_PARTY_NOTICES.md`.
-
-| License | Projects |
-|---|---|
-| MIT | Mermaid, Dagre, Graphlib, Cytoscape.js, cytoscape.js-cose-bilkent, cytoscape.js-fcose, cose-base, layout-base, non-layered-tidy-tree-layout, Rough.js, rough-rs, sanitize-url, @upsetjs/venn.js, ZenUML Core |
-| ISC | d3-hierarchy, d3-path, d3-shape, ego-tree (in roxmltree) |
-| BSD-3-Clause | d3-sankey, fmin |
-| Apache-2.0 | unicode-linebreak |
-| Apache-2.0 OR MPL-2.0 | DOMPurify |
 
 ## Windows runtime
 

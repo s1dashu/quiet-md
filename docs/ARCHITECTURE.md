@@ -150,7 +150,6 @@ Whiteboard and history modules in core:
 | `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card`, `toast` (each window's stack of toasts) the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据库) |
 | `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints and single-line input |
 | `highlight.rs` | Code highlighting |
-| `mermaid.rs` | Mermaid code blocks drawn as diagrams: merman (pure Rust) writes the SVG on a background thread, coloured from the Theme tokens, text measured by GPUI's resvg; cached in memory by source and theme |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |

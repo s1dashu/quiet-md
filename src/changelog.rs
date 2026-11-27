@@ -27,7 +27,7 @@ const NOTES: &[(&str, &[(&str, &str)])] = &[
         ("回收站可以设置几天后自动删除", "Choose how many days the Trash keeps deleted pages"),
         ("页面和文件夹可以移到另一个顶层文件夹；收藏并入置顶", "Move pages and folders into another top-level folder; Favorites fold into Pinned"),
         ("Windows 和 Linux 上粘贴保留格式；快捷键可以清除", "Pasting keeps formatting on Windows and Linux; any shortcut can be cleared"),
-        ("导入思源笔记；子文档、Mermaid 图表、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Mermaid diagrams, Keep Window on Top, spaces between Chinese and English"),
+        ("导入思源笔记；子文档、窗口保持在最前、中英文自动空格", "Import from SiYuan; child pages, Keep Window on Top, spaces between Chinese and English"),
     ]),
     ("0.1.14", &[
         ("查找替换支持正则表达式", "Find and replace supports regular expressions"),

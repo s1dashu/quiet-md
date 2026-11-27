@@ -57,7 +57,7 @@
   <img src="docs/images/readme-write.webp" width="100%" alt="A long note open in Quiet.md, with headings, inline math and a table of ion concentrations.">
 </p>
 
-Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Mermaid code blocks draw as diagrams. Databases keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
+Headings, lists, to-dos, quotes, callouts, columns, tables with merged cells, code with syntax highlighting, LaTeX math, images, files and covers. Markdown shortcuts work as you type, and the `/` menu has everything else. Mention another note to link it; the other note lists its backlinks. Databases keep records with select, date, number, formula, lookup and link fields, in views you filter, sort and group; each cell of a Notes column is a real note. The … menu has Focus Mode, Typewriter Mode and Paragraph Focus, and View › Zoom In enlarges the text alone.
 
 ### Draw
 
