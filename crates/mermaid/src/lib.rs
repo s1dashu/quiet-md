@@ -1,6 +1,7 @@
 //! Mermaid diagrams drawn as SVG, written for Quiet.md instead of a port of
 //! mermaid.js: flowcharts (`graph` / `flowchart`), state diagrams (read into
-//! the flowchart model), sequence diagrams and pie charts,
+//! the flowchart model, as are class diagrams), sequence diagrams and pie
+//! charts,
 //! parsed here, laid out in layers (flowcharts, `layout.rs`) or in lanes
 //! (sequence diagrams) and written as plain SVG that resvg draws: no CSS, no
 //! foreignObject, no markers. Colours come from the host (`Palette`) and text
@@ -8,6 +9,7 @@
 //! SVG names. Anything not understood is an `Error` with its line, never a
 //! panic (the app is built with `panic = "abort"`).
 
+mod class;
 mod flow;
 mod layout;
 mod pie;
@@ -106,6 +108,7 @@ pub enum Kind {
     Sequence,
     State,
     Pie,
+    Class,
 }
 
 /// A source line: its 1-based number and its text, trimmed.
@@ -156,6 +159,7 @@ pub fn kind(src: &str) -> Option<Kind> {
         "sequenceDiagram" => Some(Kind::Sequence),
         "stateDiagram" | "stateDiagram-v2" => Some(Kind::State),
         "pie" => Some(Kind::Pie),
+        "classDiagram" | "classDiagram-v2" => Some(Kind::Class),
         _ => None,
     }
 }
@@ -169,6 +173,7 @@ pub fn render(src: &str, style: &Style, m: &dyn Measure) -> Result<Svg, Error> {
         Some(Kind::Sequence) => seq::render(&lines, title, style, m),
         Some(Kind::State) => state::render(&lines, title, style, m),
         Some(Kind::Pie) => pie::render(&lines, title, style, m),
+        Some(Kind::Class) => class::render(&lines, title, style, m),
         None => {
             let word = first.text.split(|c: char| c.is_whitespace() || c == ';' || c == ':').next().unwrap_or("");
             err(first.no, format!("“{word}” diagrams aren't supported yet"))

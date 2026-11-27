@@ -1,0 +1,29 @@
+classDiagram
+    direction TB
+    note "领域模型"
+    class Customer {
+        +String name
+        +String email
+        +orders() List~Order~
+    }
+    class Order {
+        <<entity>>
+        +String id
+        +total()$ Money
+    }
+    class Payment {
+        <<interface>>
+        +authorise() bool
+    }
+    namespace 库存 {
+        class Item
+        class Stock~T~
+    }
+    Customer "1" --> "*" Order : places
+    Order "1" *-- "1..*" Item : contains
+    Order ..> Payment : settled by
+    Stock~T~ o-- Item
+    Payment <|.. CardPayment
+    note for Payment "可换实现"
+    classDef hot fill:#f96
+    class CardPayment:::hot

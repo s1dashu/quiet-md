@@ -97,6 +97,11 @@ impl Doc {
                 self.path(&format!("M{},{} L{},{} L{},{}", n(a.0), n(a.1), n(tip.0), n(tip.1), n(b.0), n(b.1)), &Paint { extra: " stroke-linejoin=\"round\" stroke-linecap=\"round\"".into(), ..Paint::new("none", color, 1.5) });
             }
             Head::Circle => { let c = back(len * 0.45, 0.); self.circle(c.0, c.1, len * 0.4, &Paint::new(color, color, 1.)); }
+            Head::Triangle => self.polygon(&[tip, back(len * 1.2, len * 0.55), back(len * 1.2, -len * 0.55)], &Paint::new("none", color, 1.2)),
+            Head::Diamond | Head::FilledDiamond => {
+                let fill = if head == Head::Diamond { "none" } else { color };
+                self.polygon(&[tip, back(len * 0.9, len * 0.45), back(len * 1.8, 0.), back(len * 0.9, -len * 0.45)], &Paint::new(fill, color, 1.2));
+            }
             Head::Cross => {
                 let c = back(len * 0.5, 0.);
                 let r = len * 0.38;
@@ -121,7 +126,11 @@ impl Doc {
 pub enum Anchor { Start, Middle }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Head { None, Arrow, Open, Circle, Cross }
+pub enum Head {
+    None, Arrow, Open, Circle, Cross,
+    // class diagrams: inheritance / realization, aggregation, composition
+    Triangle, Diamond, FilledDiamond,
+}
 
 /// A smooth path through `pts` (d3's `curveBasis`, the curve Mermaid draws
 /// edges with): it starts and ends on the end points.

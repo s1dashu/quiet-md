@@ -230,11 +230,11 @@ pub fn parse(lines: &[Line]) -> Result<Flow, Error> {
         }
         end_of.push(Some(End::Node(f.nodes.len())));
         let label = match st.shape { Shape::Round if st.desc.is_empty() => st.id.clone(), Shape::Round | Shape::Rect => st.desc.join("\n"), _ => String::new() };
-        f.nodes.push(Node { id: st.id, label, shape: st.shape, classes: st.classes, style: Vec::new(), sub: st.sub });
+        f.nodes.push(Node { id: st.id, label, shape: st.shape, classes: st.classes, style: Vec::new(), sub: st.sub, members: None });
     }
     for (a, b, label, dotted) in p.links {
         let (Some(Some(from)), Some(Some(to))) = (end_of.get(a).copied(), end_of.get(b).copied()) else { continue };
-        f.links.push(Link { from, to, label, stroke: if dotted { Stroke::Dotted } else { Stroke::Normal }, start: Head::None, end: if dotted { Head::None } else { Head::Arrow }, len: 1, style: Vec::new() });
+        f.links.push(Link { from, to, label, stroke: if dotted { Stroke::Dotted } else { Stroke::Normal }, start: Head::None, end: if dotted { Head::None } else { Head::Arrow }, len: 1, style: Vec::new(), ends: Default::default() });
     }
     Ok(f)
 }

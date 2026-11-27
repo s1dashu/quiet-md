@@ -17,6 +17,16 @@ pub enum Shape {
     // Mermaid 11's `@{ shape: … }` set
     Doc, Docs, LinDoc, TagDoc, Delay, HCyl, LinCyl, CurvTrap, DivRect, Tri, FlipTri, Fork, WinPane, Dot, FDot, FrDot,
     LinRect, NotchPent, SlRect, StRect, Flag, BowRect, CrossCirc, TagRect, NotchRect, Hourglass, Bolt, Text, BraceL, BraceR, Braces, Datastore,
+    /// A class diagram's class: name, then attributes and methods (`Node::members`).
+    Class,
+}
+
+/// A class's box: annotations over its name, attributes, methods.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Members {
+    pub notes: Vec<String>,
+    pub attrs: Vec<String>,
+    pub methods: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -33,6 +43,8 @@ pub struct Node {
     pub style: Vec<(String, String)>,
     /// The innermost subgraph it was mentioned in.
     pub sub: Option<usize>,
+    /// (`Shape::Class` only)
+    pub members: Option<Box<Members>>,
 }
 
 /// A link end: a node, or a subgraph by its id.
@@ -49,6 +61,8 @@ pub struct Link {
     pub end: Head,
     pub len: usize,
     pub style: Vec<(String, String)>,
+    /// Text by the start and by the end (a class diagram's multiplicities).
+    pub ends: [String; 2],
 }
 
 #[derive(Clone, Debug)]
@@ -207,7 +221,7 @@ impl Parser {
             return i;
         }
         self.ids.insert(id.to_string(), self.f.nodes.len());
-        self.f.nodes.push(Node { id: id.to_string(), label: id.to_string(), shape: Shape::Rect, classes: Vec::new(), style: Vec::new(), sub: here });
+        self.f.nodes.push(Node { id: id.to_string(), label: id.to_string(), shape: Shape::Rect, classes: Vec::new(), style: Vec::new(), sub: here, members: None });
         self.f.nodes.len() - 1
     }
 
@@ -406,7 +420,7 @@ impl Parser {
             let right = self.group(c)?;
             for &a in &left {
                 for &b in &right {
-                    self.f.links.push(Link { from: a, to: b, label: spec.label.clone(), stroke: spec.stroke, start: spec.start, end: spec.end, len: spec.len, style: Vec::new() });
+                    self.f.links.push(Link { from: a, to: b, label: spec.label.clone(), stroke: spec.stroke, start: spec.start, end: spec.end, len: spec.len, style: Vec::new(), ends: Default::default() });
                 }
             }
             left = right;
@@ -599,7 +613,7 @@ fn size(shape: Shape, t: &Block) -> (f32, f32) {
         Shape::Bolt => (24., 36.),
         Shape::SlRect => (w, h + 10.),
         Shape::Flag => (w, h * 1.3),
-        Shape::TagRect | Shape::NotchRect | Shape::Text | Shape::Datastore => (w, h),
+        Shape::TagRect | Shape::NotchRect | Shape::Text | Shape::Datastore | Shape::Class => (w, h),
         // a small hourglass with its label under it
         Shape::Hourglass => (tw.max(30.), 34. + th),
         Shape::BraceL | Shape::BraceR => (w + 10., h),
@@ -711,7 +725,12 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
     }).collect();
     let blocks: Vec<Block> = f.nodes.iter().zip(&node_look).map(|(nd, lk)| Block::new(&nd.label, WRAP, fs, lk.bold, m)).collect();
     // (a fork bar lies across the flow)
-    let sizes: Vec<(f32, f32)> = f.nodes.iter().zip(&blocks).map(|(nd, b)| { let (w, h) = size(nd.shape, b); if horizontal && nd.shape == Shape::Fork { (h, w) } else { (w, h) } }).collect();
+    let boxes: Vec<Option<ClassBox>> = f.nodes.iter().map(|nd| nd.members.as_deref().map(|mb| ClassBox::new(&nd.label, mb, fs, m))).collect();
+    let sizes: Vec<(f32, f32)> = f.nodes.iter().zip(&blocks).zip(&boxes).map(|((nd, b), cb)| {
+        if let Some(cb) = cb { return (cb.w, cb.h) }
+        let (w, h) = size(nd.shape, b);
+        if horizontal && nd.shape == Shape::Fork { (h, w) } else { (w, h) }
+    }).collect();
     let link_blocks: Vec<Block> = f.links.iter().map(|l| Block::new(&l.label, WRAP, fs, false, m)).collect();
     let sub_blocks: Vec<Block> = f.subs.iter().map(|s| Block::new(&s.title, 0., fs, false, m)).collect();
     let swap = |(w, h): (f32, f32)| if horizontal { (h, w) } else { (w, h) };
@@ -817,6 +836,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
 
     // edges, then their labels over them
     let mut labels: Vec<(usize, (f32, f32))> = Vec::new();
+    let mut end_labels: Vec<(Block, (f32, f32))> = Vec::new();
     for (i, l) in f.links.iter().enumerate() {
         let Some(e) = edge_of[i] else { continue };
         let mut pts: Vec<(f32, f32)> = o.edges.get(e).map(|p| p.iter().map(|&q| tf(q)).collect()).unwrap_or_default();
@@ -835,6 +855,15 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
             pts[0] = clip(&poly(l.from), pts[0], pts[1]);
             pts[n0 - 1] = clip(&poly(l.to), pts[n0 - 1], pts[n0 - 2]);
         }
+        // multiplicities: just past each end, to one side of the line
+        for (k, t) in l.ends.iter().enumerate() {
+            if t.is_empty() { continue }
+            let (a, b) = if k == 0 { (pts[0], pts[1]) } else { (pts[pts.len() - 1], pts[pts.len() - 2]) };
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let len = (dx * dx + dy * dy).sqrt().max(1e-3);
+            let (ux, uy) = (dx / len, dy / len);
+            end_labels.push((Block::new(t, 0., fs * 0.86, false, m), (a.0 + ux * 22. - uy * 12., a.1 + uy * 22. + ux * 12.)));
+        }
         let mut lk = look(&[&f.default_link, &l.style]);
         if lk.dash.is_none() && l.stroke == Stroke::Dotted { lk.dash = Some("3 3".into()); }
         let color = lk.stroke.clone().unwrap_or_else(|| col.line.clone());
@@ -851,7 +880,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
             if len < 1e-3 { continue }
             let dir = (dx / len, dy / len);
             heads.push((tip, dir, h));
-            let back = match h { Head::Arrow => head_len * 0.8, Head::Circle => head_len * 0.85, _ => 0. }.min(len * 0.9);
+            let back = match h { Head::Arrow => head_len * 0.8, Head::Circle => head_len * 0.85, Head::Triangle => head_len * 1.2, Head::Diamond | Head::FilledDiamond => head_len * 1.8, _ => 0. }.min(len * 0.9);
             pts[at] = (tip.0 - dir.0 * back, tip.1 - dir.1 * back);
         }
         let mut p = Paint::new("none", &color, width);
@@ -859,6 +888,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
         doc.path(&svg::basis(&pts), &p);
         for (tip, dir, h) in heads { doc.head(tip, dir, h, head_len, &color); }
     }
+    for (b, (x, y)) in &end_labels { doc.text(b, *x, *y, Anchor::Middle, &col.text); }
     for (i, (cx, cy)) in labels {
         let b = &link_blocks[i];
         let lk = look(&[&f.default_link, &f.links[i].style]);
@@ -874,6 +904,7 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
         let mut p = Paint::new(lk.fill.as_deref().unwrap_or(&col.node_fill), lk.stroke.as_deref().unwrap_or(&col.node_border), lk.width.unwrap_or(1.));
         p.dash = lk.dash.clone();
         let (l, t) = (cx - w / 2., cy - h / 2.);
+        if let Some(cb) = &boxes[i] { cb.draw(&mut doc, l, t, &p, lk.color.as_deref().unwrap_or(&col.text)); continue }
         match nd.shape {
             Shape::Rect => doc.rect(l, t, w, h, 0., &p),
             Shape::Round => doc.rect(l, t, w, h, 6., &p),
@@ -956,6 +987,38 @@ pub(crate) fn draw(f: &Flow, title: Option<String>, style: &Style, m: &dyn Measu
         }
     }
     Ok(Svg { svg: doc.finish(width, height, ""), width, height })
+}
+
+/// A class's box laid out: its compartments' text and size.
+struct ClassBox { notes: Block, name: Block, attrs: Block, methods: Block, w: f32, h: f32 }
+
+impl ClassBox {
+    const PAD: f32 = 10.;
+    fn new(name: &str, mb: &Members, fs: f32, m: &dyn Measure) -> ClassBox {
+        let notes = Block::new(&mb.notes.iter().map(|a| format!("«{a}»")).collect::<Vec<_>>().join("\n"), 0., fs * 0.9, false, m);
+        let name = Block::new(name, 0., fs, true, m);
+        let attrs = Block::new(&mb.attrs.join("\n"), 0., fs * 0.93, false, m);
+        let methods = Block::new(&mb.methods.join("\n"), 0., fs * 0.93, false, m);
+        let w = [notes.w, name.w, attrs.w, methods.w].into_iter().fold(60., f32::max) + 2. * ClassBox::PAD + 8.;
+        let part = |b: &Block| if b.is_empty() { 12. } else { b.h + ClassBox::PAD };
+        let h = notes.h + name.h + 2. * ClassBox::PAD - 4. + part(&attrs) + part(&methods);
+        ClassBox { notes, name, attrs, methods, w, h }
+    }
+    fn draw(&self, doc: &mut Doc, l: f32, t: f32, p: &Paint, color: &str) {
+        doc.rect(l, t, self.w, self.h, 0., p);
+        let q = Paint::new("none", &p.stroke, p.width);
+        let mut y = t + ClassBox::PAD - 2.;
+        doc.text(&self.notes, l + self.w / 2., y + self.notes.h / 2., Anchor::Middle, color);
+        y += self.notes.h;
+        doc.text(&self.name, l + self.w / 2., y + self.name.h / 2., Anchor::Middle, color);
+        y += self.name.h + ClassBox::PAD - 2.;
+        for b in [&self.attrs, &self.methods] {
+            doc.line((l, y), (l + self.w, y), &q);
+            let hh = if b.is_empty() { 12. } else { b.h + ClassBox::PAD };
+            doc.text(b, l + ClassBox::PAD, y + hh / 2., Anchor::Start, color);
+            y += hh;
+        }
+    }
 }
 
 fn inside(r: Rect, p: (f32, f32)) -> bool { p.0 > r.x && p.0 < r.x + r.w && p.1 > r.y && p.1 < r.y + r.h }
