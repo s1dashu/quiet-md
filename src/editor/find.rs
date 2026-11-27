@@ -112,6 +112,8 @@ pub fn first_body_hit(core: &Core, q: &str) -> Option<(BlockId, Range<usize>)> {
     core.units().iter().filter(|u| u.text && u.id != TITLE).find_map(|u| Some((u.id, find_in(core.text_of(u.id)?, q).into_iter().next()?)))
 }
 
+/// The panel's width, and its buttons'; both grow with a longer label (#487: French
+/// “Occurrence précédente”, English “Previous match” overran 80).
 const BOX_W: f32 = 404.;
 const BTN_W: f32 = 80.;
 
@@ -411,7 +413,7 @@ impl Editor {
         let enabled = n > 0;
         // Primary or outline, small; disabled with nothing found.
         let button = |id: &'static str, text: &'static str, primary: bool| {
-            Button::new(id, if primary { ButtonVariant::Primary } else { ButtonVariant::Outline }).sized(ButtonSize::Sm).w(px(BTN_W)).disabled(!enabled).label(text)
+            Button::new(id, if primary { ButtonVariant::Primary } else { ButtonVariant::Outline }).sized(ButtonSize::Sm).min_w(px(BTN_W)).disabled(!enabled).label(text)
         };
         let prev = button("find-prev", crate::settings::text("上一处"), false)
             .tip_label("Shift + Enter".into(), TipSide::Above)
@@ -466,7 +468,7 @@ impl Editor {
             .absolute()
             .top(px(8.))
             .right(px(16.))
-            .w(px(BOX_W))
+            .min_w(px(BOX_W))
             .cursor(CursorStyle::Arrow)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
