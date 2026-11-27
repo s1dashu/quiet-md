@@ -140,6 +140,14 @@ pub fn pending(path: &Path) -> bool {
     #[cfg(not(target_family = "wasm"))] { let _ = path; false }
 }
 
+/// Whether `path` is a lazy file not fetched yet (web build), without starting
+/// the fetch: a file that will be there once something shows it. Always false
+/// on the desktop.
+pub fn lazy(path: &Path) -> bool {
+    #[cfg(target_family = "wasm")] { mem::lazy(path) }
+    #[cfg(not(target_family = "wasm"))] { let _ = path; false }
+}
+
 #[cfg(target_family = "wasm")]
 pub use mem::{add_lazy, set_fetcher};
 
@@ -234,6 +242,7 @@ mod mem {
         if let (Some(url), Some(fetch)) = (start, *FETCHER.lock().unwrap()) { fetch(p, url) }
         true
     }
+    pub(super) fn lazy(p: &Path) -> bool { LAZY.lock().unwrap().contains_key(&norm(p)) }
     fn arrived(p: &Path) { LAZY.lock().unwrap().remove(p); }
 
     pub fn metadata<P: AsRef<Path>>(p: P) -> io::Result<Metadata> {

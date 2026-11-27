@@ -16,7 +16,7 @@ cd "$repo"
 # FAST=1: the everyday release profile and no wasm-opt, for quick rebuilds.
 profile=${FAST:+release}; profile=${profile:-web}
 cargo build --profile $profile --target wasm32-unknown-unknown --bin quiet_md
-"$wb" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/$profile/quiet_md.wasm
+"$wb" --target web --no-typescript --out-dir "$out" "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/$profile/quiet_md.wasm"
 if [ -z "$FAST" ] && command -v wasm-opt > /dev/null; then
   wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-reference-types \
     "$out/quiet_md_bg.wasm" -o "$out/quiet_md_bg.wasm.opt" && mv "$out/quiet_md_bg.wasm.opt" "$out/quiet_md_bg.wasm"

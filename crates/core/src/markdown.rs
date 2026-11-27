@@ -347,7 +347,7 @@ pub fn resolve_present(blocks: &mut [Block], dir: &Path) {
         let BlockKind::Image { src, .. } = &mut b.kind else { continue };
         if src.contains("://") || src.starts_with("data:") || Path::new(src.as_str()).fs_is_absolute() { continue }
         let path = crate::paths::lexical(&dir.join(percent_decode(src)));
-        if path.fs_is_file() { *src = path.to_string_lossy().into_owned(); }
+        if path.fs_is_file() || crate::vfs::lazy(&path) { *src = path.to_string_lossy().into_owned(); }
     }
 }
 

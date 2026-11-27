@@ -8,7 +8,8 @@
 use crate::app::{HEADER_H, Workspace};
 use crate::ui::{TipExt, TitleBarExt};
 use gpui::{prelude::FluentBuilder, *};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 actions!(workspace, [ToggleFocus]);
 

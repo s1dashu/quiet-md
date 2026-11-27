@@ -1547,7 +1547,8 @@ impl Editor {
             opened: now,
             closing: None,
             chrome: false,
-            chrome_t: now - Duration::from_secs(1),
+            // a second ago, or the start of a browser's clock (it starts at 0)
+            chrome_t: now.checked_sub(Duration::from_secs(1)).unwrap_or(now),
             last_move: now,
             press: None,
             moved: false,

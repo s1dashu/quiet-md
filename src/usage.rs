@@ -65,7 +65,7 @@ fn today() -> String {
 }
 
 /// When an open was last counted: coming back within half an hour is the same use.
-static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+static LAST: std::sync::Mutex<Option<web_time::Instant>> = std::sync::Mutex::new(None);
 
 /// Quiet.md was launched or came to the front: one more open today, unless
 /// it was counted less than half an hour ago.
@@ -74,7 +74,7 @@ pub fn opened() {
     {
         let mut last = LAST.lock().unwrap();
         if last.is_some_and(|t| t.elapsed() < Duration::from_secs(1800)) { return }
-        *last = Some(std::time::Instant::now());
+        *last = Some(web_time::Instant::now());
     }
     let mut v = read();
     let o = v.as_object_mut().unwrap();

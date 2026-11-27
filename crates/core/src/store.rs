@@ -3802,6 +3802,9 @@ impl Store {
         crate::versions::snapshot_bytes(&self.history_base(), id, "sqlite", &bytes, crate::time::now_ms(), self.settings().history_limit(), force)?;
         Ok(self.versions(id).first().map(|v| v.name.clone()) != before)
     }
+    /// The web build has no 数据表 (no SQLite).
+    #[cfg(target_family = "wasm")]
+    pub fn snapshot_table(&self, _id: &str, _force: bool) -> Result<bool> { anyhow::bail!("数据表 isn't available here") }
 
     /// The text a version's changes are counted on: a 数据表's rows as lines.
     fn version_body(&self, id: &str, name: Option<&str>) -> Result<String> {

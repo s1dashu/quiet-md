@@ -175,11 +175,12 @@ pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &
 }
 
 /// Everything that needs the library, then the main window.
-fn start(existed: bool, scripted: bool, opening: std::thread::JoinHandle<fdl_core::top_folders::TopFolders>, incoming: local_files::Incoming, cx: &mut App) {
+/// `opening` hands over the top-level folders: the desktop's waits for its thread.
+fn start(existed: bool, scripted: bool, opening: impl FnOnce() -> fdl_core::top_folders::TopFolders, incoming: local_files::Incoming, cx: &mut App) {
     changelog::startup(existed);
     shortcuts::init(cx);
     // No top-level folder is fatal: one that can't be opened shows as such in the sidebar.
-    let tops = opening.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+    let tops = opening();
     cx.set_global(shared_store::SharedStore::with_top_folders(tops));
     let mut moved = vec![];
     cx.global::<shared_store::SharedStore>().each(|s| moved.extend(s.migrated.take()));
@@ -280,7 +281,7 @@ fn main() {
         set_app_icon();
         init_app(cx);
         let quick_enabled = !scripted;
-        start(existed, scripted, opening, incoming, cx);
+        start(existed, scripted, move || opening.join().unwrap_or_else(|e| std::panic::resume_unwind(e)), incoming, cx);
         cx.on_window_closed(move |cx, _| {
             if (!quick_enabled || !cfg!(target_os = "macos")) && cx.windows().is_empty() {
                 cx.quit();

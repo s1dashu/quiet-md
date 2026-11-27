@@ -3,9 +3,10 @@
 
 A bundle is a run of [u32 LE path length][path][u32 LE data length][data], paths
 relative to the library and joined with '/'. src/web.rs unpacks it into memory.
-Pictures (.assets/) stay out of the bundle: they are copied next to it, into
+Pictures stay out of the bundle (all of .assets/, and any other picture, e.g. a
+vault's .attachments/ that Markdown links to): they are copied next to it, into
 <out without .qmdb>/, and listed in the bundle's .web/lazy, so the page fetches
-each one when it is first shown (shrink them before importing: web/README.md). Absolute
+each one when it is first shown (shrink them first: web/README.md). Absolute
 paths into the library (an import writes them) become library-relative. The
 bundle itself is `QMZ1` + zlib: a static host serves .qmdb uncompressed.
 
@@ -16,6 +17,7 @@ import io, os, shutil, struct, sys, zlib
 root, out = os.path.abspath(sys.argv[1]), sys.argv[2]
 lazy_dir = out[:-len('.qmdb')] if out.endswith('.qmdb') else out + '.files'
 SKIP = {'.DS_Store'}
+PICTURES = ('.jpg', '.jpeg', '.png', '.gif', '.webp')
 prefixes = {root + '/', os.path.realpath(root) + '/'}
 n = size = 0
 lazy = []
@@ -33,7 +35,7 @@ for dirpath, dirs, files in os.walk(root):
         path = os.path.join(dirpath, name)
         rel = os.path.relpath(path, root).replace(os.sep, '/')
         data = open(path, 'rb').read()
-        if rel.startswith('.assets/'):
+        if rel.startswith('.assets/') or name.lower().endswith(PICTURES):
             os.makedirs(os.path.dirname(os.path.join(lazy_dir, rel)), exist_ok=True)
             shutil.copyfile(path, os.path.join(lazy_dir, rel))
             lazy.append(rel)

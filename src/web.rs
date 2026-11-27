@@ -119,7 +119,7 @@ fn run(fonts: Vec<Cow<'static, [u8]>>) {
     app.run(move |cx: &mut App| {
         if let Err(e) = cx.text_system().add_fonts(fonts) { log::warn!("fonts: {e}") }
         init_app(cx);
-        start(true, false, None, local_files::Incoming::default(), cx);
+        start(true, false, fdl_core::top_folders::TopFolders::load, local_files::Incoming::default(), cx);
         cx.spawn(async |cx| loop {
             cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
             if ARRIVED.swap(false, std::sync::atomic::Ordering::Relaxed) { cx.update(|cx| cx.refresh_windows()) }

@@ -83,6 +83,8 @@ pub fn check_cjk_punct(cx: &App) {
     use std::sync::atomic::Ordering;
     static CHECKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if cfg!(any(target_os = "macos", target_os = "ios")) || CHECKED.swap(true, Ordering::Relaxed) { return }
+    // The browser has no families to ask for (asking panics): its Chinese comes from canvas text.
+    if cfg!(target_family = "wasm") { CJK_PUNCT_MISSING.store(true, Ordering::Relaxed); return }
     CJK_PUNCT_MISSING.store(!resolves(crate::editor_ui::CJK_PUNCT_FONT, cx), Ordering::Relaxed);
 }
 

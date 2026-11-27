@@ -310,6 +310,10 @@ pub(crate) fn import_csv(store: &mut crate::store::Store, path: &Path, parent: O
     let mut base = crate::table::Base::default();
     let t = crate::table::csv::import(&mut base, name, text);
     base.tables.push(t);
+    // The web build has no 数据表 (no SQLite).
+    #[cfg(target_family = "wasm")]
+    { let _ = (store, parent); anyhow::bail!("数据表 isn't available here") }
+    #[cfg(not(target_family = "wasm"))]
     store.create_table_in(name, &base, parent)
 }
 

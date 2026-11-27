@@ -324,6 +324,13 @@ jobs:
         if: steps.filter.outputs.skip != 'true'
         run: python3 scripts/check.py
 
+      # The website's demo (web/README.md) builds the app for wasm32; type-check it so it can't break unnoticed.
+      - name: Web (wasm32) check
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo check --locked --target wasm32-unknown-unknown --bin quiet_md
+
       - name: Verify Linux package
         if: steps.filter.outputs.skip != 'true'
         run: scripts/package-linux.sh

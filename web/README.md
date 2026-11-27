@@ -4,9 +4,9 @@ The website's [example notebooks](../site/public/notebooks/) run Quiet.md itself
 
 ## Platform differences
 
-- **Files.** The web library lives in memory (`fdl_core::vfs`). Desktop delegates to `std::fs`. The browser unpacks a library bundle on startup. Edits persist within the tab until refresh. Query paths through `PathExt` (e.g. `p.fs_exists()`), since native `Path` methods query the real filesystem. Use `fs_is_absolute()` because `Path::is_absolute()` always returns false on wasm32-unknown-unknown.
-- **Time and processes.** Use `web_time::{Instant, SystemTime}`, which maps to std on desktop. In a browser, `std::time::Instant::now()` panics. Similarly, use `vfs::temp_dir()` and `vfs::process_id()` in place of `std::env::temp_dir()` and `std::process::id()`.
-- **Fonts.** The browser cannot enumerate system fonts. The page downloads Inter and JetBrains Mono (OFL) from `fonts/` and uses browser fallback for Chinese (`CanvasFontFallback::EmojiAndCjk`). Vendor patch 0029 maps `.SystemUIFont` to Inter.
+- **Files.** The web library lives in memory (`fdl_core::vfs`). Desktop delegates to `std::fs`. The browser unpacks a library bundle on startup. Edits persist within the tab until refresh. Query paths through `PathExt` (e.g. `p.fs_exists()`), since native `Path` methods query the real filesystem. Use `fs_is_absolute()` because `Path::is_absolute()` always returns false on wasm32-unknown-unknown. Pictures are fetched on first display, so until then they don't exist: check `vfs::lazy(p)` beside `p.fs_is_file()` where a missing file would be dropped.
+- **Time and processes.** Use `web_time::{Instant, SystemTime}`, which maps to std on desktop. In a browser, `std::time::Instant::now()` panics, and the clock starts at 0 when the page loads, so `Instant::now() - d` panics during the first `d`: keep "long ago" as `None` or use `checked_sub`. Similarly, use `vfs::temp_dir()` and `vfs::process_id()` in place of `std::env::temp_dir()` and `std::process::id()`.
+- **Fonts.** The browser cannot enumerate system fonts, and asking for a family it doesn't have panics (so the Chinese punctuation face, `ui::CJK_PUNCT_FONT`, is off). The page downloads Inter and JetBrains Mono (OFL) from `fonts/` and uses browser fallback for Chinese (`CanvasFontFallback::EmojiAndCjk`). Vendor patch 0029 maps `.SystemUIFont` to Inter.
 - **Images.** The bundle excludes `.assets/`. Images sit alongside it and download on first display via `vfs::add_lazy`, with a loading indicator while pending.
 - **Shortcuts.** Mac browsers use macOS bindings (⌘), and other platforms use PC bindings (`shortcuts::mac()`).
 - **Startup.** The web app opens on Home (desktop reopens the last document), so visitors see the whole notebook first.
@@ -22,16 +22,16 @@ web/build.sh site/public/demo          # Production: web profile and wasm-opt -O
 FAST=1 web/build.sh <directory>        # Debugging: release profile, skip wasm-opt
 ```
 
-The generated `site/public/demo/` directory stays outside version control and deploys with the site (`cd site && npx wrangler@4 deploy`). Compressed transfers are about 6 MB of Wasm and 2 MB of fonts. Startup waits only for the five fonts the first screen needs (regular and monospace, preloaded in `web/index.html` alongside the Wasm and the bundle); italics and the rest load once the window is up. The site's home page prefetches the Wasm when idle.
+The generated `site/public/demo/` directory stays outside version control and deploys with the site (`cd site && npx wrangler@4 deploy`). Compressed transfers are about 7 MB of Wasm (Brotli) and 2 MB of fonts. Startup waits only for the five fonts the first screen needs (regular and monospace, preloaded in `web/index.html` alongside the Wasm and the bundle); italics and the rest load once the window is up. The site's home page prefetches the Wasm when idle.
 
 ## Example libraries
 
 Persona materials live in the private `marketing/mock-users/<name>/` directory. For each library:
 
-1. Convert images to 1400 px JPEGs with `sips`, then import with the persona's `build_library.sh` using `FLAT=1`.
-2. Open once with a devtools build to create `.quiet/index.json`. Set sidebar order with `web/curate.py <library> "<top-level-name>" …`.
-3. Disable `auto_update` and `quick_hotkey` in preferences. Han Meimei's two boards (made by the persona's `extras.py`) sit at the top level in positions 4 and 5, the second row of Home in the site's window; their pictures become 1200 px JPEGs and the boards' paths are rewritten.
-4. Run `web/bundle.py <library> site/public/demo/libraries/<name>.qmdb`. It also writes `libraries/<name>/.assets/`. Bundles are zlib-compressed (they start with `QMZ1`) because static hosting does not compress `.qmdb`.
+1. Build the folder as a user has it with the persona's `build_library.sh`: her vault (Markdown, pictures in `.attachments/` by relative links) is a folder opened in place, and `extras.py` adds the boards. `WEB=1 QMD_REPO=<this checkout>` readies it for the web: no data tables (the web build has no SQLite), pictures as 1400 px JPEGs (the boards' 1200 px) with their links rewritten, and preferences in English without the update check or the quick-note hotkey.
+2. Set the top-level order with `web/curate.py <library> "<top-level-name>" …` before anything opens it: Home and the sidebar list folders newest first, and the script dates the folders in that order. Han Meimei's leads with `Index Blue "Signals & Clocks" "Old Medicine" "Manuscripts & Murals" "Maps & Cities" Seeing "Natural History" Journal`, as in the README's picture.
+3. Open it once with a devtools build (`tools/harness/run.py` with `FDL_LIB_NAME="Quiet Notes"`, the web build's folder name), which writes `.quiet/` (the order kept in `.quiet/meta`, the hotkey off in `shortcuts.json`). Bundle that copy, without `.quiet/local/` and the window size in `.quiet/settings.json`.
+4. Run `web/bundle.py <library> site/public/demo/libraries/<name>.qmdb`. It copies the pictures (`.assets/` and every other picture) to `libraries/<name>/` and lists them for fetching on first display. Bundles are zlib-compressed (they start with `QMZ1`) because static hosting does not compress `.qmdb`.
 
 Open a library at `/demo/?lib=<name>`. To add a persona, generate the bundle, add an `index.html` modeled on an existing notebook and a 1280×800 devtools screenshot named `home.webp` in `site/public/notebooks/<name>/`, and add the entry to `notebooks/data.js`. The home page currently shows only Han Meimei (one `article.showcase` in `main.live`).
 
