@@ -169,6 +169,8 @@ pub fn parse(lines: &[Line]) -> Result<Flow, Error> {
         let rest = after.trim();
         if !rest.is_empty() && rest != "{" { return err(no, format!("Couldn't read “{t}”")) }
         let e = p.ent(a_name, alias, class, no)?;
+        // declared in a subgraph: in it, wherever it was mentioned first
+        if p.scope().is_some() { p.f.nodes[e].sub = p.scope(); }
         if rest == "{" {
             let nd = &mut p.f.nodes[e];
             nd.shape = Shape::Class;
@@ -233,6 +235,8 @@ mod tests {
         assert_eq!((f.nodes[2].label.as_str(), f.nodes[2].sub), ("Customer Account", Some(0)));
         assert_eq!(f.subs[0].title, "Group");
         assert_eq!(f.links[0].to, End::Sub(0));
+        let g = p("erDiagram\nA ||--o{ B : x\nsubgraph s\n  B\nend");
+        assert_eq!((g.nodes[0].sub, g.nodes[1].sub), (None, Some(0)));
     }
 
     #[test]

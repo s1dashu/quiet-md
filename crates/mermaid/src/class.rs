@@ -202,6 +202,8 @@ pub fn parse(lines: &[Line]) -> Result<Flow, Error> {
             let mut label = None;
             if let Some(a) = r.find('[') { label = Some(text::label(r[a + 1..].trim_end_matches(']'))); r = r[..a].trim(); }
             let i = p.class(r, no)?;
+            // declared in a namespace: in it, wherever it was mentioned first
+            if p.scope().is_some() { p.f.nodes[i].sub = p.scope(); }
             if !css.trim().is_empty() { p.f.nodes[i].classes.push(css.trim().to_string()); }
             if let Some(lb) = label { p.f.nodes[i].label = lb; }
             if let (Some(n), Some(mb)) = (note, p.f.nodes[i].members.as_deref_mut()) { mb.notes.push(n); }
@@ -293,6 +295,8 @@ mod tests {
         assert_eq!(f.nodes[4].label, "A car");
         assert_eq!(f.nodes[4].classes, ["hot", "cold"]);
         assert_eq!(f.nodes[4].style.len(), 1);
+        let g = p("classDiagram\nA --> B\nnamespace N {\n  class B\n}");
+        assert_eq!((g.nodes[0].sub, g.nodes[1].sub), (None, Some(0)));
     }
 
     #[test]
