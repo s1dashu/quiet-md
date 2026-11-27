@@ -144,7 +144,11 @@ impl Session {
         let tops = match library {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
-                if !Store::is_library(&dir) {
+                // A `.quiet` folder without its format file is a library Quiet.md
+                // began and never wrote into (an earlier version stopped at its
+                // first-launch pages): the app opens it, so does the CLI. A plain
+                // folder is no library, and the CLI never makes one of it.
+                if !Store::is_library(&dir) && !dir.join(fdl_core::store::INTERNAL).is_dir() {
                     return Err(fail("no_library", format!("{} is not a Quiet.md library", dir.display())).hint("pass a folder Quiet.md has open, or leave out --library to use every folder it has open"));
                 }
                 if Store::flat_at(&dir) {

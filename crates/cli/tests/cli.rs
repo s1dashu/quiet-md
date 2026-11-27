@@ -183,6 +183,19 @@ fn not_a_library() {
 }
 
 #[test]
+fn a_library_begun_but_never_written_opens_empty() {
+    // An earlier Quiet.md left only an empty `.quiet` at its first-launch pages.
+    let dir = std::env::temp_dir().join(format!("quiet-cli-test-begun-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join(".quiet")).unwrap();
+    let o = quiet(&dir, &["ls", "-r", "--json"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(serde_json::from_slice::<serde_json::Value>(&o.stdout).unwrap(), serde_json::json!([]));
+    assert!(ok(&dir, &["new", "First", "--md", "hello"]).contains("First"));
+    assert!(dir.join("First.xml").is_file());
+}
+
+#[test]
 fn refs_find_their_block_after_others_edit() {
     let lib = library(&[("Plan", PLAN)]);
     let notes = json(&lib, &["outline", "Plan"])["headings"][2]["ref"].as_str().unwrap().to_string();
