@@ -314,13 +314,15 @@ impl Workspace {
     }
 
     /// How far a row is pulled over its actions.
-    pub(crate) fn swiped(&self, id: &str) -> f32 { self.phone.swipe.as_ref().filter(|s| s.id == id).map_or(0., |s| s.x) }
+    /// `drawer`: the drawer's row of `id`, else the list's (the two show the same page).
+    pub(crate) fn swiped(&self, id: &str, drawer: bool) -> f32 { self.phone.swipe.as_ref().filter(|s| s.id == id && s.drawer == drawer).map_or(0., |s| s.x) }
 
     /// Each frame: a let-go row settles; the drawer's goes with the drawer.
     pub(crate) fn phone_tick(&mut self, window: &mut Window) {
         sheet_tick();
         self.phone.paged = false;
-        if self.phone.swipe.as_ref().is_some_and(|s| s.drawer && !self.sidebar_open) { self.phone.swipe = None; }
+        // The drawer's row goes with the drawer; a list's, when the drawer comes over it.
+        if self.phone.swipe.as_ref().is_some_and(|s| s.drawer != self.sidebar_open) { self.phone.swipe = None; }
         let Some(s) = self.phone.swipe.as_mut() else { return };
         if let Some(a) = s.settle {
             let (x, moving) = settle(a);
@@ -373,7 +375,7 @@ impl Workspace {
 
     fn phone_row(&self, e: &Entry, last: bool, cx: &mut Context<Self>) -> AnyElement {
         let folder = e.meta.folder.is_some() && e.note.is_none();
-        let x = self.swiped(&e.id);
+        let x = self.swiped(&e.id, false);
         let sub = if folder {
             let n = self.entries.iter().filter(|c| c.meta.parent.as_deref() == Some(e.id.as_str())).count();
             crate::localized_count!(n, "{} 项", "{} item", "{} items", n)

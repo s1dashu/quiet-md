@@ -448,7 +448,8 @@ impl Workspace {
                     .overflow_hidden().whitespace_nowrap().text_ellipsis().child(ui_text(display_title(&e.title))))
                 .child(div().text_size(px(12.)).line_height(px(18.)).text_color(Theme::text_caption())
                     .child(crate::localized_count!(count, "{} 项", "{} item", "{} items", count))))
-            .when(self.batch.is_none(), |d| d
+            // touch: no hover to show them by (a long press is the folder's menu), and they would take the name's room
+            .when(self.batch.is_none() && !crate::design::touch(), |d| d
                 // Outline buttons floating on the tile, round.
                 .child(crate::design::Button::outline(SharedString::from(format!("page-fnew-{id}"))).sized(crate::design::ButtonSize::Tool).rounded_full().opacity(reveal)
                     .tip(crate::settings::tr("新建文档", "New document"), None)

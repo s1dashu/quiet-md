@@ -1049,7 +1049,7 @@ impl Workspace {
                         .when(!menu_on, |d| d.opacity(0.).group_hover("page-card", |s| s.opacity(1.)))
                         .child(crate::ui::squircle_outline(radius + RING, RING, Theme::ring_sheet())))
                     .when_some(check, |d, c| d.child(div().absolute().top(px(18.)).left(px(18.)).h(px(20.)).flex().items_center().child(c)))
-                    .when(self.batch.is_none(), |d| d.child(
+                    .when(self.batch.is_none() && !crate::design::touch(), |d| d.child(
                         div().absolute().top(px(8.)).right(px(8.))
                             .when(!menu_on, |d| d.opacity(0.).group_hover("page-card", |s| s.opacity(1.)))
                             .child(self.card_more(e, format!("page-gmore-{}", e.id), cx).rounded_full().bg(Theme::bg_overlay())),
