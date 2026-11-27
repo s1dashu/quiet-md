@@ -82,6 +82,7 @@ fn part(title: &'static str, badge: Option<&'static str>, line: &'static str, bo
         .into_any_element()
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn small(s: &'static str) -> Div { div().text_size(px(geo().text_xs)).line_height(px(geo().text_xs * 1.5)).text_color(color::muted_foreground()).child(s) }
 
 /// 设置 › 连接 Agent: the skill's install line, a prompt for the agent, the CLI.
