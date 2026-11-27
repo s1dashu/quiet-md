@@ -1,0 +1,1627 @@
+# docs/PERFORMANCE.md "Memory by scenario": the 15,000-note vault with Gallery/ (gen_gallery.py), Data/ (a long document,
+# a 数据库 of 30,000 records), Gallery/Many photos.md and Gallery/Photo board.excalidraw. Three rounds; `idle` is Home 35 s on.
+# A notice of what is new (an update) covers the sidebar's lower half: `click 251 371` closes it.
+resize 1280 800
+move 5 5
+wait 6000
+click 251 371
+wait 500
+shot r0-start
+wait 6000
+row lib
+wait 2500
+downat card:Inbox
+upat card:Inbox
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r1-a-inbox
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Long document
+upat card:Long document
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r1-b-longdoc
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Big table
+upat card:Big table
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r1-c-table
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 5000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r1-d-gallery
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Many photos
+upat card:Many photos
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r1-e-photos
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Photo board
+upat card:Photo board
+wait 6000
+shot r1-f-board
+wait 6000
+row lib
+wait 2500
+wait 35000
+shot r1-g-idle
+wait 6000
+row lib
+wait 2500
+downat card:Inbox
+upat card:Inbox
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r2-a-inbox
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Long document
+upat card:Long document
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r2-b-longdoc
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Big table
+upat card:Big table
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r2-c-table
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 5000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r2-d-gallery
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Many photos
+upat card:Many photos
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r2-e-photos
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Photo board
+upat card:Photo board
+wait 6000
+shot r2-f-board
+wait 6000
+row lib
+wait 2500
+wait 35000
+shot r2-g-idle
+wait 6000
+row lib
+wait 2500
+downat card:Inbox
+upat card:Inbox
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r3-a-inbox
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Long document
+upat card:Long document
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r3-b-longdoc
+wait 6000
+row lib
+wait 2500
+downat card:Data
+upat card:Data
+wait 3000
+downat card:Big table
+upat card:Big table
+wait 4000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r3-c-table
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 5000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r3-d-gallery
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Many photos
+upat card:Many photos
+wait 3000
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+wheel 800 450 600
+wait 120
+shot r3-e-photos
+wait 6000
+row lib
+wait 2500
+downat card:Gallery
+upat card:Gallery
+wait 3000
+downat card:Photo board
+upat card:Photo board
+wait 6000
+shot r3-f-board
+wait 6000
+row lib
+wait 2500
+wait 35000
+shot r3-g-idle
+wait 6000

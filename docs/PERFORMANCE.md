@@ -220,7 +220,7 @@ These grow with the library too. Times are for the 15,000-note vault, with a lib
 | Operation | When | Before | After |
 |---|---|---:|---:|
 | `Store::list`, the first time | Opening a library for the first time: every note is read | 2.0 s | off the main thread (below) |
-| `Store::list` | Every time the window comes forward (`app.rs`, window activation), and 2 s after files change on disk | 70-78 ms (4 ms) | 38-44 ms (3 ms) |
+| `Store::list` | Every time the window comes forward (`app.rs`, window activation), and 2 s after files change on disk | 70-78 ms (4 ms) | 38-44 ms (3 ms); since 2026-11-28 off the main thread both times ([Folder pages](#folder-pages-hover-card-previews-and-opening)) |
 | `Store::save_editor` | Every autosave while typing | 52-57 ms (8 ms) | 12 ms (8 ms) |
 
 Measured 2026-11-25 on the Mac mini above, five runs alternating between `86317e7` and `perf/meta-cache`. Saving waits on the disk (the note and this device's 4.5 MB metadata file, each written with a backup and `fsync`): with other builds busy on the same disk it took 64-143 ms before and 20-79 ms after.
@@ -299,4 +299,88 @@ grep -a 'library:' $TMPDIR/quiet-big-run/log
 # adding a code folder: the tree under $TMPDIR, so what this computer keeps about it goes there too
 python3 tools/perf/gen_code_tree.py $TMPDIR/codetree        # --project-files for the usual case
 TMPDIR=$TMPDIR cargo run --release -p fdl_core --example add_folder_bench -- $TMPDIR/codetree 3
+```
+
+## Folder pages: hover, card previews and opening
+
+A folder card opens a little when the pointer is on it (the papers inside rise, springs driven by `request_animation_frame`). Users saw it drop a few frames now and then, at random. Measured 2026-11-28 on the Mac mini above against `66ee92a` (`perf/round-2026-11`), on the 15,000-note vault plus `tools/perf/gen_gallery.py` (`Gallery/`: 24 albums of four photo notes and 30 loose ones, 3024 × 2016 JPEGs), a `Data/` folder with a 1.3 MB document and a 数据库 of 30,000 records and 31 columns (3,013 of them with a photo attachment).
+
+### Method
+
+`FDL_FRAMES` ([harness](../tools/harness/README.md)) logs every frame: its draw time, the gap since the last one and the instructions the process retired meanwhile (`minstr`), plus any main-thread work over 1 ms between frames (`busy <what>`: window activation, the 2 s checks, the picture sweep, a card preview built, a listing taken over, opening a page). `wait` drives frames every 8 ms as a 120 Hz display link would. A script moves the pointer between two folder cards every 400 ms for 20 s while `sample` records the main thread; another does the same while a second program writes a note into the library every 3 s. The Mac mini's load was 5-11 (other builds), which moves the main thread between performance and efficiency cores and makes frame times jump by 2-3×; the instruction count does not move with it, so it says what a frame costs.
+
+### Why frames dropped
+
+A hover frame on `Gallery` costs about 45 M instructions (2.7-5 ms on a performance core): the whole window is laid out and painted again each frame, of which the folder cards' papers are about a fifth (`Paper::paint` builds their outlines as paths, which GPUI bins on the CPU every frame). That fits 120 Hz. The drops were frames that also did something else:
+
+| What else ran in the frame | Before | After |
+|---|---:|---:|
+| A card preview asking the disk (`stat` of its image, of a table's file, of its folder) while being built, and every 2 s for tables | 5-10 samples of `stat` in 10 s of hovering | none (paths resolved once per document change, file times kept 2 s) |
+| A 数据库 card first drawn: the whole table read, its view run and every cell turned to text, to show 8 rows of 5 columns | 114-398 ms | 0 on the main thread (read in the background, only what it shows: 118-312 ms there) |
+| A listing handed back after a file changed on disk (`Store::adopt`, the old entries freed, sorted) | 21-27 ms | 8.5-10 ms |
+| Sorting the entries after it | 2.9 ms | 1.6 ms (an index permutation, entries moved once) |
+| The window coming forward: `Store::list` on the main thread | 38-44 ms | 0 (listed in the background like the 2 s check) |
+
+Hovering on `Gallery` for 20 s, frame draw in ms (one run each; the second pair of runs gave 5.4 → 2.7 ms P50 and 10 → 0 frames over 8.3 ms):
+
+| | P50 | P90 | P99 | Max | Over 8.3 ms | M instructions P50 |
+|---|---:|---:|---:|---:|---:|---:|
+| Before | 5.22 | 7.00 | 8.71 | 13.41 | 11 of 420 | 45.3 |
+| After | 3.75 | 6.31 | 8.17 | 10.51 | 5 of 404 | 44.8 |
+
+The frames still over 8.3 ms after the fix are the efficiency core under load: their instruction count is the usual one. Home of the 15,000-note vault (its folder cards plus a few hundred document cards) costs 59 M instructions a hover frame, P50 8.4-9.2 ms on this loaded machine; it has not been measured on a faster one.
+
+### Opening pages
+
+Opening a page or folder set its opened time in memory and wrote this computer's metadata file later, but neither told the store that memory was still what the disk says, so the next write (the 手动排序 check of every folder opened, the view state itself) read and merged every device's metadata file again. Opening a 数据库 also read the file and its newest version whole, twice per visit (the version kept when opening and when leaving). Main-thread time, 15,000-note vault, median of six to thirteen opens:
+
+| Opening | Before | After |
+|---|---:|---:|
+| A folder (`initialize_manual_order`) | 48-85 ms | 9-22 ms |
+| The 30,000-record 数据库 (`try_open`) | 107-132 ms | 90-104 ms |
+| A document after it (`try_open`, the table's version check on leaving) | 26-40 ms | 18-24 ms |
+
+The rest of opening the table is loading its records into the view. With the harness, a click reaches the screen 200-400 ms later on this machine, but most of that is its 8 ms timer firing late under load: the main thread is idle for about 80 % of it.
+
+### Starting
+
+Starting with the 60,000-note vault (`gen_library.py --vault 60000`): the first frame comes 0.45 s after launch the first time (the listing then takes 6.5-9 s in the background on this loaded machine, taken over in 27-31 ms) and 0.95 s the next time (listed in 0.53 s). Before the window is made, `start` waits for each top-level folder's store to open (`TopFolders::load`: every device's metadata merged, the parse cache read, about 200-300 ms for 60,000 notes) and then up to 150 ms for the listing; that is what a large library adds to a launch.
+
+## Memory by scenario
+
+Physical footprint (Activity Monitor's 内存 column) by `tools/perf/mem_probe.py`, measured 2026-11-28 on the Mac mini above at 1× scale (on a 2× display the window's surfaces, glyph atlases and decoded pictures take about four times as much). `small` is malloc's small and tiny regions (entries, metadata, layout), `pixels` its large blocks and untagged VM (decoded images, big buffers), `gpu` textures. Each point is taken some seconds after getting there. The same step differs by up to 90 MB between runs, depending on when a background listing or a metadata merge last ran: compare trends, not single numbers.
+
+The library is the 15,000-note vault with `Gallery/` and `Data/` as in [Folder pages](#folder-pages-hover-card-previews-and-opening), plus a note with 30 of the photos and a 画板 with the same 30 (`Gallery/Many photos.md`, `Gallery/Photo board.excalidraw`). Three rounds of: `Inbox` scrolled through, the 1.3 MB document scrolled through, the 30,000-record 数据库 scrolled, `Gallery`, the photo note scrolled, the board, then Home for 35 s. MB, mean of two runs:
+
+| Step | Total | small | pixels | gpu |
+|---|---:|---:|---:|---:|
+| Started (listed) | 294 | 150 | 98 | 27 |
+| `Inbox` (3,016 cards) | 334 | 179 | 101 | 27 |
+| 1.3 MB document | 364 | 210 | 107 | 27 |
+| 数据库, 30,000 records × 31 columns | 417 | 255 | 117 | 27 |
+| `Gallery` (album cards with photos) | 420 | 263 | 104 | 35 |
+| 30 photos in one note | 517 | 251 | 146 | 101 |
+| 30 photos on a board | 396 | 237 | 106 | 39 |
+| Home, 35 s later | 346 | 188 | 104 | 35 |
+
+- **Pictures** are the largest step and are given back: the photo note adds about 66 MB of textures and 40-45 MB of pixels, gone again a page later (`DocImages` decodes at the size shown, keeps only the atlas texture once drawn, and drops what no window drew for 30 s or past 64 MiB). The board decodes at its zoom (26 % here), so the same 30 photos add only a few MB. The folder page's photo cards add about 8 MB of textures.
+- **The 数据库** costs 23 MB while open on its own (scrolled to its photo column and through about 7,500 rows; the grid shows attachments as names, decoding nothing) and is given back on leaving.
+- **Long use** does not only grow: after each round Home is at 299-307 MB in one run and 476, 379, 310 MB in the other, and at the end of the third round both are back within 30 MB of the start. No leak (the earlier `leaks` run found 2.4 KB).
+- **Many notes** cost about 10 KB each, all the time: 280-316 MB for the 15,000-note vault and 700-750 MB for 60,000 notes (`small` 444-487 MB, `pixels` 210 MB), most of it the entries (each with its whole text for search and previews) and the metadata kept in several copies (the merged view, the index, and a copy of the index to tell whether memory is still what the disk says).
+
+Handing freed pages back to the system (`malloc_zone_pressure_relief`) on every 2 s picture sweep instead of only after pictures went was tried: under a millisecond each time, but the footprint stayed within the runs' spread (mean 394 → 380 MB), so it was left out. The small region holds live data and fragments, not whole free pages.
+
+### Reproduce
+
+```sh
+cargo build --release --locked --features devtools
+python3 tools/perf/gen_library.py --vault 15000 $TMPDIR/perf/vault
+python3 tools/perf/gen_gallery.py $TMPDIR/perf/vault
+python3 tools/perf/gen_scenarios.py $TMPDIR/perf/vault $TMPDIR/perf/work   # then the 数据库, as its docstring says
+# hover: frame log and the main thread meanwhile
+FDL_FRAMES=1 python3 tools/harness/run.py tools/harness/examples/hover-cards.txt $TMPDIR/perf/vault $TMPDIR/perf/hover &
+sleep 12; sample quiet_md 10 -file $TMPDIR/perf/hover.sample; wait
+grep -a 'frame-time\|busy' $TMPDIR/perf/hover/log
+# memory by scenario
+python3 tools/perf/mem_probe.py tools/perf/mem/library.txt $TMPDIR/perf/vault $TMPDIR/perf/mem after
 ```

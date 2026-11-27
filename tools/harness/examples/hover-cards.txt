@@ -1,0 +1,106 @@
+# The 15,000-note vault with gen_gallery.py's Gallery/ (and a Data/ folder, docs/PERFORMANCE.md "Folder pages").
+# Run with FDL_FRAMES=1 and sample the main thread meanwhile: the pointer goes between two album cards every 400 ms.
+move 5 5
+wait 5000
+row Gallery
+wait 4000
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
+moveat card:Album 24
+wait 400
+moveat card:Album 23
+wait 400
