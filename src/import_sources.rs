@@ -1,6 +1,6 @@
 //! 从其他应用导入: the apps notes come in from and the folders of theirs found on this
-//! computer. The welcome pages (`onboarding`) and the 从其他应用导入… panel (`transfer`)
-//! both list from here; each source says what to pick and which import brings it in.
+//! computer. The 从其他应用导入… panel (`transfer`) lists from here; each source
+//! says what to pick and which import brings it in.
 
 use crate::settings::tr;
 use crate::transfer::ImportKind;
@@ -145,7 +145,59 @@ fn found_name(app: &str, path: &Path, mobile: &Path) -> String {
 /// reads as iCloud 云盘, anything else as its short path.
 fn where_short(p: &Path) -> String {
     let mobile = dirs::home_dir().unwrap_or_default().join("Library/Mobile Documents");
-    if p.starts_with(&mobile) { tr("iCloud 云盘", "iCloud Drive").to_string() } else { crate::onboarding::short_path(p) }
+    if p.starts_with(&mobile) { tr("iCloud 云盘", "iCloud Drive").to_string() } else { short_path(p) }
+}
+
+/// Whether macOS keeps `path` (or the nearest folder above it that exists)
+/// in iCloud; this also covers Documents with 桌面与文稿 syncing on.
+#[cfg(target_os = "macos")]
+pub(crate) fn ubiquitous(path: &Path) -> bool {
+    use fdl_core::vfs::PathExt as _;
+    use objc::runtime::{BOOL, NO, Object};
+    use objc::{class, msg_send, sel, sel_impl};
+    #[link(name = "Foundation", kind = "framework")]
+    unsafe extern "C" { static NSURLIsUbiquitousItemKey: *mut Object; }
+    let mut p = path;
+    while !p.fs_exists() { match p.parent() { Some(q) => p = q, None => return false } }
+    let s = p.to_string_lossy();
+    unsafe {
+        let ns: *mut Object = msg_send![class!(NSString), alloc];
+        let ns: *mut Object = msg_send![ns, initWithBytes:s.as_ptr() length:s.len() encoding:4usize];
+        let url: *mut Object = msg_send![class!(NSURL), fileURLWithPath:ns];
+        let _: () = msg_send![ns, release];
+        let mut value: *mut Object = std::ptr::null_mut();
+        let ok: BOOL = msg_send![url, getResourceValue:&mut value forKey:NSURLIsUbiquitousItemKey error:std::ptr::null_mut::<*mut Object>()];
+        if ok == NO || value.is_null() { return false }
+        let on: BOOL = msg_send![value, boolValue];
+        on != NO
+    }
+}
+
+/// A path as people know it: 文稿 › Quiet.md, iCloud 云盘 › Notes, Dropbox › …;
+/// deep ones keep their first and last two names.
+pub(crate) fn short_path(p: &Path) -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    let places: [(PathBuf, &str); 5] = [
+        (home.join("Library/Mobile Documents/com~apple~CloudDocs"), tr("iCloud 云盘", "iCloud Drive")),
+        (dirs::document_dir().unwrap_or_else(|| home.join("Documents")), tr("文稿", "Documents")),
+        (dirs::desktop_dir().unwrap_or_else(|| home.join("Desktop")), tr("桌面", "Desktop")),
+        (dirs::download_dir().unwrap_or_else(|| home.join("Downloads")), tr("下载", "Downloads")),
+        (home.join("Library/Mobile Documents"), "iCloud"),
+    ];
+    let names = |r: &Path| r.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    let (base, rest): (String, Vec<String>) = if let Some((b, r)) = places.iter().find_map(|(b, n)| p.strip_prefix(b).ok().map(|r| (n.to_string(), names(r)))) { (b, r) }
+        else if let Ok(r) = p.strip_prefix(home.join("Library/CloudStorage")) {
+            let mut r = names(r);
+            let provider = if r.is_empty() { String::new() } else { r.remove(0) };
+            (provider.split('-').next().unwrap_or(&provider).to_string(), r)
+        }
+        else if let Ok(r) = p.strip_prefix(&home) { ("~".into(), names(r)) }
+        else { (String::new(), names(p).into_iter().filter(|c| c != "/").collect()) };
+    let rest = if rest.len() > 3 { vec![rest[0].clone(), "…".into(), rest[rest.len() - 2].clone(), rest[rest.len() - 1].clone()] } else { rest };
+    let mut parts = vec![];
+    if !base.is_empty() { parts.push(base) }
+    parts.extend(rest);
+    parts.join(" › ")
 }
 
 #[cfg(test)]

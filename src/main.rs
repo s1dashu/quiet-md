@@ -47,7 +47,6 @@ mod modes;
 mod typewriter;
 mod zoom;
 mod import_sources;
-mod onboarding;
 #[cfg(target_os = "macos")]
 mod native_header;
 #[cfg(not(target_os = "macos"))]
@@ -165,7 +164,7 @@ pub(crate) fn main_window_options(scripted: bool, at: Option<Bounds<Pixels>>, cx
     }
 }
 
-/// The main window, at the remembered spot, or where first launch's window was.
+/// The main window, at `at` or else the remembered spot.
 pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &mut App) {
     let options = main_window_options(scripted, at, cx);
     cx.open_window(options, |window, cx| {
@@ -176,15 +175,13 @@ pub(crate) fn open_main_window(scripted: bool, at: Option<Bounds<Pixels>>, cx: &
     .expect("open window");
 }
 
-/// Everything that needs the library: run once it is chosen (at once for an
-/// existing one, after first launch's pages for a new one). The main view
-/// opens in a new window, or takes over `into` — first launch's own window,
-/// so the pages give way to the notes without a second window.
-pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, incoming: local_files::Incoming, cx: &mut App) -> Option<Entity<app::Workspace>> {
+/// Everything that needs the library, then the main window.
+fn start(existed: bool, scripted: bool, opening: std::thread::JoinHandle<fdl_core::top_folders::TopFolders>, incoming: local_files::Incoming, cx: &mut App) {
     changelog::startup(existed);
     shortcuts::init(cx);
     // No top-level folder is fatal: one that can't be opened shows as such in the sidebar.
-    if !cx.has_global::<shared_store::SharedStore>() { cx.set_global(shared_store::SharedStore::open()); }
+    let tops = opening.join().unwrap_or_else(|e| std::panic::resume_unwind(e));
+    cx.set_global(shared_store::SharedStore::with_top_folders(tops));
     let mut moved = vec![];
     cx.global::<shared_store::SharedStore>().each(|s| moved.extend(s.migrated.take()));
     for r in moved { changelog::migrated(&r); }
@@ -195,20 +192,14 @@ pub(crate) fn start(existed: bool, scripted: bool, into: Option<&mut Window>, in
     app::set_menus(cx);
     update::init(cx);
     usage::init(cx);
-    let took = into.map(|window| window.replace_root(cx, app::Workspace::new));
-    if took.is_none() { open_main_window(scripted, None, cx); }
+    open_main_window(scripted, None, cx);
     // A synced library (or one used elsewhere) moves to real folders only once the user agrees.
-    if let store::MigrationState::NeedsConsent(r) = store::Store::migration_state(&store::Store::active_dir()) && settings::migrate_ask_due() {
-        match &took {
-            Some(ws) => ws.update(cx, |w, cx| { w.confirm = Some(app::Confirm::Migrate(r)); cx.notify(); }),
-            None => if let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<app::Workspace>()) {
-                let _ = ws.update(cx, |w, _, cx| { w.confirm = Some(app::Confirm::Migrate(r)); cx.notify(); });
-            },
-        }
+    if let store::MigrationState::NeedsConsent(r) = store::Store::migration_state(&store::Store::active_dir()) && settings::migrate_ask_due()
+        && let Some(ws) = cx.windows().into_iter().find_map(|w| w.downcast::<app::Workspace>()) {
+        let _ = ws.update(cx, |w, _, cx| { w.confirm = Some(app::Confirm::Migrate(r)); cx.notify(); });
     }
     incoming.deliver(cx);
     local_folders::follow_folder_list(cx);
-    took
 }
 
 /// Fonts, keys, preferences and theme: the same for the desktop and the web build.
@@ -251,7 +242,7 @@ fn main() {
     // writing its own, and `guides` seeds a new library only once.
     // The store asks the system whether a library is in iCloud through this.
     #[cfg(target_os = "macos")]
-    store::set_ubiquity_probe(onboarding::ubiquitous);
+    store::set_ubiquity_probe(import_sources::ubiquitous);
     let root = store::Store::legacy_dir();
     let fixed = std::env::var_os("QUIET_MD_HOME").is_some();
     logging::write(&format!("library {}", root.display()));
@@ -259,13 +250,24 @@ fn main() {
     // library builds before it used means this computer has been here
     // before, and can show 更新日志.
     let existed = (!fixed && fdl_core::vfs::PathExt::fs_exists(fdl_core::top_folders::TopFolders::list_file().as_path())) || guides::seeded(&root).unwrap_or(false);
-    // A first launch picks its folders on the first launch's pages.
-    let onboard = onboarding::wanted(existed, scripted);
-    // A test run's folder (`QUIET_MD_HOME`) is set up as before; the
-    // self-test checks first launch's seeding, without its pages.
-    if fixed && (!scripted || selftest::active()) && !onboard && let Err(err) = guides::initialize(&root) {
-        logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
-    }
+    // A first launch goes straight in: the default library (an old `Quiet.md`
+    // is kept, `Store::default_in`) gets the guides and becomes a top-level
+    // folder; the window opens on its first guide (`open_start`). That and
+    // opening the top-level folders (a new library's first opening moves it to
+    // the current format, ~180 ms of fsyncs) run beside GPUI's own start-up,
+    // which takes about as long; `start` waits for them.
+    let seed = (fixed || !existed) && (!scripted || selftest::active());
+    let first = !existed && !scripted && !fixed;
+    let chinese = seed && settings::prefs().lang() == settings::Lang::Zh;
+    let opening = std::thread::spawn(move || {
+        if seed && let Err(err) = guides::initialize(&root, chinese) {
+            logging::fatal(&format!("无法初始化文档库 / Could not set up the library at {}", root.display()), &err);
+        }
+        let mut tops = fdl_core::top_folders::TopFolders::load();
+        // First launch's library is a top-level folder even beside a list older builds left.
+        if first { let _ = tops.add(&root); }
+        tops
+    });
     let app = gpui_platform::application().with_assets(assets::Assets);
     // Markdown files opened from the Finder or the command line are edited in place.
     let incoming = local_files::Incoming::from_args();
@@ -273,16 +275,15 @@ fn main() {
     app.on_open_urls(move |u| urls.push_urls(u));
     // macOS keeps running after ⌘W closes the last window (quick notes stay
     // available); clicking the Dock icon then brings the main window back.
-    app.on_reopen(|cx| if cx.windows().is_empty() && !onboarding::pending() { open_main_window(false, None, cx); });
+    app.on_reopen(|cx| if cx.windows().is_empty() { open_main_window(false, None, cx); });
     app.run(move |cx: &mut App| {
         #[cfg(target_os = "macos")]
         set_app_icon();
         init_app(cx);
         let quick_enabled = !scripted;
-        if onboard { onboarding::open(scripted, incoming, cx); } else { start(existed, scripted, None, incoming, cx); }
+        start(existed, scripted, opening, incoming, cx);
         cx.on_window_closed(move |cx, _| {
-            // Closing first launch's window before it finished quits: there is no library yet.
-            if (!quick_enabled || !cfg!(target_os = "macos") || onboarding::pending()) && cx.windows().is_empty() {
+            if (!quick_enabled || !cfg!(target_os = "macos")) && cx.windows().is_empty() {
                 cx.quit();
             }
         })

@@ -179,7 +179,7 @@ fn assets_above(blocks: &mut [Block], dir: &Path, root: Option<&Path>) {
 }
 
 /// One scanned folder as a library folder under `parent`; its id. Needs no
-/// window, so 欢迎页 can import on a background thread before the main window.
+/// window, so it can run on a background thread.
 pub(crate) fn import_tree(store: &mut crate::store::Store, t: &Scanned, parent: Option<&str>, failed: &mut usize) -> Option<String> {
     tree(store, t, &t.dir, parent, failed)
 }
@@ -1210,7 +1210,7 @@ mod tests {
 
     #[test]
     fn a_folder_import_keeps_each_files_times() {
-        // 导入文件夹, a dropped folder, and 欢迎页's Obsidian / Typora import (import_tree).
+        // 导入文件夹, a dropped folder, and 从其他应用导入's Obsidian / Typora import (import_tree).
         let (tmp, from, mut store) = places("folder");
         aged(&from.join("vault/a.md"), "a", THEN);
         aged(&from.join("vault/sub/b.md"), "b", THEN + 60);

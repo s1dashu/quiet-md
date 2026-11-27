@@ -12,7 +12,6 @@ Dependencies flow from the application and the CLI to core. Within the workspace
 
 ```text
 main.rs — window
-  ├─ onboarding.rs — first launch, replaced by Workspace in the same window after library selection
   └─ app.rs — Workspace (window root view)
        ├─ store.rs — library directories and .quiet/meta/ (see FORMAT.md) [core]
        ├─ meta.rs — FORMAT 5/6: metadata, deletions and hand order split by device, merged field by field [core]

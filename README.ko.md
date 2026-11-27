@@ -73,11 +73,7 @@
 
 ### 노트 가져오기
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md의 첫 실행 화면. 찾아낸 Obsidian 보관소를 그 자리에서 열겠냐고 묻고 있습니다.">
-</p>
-
-처음 실행하면 Quiet.md가 Obsidian, Logseq, iA Writer, Typora 라이브러리를 찾아 복사해 옵니다. 원본은 건드리지 않습니다. Obsidian의 `[[위키링크]]`도 그대로 동작해서, 클릭하면 가리키는 노트가 열립니다. 나중에도 Markdown 파일과 폴더를 폴더 페이지나 사이드바의 폴더로 바로 끌어다 놓을 수 있습니다. ‘다른 앱에서 가져오기…’로 SiYuan도 가져옵니다. 노트는 Markdown이나 PDF로 내보내거나 바로 인쇄할 수 있습니다.
+‘다른 앱에서 가져오기…’(파일 메뉴)는 이 컴퓨터의 Obsidian, Logseq, iA Writer, Typora 라이브러리와 SiYuan 작업 공간을 찾아 복사해 옵니다. 원본은 건드리지 않습니다. Obsidian의 `[[위키링크]]`도 그대로 동작해서, 클릭하면 가리키는 노트가 열립니다. 나중에도 Markdown 파일과 폴더를 폴더 페이지나 사이드바의 폴더로 바로 끌어다 놓을 수 있습니다. 노트는 Markdown이나 PDF로 내보내거나 바로 인쇄할 수 있습니다.
 
 ### 그 밖에
 
@@ -113,7 +109,7 @@
 
 [Quiet.md](https://quiet.md/?lang=en)에서도 내려받을 수 있습니다. 모든 릴리스와 SHA-256 체크섬은 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)에 있습니다.
 
-처음 실행하면 인터페이스 언어, 라이브러리 위치, 빠른 메모 단축키를 고르고, Obsidian, Logseq, iA Writer, Typora의 노트를 복사해 가져올 수 있습니다. 빈 라이브러리에는 **Getting started** 가이드가 들어갑니다. 주요 기능을 10분 만에 둘러보는 안내입니다. 이미 있는 노트는 덮어쓰지 않습니다.
+처음 실행하면 도큐멘트의 **Quiet Notes** 폴더(이전 버전이 만든 `Quiet.md` 폴더가 있으면 그 폴더)가 바로 열리고, 그 안에 **Getting started** 가이드가 들어 있습니다. 주요 기능을 10분 만에 둘러보는 안내입니다. 이미 있는 노트는 덮어쓰지 않습니다. 다른 폴더 추가나 다른 앱의 노트 가져오기는 언제든 파일 메뉴에서 할 수 있습니다.
 
 ## 성능
 

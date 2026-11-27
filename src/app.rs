@@ -24,7 +24,7 @@ const SAVE_DELAY: Duration = Duration::from_millis(500);
 const SAVE_MAX_DELAY: Duration = Duration::from_secs(2);
 
 actions!(workspace, [NewDoc, OpenFile, OpenFolder, ImportDoc, ImportFolder, ImportFromApps, ToggleSidebar, FocusSearch, FindInDoc, ReplaceInDoc, OpenSettings, OpenAbout, CheckForUpdates, CloseWindow, Quit,
-    ReplayOnboarding, HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen, ToggleDarkMode]);
+    HideApp, HideOthers, ShowAll, Minimize, Zoom, ToggleFullScreen, ToggleDarkMode]);
 // A confirmation dialog's keys, in its own key context: ↩ is the action button, Esc 取消.
 actions!(confirm, [ConfirmOk, ConfirmCancel]);
 
@@ -196,8 +196,6 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("cmd-n", NewDoc, None),
         KeyBinding::new("cmd-shift-n", crate::quick_note::QuickNew, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
-        // For trying the first-launch pages; not listed in Settings › Shortcuts.
-        KeyBinding::new("cmd-alt-shift-o", ReplayOnboarding, None),
         KeyBinding::new("cmd-shift-i", ImportDoc, None),
         KeyBinding::new("cmd-o", OpenFile, None),
         KeyBinding::new("cmd-shift-o", OpenFolder, None),
@@ -467,8 +465,6 @@ pub struct Workspace {
     pub confirm_return: Option<Option<WeakFocusHandle>>,
     /// The keyboard while 导出 Markdown or 文档信息 dialog (the confirmation has its own, `confirm_focus`) is open.
     pub dialog_focus: crate::design::DialogFocus,
-    /// The first-launch pages laid over the window again (⌘⌥⇧O, Settings › About).
-    pub onboarding: Option<Entity<crate::onboarding::Onboarding>>,
     pub view: View,
     pub folder_page: crate::folder_page::FolderPage,
     pub settings_scroll: ScrollHandle,
@@ -759,7 +755,6 @@ impl Workspace {
             confirm_focus: cx.focus_handle(),
             confirm_return: None,
             dialog_focus: crate::design::DialogFocus::new(cx),
-            onboarding: None,
             view: View::Doc,
             folder_page: Default::default(),
             settings_scroll: ScrollHandle::new(),
@@ -2235,7 +2230,6 @@ impl Render for Workspace {
             .on_action(|_: &Zoom, window, _| window.zoom_window())
             .on_action(|_: &ToggleFullScreen, window, _| window.toggle_fullscreen())
             .on_action(cx.listener(|w, _: &OpenSettings, _, cx| w.show_view(View::Settings, cx)))
-            .on_action(cx.listener(|w, _: &ReplayOnboarding, window, cx| w.replay_onboarding(window, cx)))
             .on_action(cx.listener(|w, _: &OpenAbout, _, cx| w.open_settings(crate::settings::Page::About, cx)))
             .on_action(cx.listener(|w, _: &CheckForUpdates, _, cx| { w.open_settings(crate::settings::Page::About, cx); crate::update::check(true, cx); }))
             .on_action(cx.listener(|w, _: &NewDoc, window, cx| w.new_doc(window, cx)))
@@ -2387,25 +2381,6 @@ impl Render for Workspace {
             .children(crumb_menu)
             .children(forced_update)
             .children(toast)
-            // Over everything, toasts included, until its last page is done.
-            .when_some(self.onboarding.clone(), |d, o| d.child(deferred(div().id("onboarding-cover").absolute().inset_0().occlude().child(o)).with_priority(30)))
-    }
-}
-
-impl Workspace {
-    /// Lay the first-launch pages over this window; finishing them uncovers it.
-    pub(crate) fn replay_onboarding(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.onboarding.is_some() { return }
-        let o = cx.new(|cx| crate::onboarding::Onboarding::replay(window, cx));
-        cx.subscribe_in(&o, window, |w, _, _: &crate::onboarding::Done, window, cx| {
-            w.onboarding = None;
-            // The language may have changed on the first page.
-            crate::settings::refresh_all(w, cx);
-            window.focus(&w.focus, cx);
-            cx.notify();
-        }).detach();
-        self.onboarding = Some(o);
-        cx.notify();
     }
 }
 

@@ -398,13 +398,6 @@ pub fn apply_appearance(pref: &str) {
     let _ = pref;
 }
 
-/// 关于 › 首次启动引导's note, its shortcut spelled as this platform binds it (cmd-alt-shift-o is
-/// Ctrl+Alt+Shift+O off the Mac); every translation carries the Mac glyphs, swapped here.
-fn onboarding_note() -> String {
-    let note = tr("在这个窗口上再走一遍首次启动的欢迎页（⌘⌥⇧O）；只会应用快捷键，不改动文档库", "Go through the first-launch pages again over this window (⌘⌥⇧O); only the shortcut is applied, the library stays as it is");
-    if cfg!(target_os = "macos") { note.to_string() } else { note.replace("⌘⌥⇧O", "Ctrl+Alt+Shift+O") }
-}
-
 /// Draw light or dark as the preference and the system say; true when the look changed.
 pub fn sync_dark(cx: &App) -> bool {
     let on = match prefs().appearance.as_str() {
@@ -1815,8 +1808,6 @@ impl Workspace {
             .child(group("group-update", None, vec![update_row(cx).into_any_element()]))
             .child(group("group-repo", None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
                 button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
-            .child(group("group-onboarding", None, vec![row(tr("首次启动引导", "Onboarding"), Some(onboarding_note().into()),
-                button("replay-onboarding", tr("打开", "Open")).on_click(cx.listener(|w, _, window, cx| w.replay_onboarding(window, cx)))).into_any_element()]))
             .into_any_element()
     }
 }

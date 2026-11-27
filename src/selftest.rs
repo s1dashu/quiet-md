@@ -98,7 +98,7 @@ fn drive(dir: &Path, report: &Path) -> anyhow::Result<bool> {
         let mut child = std::process::Command::new(&exe)
             .env(PHASE_ENV, phase.to_string()).env(DIR_ENV, &dir).env("QUIET_MD_HOME", &library)
             .env("QUIET_MD_LOG_DIR", dir.join("logs"))
-            .env_remove("FDL_SCRIPT").env_remove("QUIET_MD_UPDATE_URL").env_remove("QUIET_MD_ONBOARDING")
+            .env_remove("FDL_SCRIPT").env_remove("QUIET_MD_UPDATE_URL")
             .stdin(std::process::Stdio::null()).stdout(out.try_clone()?).stderr(out)
             .spawn()?;
         let t0 = Instant::now();

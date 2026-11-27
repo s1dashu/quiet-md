@@ -73,11 +73,7 @@
 
 ### 帶上舊筆記
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次啟動的畫面，提示原地開啟它找到的 Obsidian 筆記庫。">
-</p>
-
-第一次開啟時，Quiet.md 會找到你的 Obsidian、Logseq、iA Writer 與 Typora 筆記庫並複製進來，原始檔案不會被更動。Obsidian 的 `[[雙向連結]]` 照樣能用，點一下就會開啟它指向的筆記。之後也可以把 Markdown 檔案和資料夾拖到資料夾頁，或直接拖進側邊欄的某個資料夾；「從其他應用程式匯入…」還能匯入思源筆記。筆記也能匯出為 Markdown 或 PDF，或直接列印。
+「從其他應用程式匯入…」（在「檔案」選單裡）會找到這台電腦上的 Obsidian、Logseq、iA Writer、Typora 筆記庫與思源筆記工作空間並複製進來，原始檔案不會被更動。Obsidian 的 `[[雙向連結]]` 照樣能用，點一下就會開啟它指向的筆記。之後也可以把 Markdown 檔案和資料夾拖到資料夾頁，或直接拖進側邊欄的某個資料夾。筆記也能匯出為 Markdown 或 PDF，或直接列印。
 
 ### 還有更多
 
@@ -113,7 +109,7 @@
 
 你也可以前往 [Quiet.md](https://quiet.md/?lang=zh-Hant) 官方網站下載，所有發行版本與對應的 SHA-256 雜湊值皆公布於 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)。
 
-首次啟動時，Quiet.md 會詢問介面語言、文件庫儲存位置與快速筆記快速鍵，並提供從 Obsidian、Logseq、iA Writer 或 Typora 複製匯入既有筆記的選項。全新的空白文件庫會附帶一份 **Getting started** 入門指南，帶你在十分鐘內逛完主要功能，且絕不會覆寫任何既有筆記。
+首次啟動會直接開啟「文件」裡的 **Quiet Notes** 資料夾（先前版本建過 `Quiet.md` 資料夾的，就沿用它），裡面附有一份 **Getting started** 入門指南，帶你在十分鐘內逛完主要功能，且絕不會覆寫任何既有筆記。其他資料夾或其他應用程式裡的筆記，隨時都能從「檔案」選單加入或匯入。
 
 ## 效能表現
 

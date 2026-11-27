@@ -73,11 +73,7 @@ La barre latérale regroupe vos dossiers de premier niveau, et la page de chacun
 
 ### Apporter vos notes
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="L'écran du premier lancement de Quiet.md, qui propose d'ouvrir sur place un coffre Obsidian trouvé sur l'ordinateur.">
-</p>
-
-Au premier lancement, Quiet.md cherche vos bibliothèques Obsidian, Logseq, iA Writer et Typora et les copie, sans toucher aux originaux. Les `[[liens wiki]]` d'Obsidian continuent de fonctionner : cliquez sur l'un d'eux pour ouvrir la note visée. Ensuite, glissez des fichiers et dossiers Markdown sur la page d'un dossier ou directement dans un dossier de la barre latérale ; Importer depuis une autre app… prend aussi les espaces de travail SiYuan. Les notes repartent en Markdown ou en PDF, ou directement vers l'imprimante.
+Importer depuis une autre app… (dans le menu Fichier) cherche sur l'ordinateur vos bibliothèques Obsidian, Logseq, iA Writer et Typora et vos espaces de travail SiYuan, et les copie sans toucher aux originaux. Les `[[liens wiki]]` d'Obsidian continuent de fonctionner : cliquez sur l'un d'eux pour ouvrir la note visée. Ensuite, glissez des fichiers et dossiers Markdown sur la page d'un dossier ou directement dans un dossier de la barre latérale. Les notes repartent en Markdown ou en PDF, ou directement vers l'imprimante.
 
 ### Et aussi
 
@@ -113,7 +109,7 @@ Au premier lancement, Quiet.md cherche vos bibliothèques Obsidian, Logseq, iA W
 
 Vous pouvez aussi télécharger depuis [Quiet.md](https://quiet.md/?lang=fr). Chaque version et ses sommes de contrôle SHA-256 sont sur [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
 
-Au premier lancement, Quiet.md demande la langue de l'interface, l'emplacement de votre bibliothèque et le raccourci de note rapide, et propose de copier vos notes depuis Obsidian, Logseq, iA Writer ou Typora. Une bibliothèque vide reçoit le guide **Getting started** : une visite de dix minutes des principales fonctionnalités. Les notes existantes ne sont jamais écrasées.
+Au premier lancement, Quiet.md ouvre directement un dossier **Quiet Notes** dans vos Documents (ou le dossier `Quiet.md` qu'une version précédente y a créé), avec le guide **Getting started** : une visite de dix minutes des principales fonctionnalités. Les notes existantes ne sont jamais écrasées. Ajoutez d'autres dossiers ou importez les notes d'autres apps quand vous voulez, depuis le menu Fichier.
 
 ## Performances
 

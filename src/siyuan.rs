@@ -1,5 +1,5 @@
 //! 导入思源笔记: the app's side of `fdl_core::siyuan` — the text it writes
-//! in the interface's language, one run shared by the 导入 menu and 欢迎页,
+//! in the interface's language, one run shared by the 导入 menu and 从其他应用导入,
 //! the toast that ends it, and the 导入报告 page listing what changed form.
 
 use crate::model::{Block, BlockKind, Document, InlineDocLink, InlineKind, Marks, RichText};

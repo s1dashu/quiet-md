@@ -430,8 +430,6 @@ fn change(id: &str, key: Option<String>, cx: &mut App) -> anyhow::Result<()> {
     cx.global_mut::<Shortcuts>().custom = custom;
     rebuild(cx); cx.refresh_windows(); Ok(())
 }
-/// First launch's choice of the quick-note shortcut.
-pub(crate) fn set_global(key: &str, cx: &mut App) -> anyhow::Result<()> { change("global", Some(key.into()), cx) }
 fn write(custom: &BTreeMap<String, String>) -> anyhow::Result<()> {
     use std::io::Write;
     let tmp = path().with_extension("json.tmp");

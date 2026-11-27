@@ -358,11 +358,6 @@ pub fn shadow_dialog() -> Vec<BoxShadow> {
     vec![shadow(0.06, 2., 8., 0.), shadow(0.16, 24., 64., 0.)]
 }
 
-/// Cards resting on the sidebar (更新日志): a faint lift, no border.
-pub fn shadow_card() -> Vec<BoxShadow> {
-    vec![shadow(0.04, 1., 2., 0.), shadow(0.06, 4., 14., 0.)]
-}
-
 /// A folder page's document cards: the folder card's shadow (`folder_card`), fainter,
 /// cast from the same inset box so the two line up along the bottom.
 pub fn shadow_sheet() -> Vec<BoxShadow> {

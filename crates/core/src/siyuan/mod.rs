@@ -127,7 +127,7 @@ pub fn recognizes(path: &Path) -> bool {
     is_notebook(dir) || crate::vfs::read_dir(dir).into_iter().flatten().flatten().any(|e| is_notebook(&e.path()))
 }
 
-/// How many documents the notebooks in `path` hold (欢迎页's count); stops at `limit`.
+/// How many documents the notebooks in `path` hold (从其他应用导入's count); stops at `limit`.
 pub fn count_docs(path: &Path, limit: usize) -> usize {
     fn walk(dir: &Path, n: &mut usize, limit: usize) {
         for e in crate::vfs::read_dir(dir).into_iter().flatten().flatten() {

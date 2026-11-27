@@ -13,7 +13,7 @@ ap.add_argument('shot'); ap.add_argument('out')
 ap.add_argument('--sidebar', type=int, default=0, help='sidebar width in pixels; 0: no glass')
 ap.add_argument('--flat', help='a plain backdrop colour instead of the meadow')
 ap.add_argument('--canvas', type=int, nargs=2, default=(2400, 1500)); ap.add_argument('--at', type=int, nargs=2, default=(200, 135))
-ap.add_argument('--no-lights', action='store_true', help='the shot has no title bar (onboarding draws none)')
+ap.add_argument('--no-lights', action='store_true', help='the shot has no title bar')
 a = ap.parse_args()
 repo = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')
 (W, H), (X, Y), R = a.canvas, a.at, 52  # R: macOS 26's window corner, 26pt

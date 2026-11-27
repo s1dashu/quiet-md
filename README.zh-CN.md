@@ -73,11 +73,7 @@
 
 ### 带上旧笔记
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="Quiet.md 首次启动的画面，提示原地打开它找到的 Obsidian 库。">
-</p>
-
-第一次打开时，Quiet.md 会找到你的 Obsidian、Logseq、iA Writer 和 Typora 笔记库并复制进来，原文件不会被改动。Obsidian 的 `[[双链]]` 照样能用，点一下就打开它指向的笔记。之后也可以把 Markdown 文件和文件夹拖到文件夹页，或者直接拖进侧栏的某个文件夹；「从其他应用导入…」还能导入思源笔记。笔记也能导出成 Markdown 或 PDF，或者直接打印。
+「从其他应用导入…」（在「文件」菜单里）会找到这台电脑上的 Obsidian、Logseq、iA Writer、Typora 笔记库和思源笔记工作空间并复制进来，原文件不会被改动。Obsidian 的 `[[双链]]` 照样能用，点一下就打开它指向的笔记。之后也可以把 Markdown 文件和文件夹拖到文件夹页，或者直接拖进侧栏的某个文件夹。笔记也能导出成 Markdown 或 PDF，或者直接打印。
 
 ### 还有
 
@@ -113,7 +109,7 @@
 
 也可以在官网 [Quiet.md](https://quiet.md) 下载。所有版本和 SHA-256 校验值见 [GitHub Releases](https://github.com/s1dashu/quiet-md/releases)。
 
-首次启动时可以选择界面语言、文档库位置和随手记快捷键，并可从 Obsidian、Logseq、iA Writer、Typora 复制已有笔记进来。空文档库里会放一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。
+首次启动会直接打开「文稿」里的 **Quiet Notes** 文件夹（以前的版本建过 `Quiet.md` 文件夹的，就用它），里面放着一套「开始指南」，十分钟带你过一遍主要功能；已有的笔记不会被覆盖。别的文件夹、其他应用里的笔记，随时可以从「文件」菜单添加或导入。
 
 ## 性能
 

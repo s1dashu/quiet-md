@@ -73,11 +73,7 @@ La barra lateral agrupa tus carpetas de primer nivel, y la página de cada una e
 
 ### Trae tus notas
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="La pantalla del primer inicio de Quiet.md, que ofrece abrir donde está una bóveda de Obsidian que ha encontrado.">
-</p>
-
-En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y las copia, sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown a la página de una carpeta o directamente a una carpeta de la barra lateral; Importar desde otra app… también trae espacios de trabajo de SiYuan. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
+Importar desde otra app… (en el menú Archivo) busca en el ordenador tus bibliotecas de Obsidian, Logseq, iA Writer y Typora y tus espacios de trabajo de SiYuan, y los copia sin tocar los originales. Los `[[enlaces wiki]]` de Obsidian siguen funcionando: haz clic en uno para abrir la nota a la que apunta. Más adelante, arrastra archivos y carpetas Markdown a la página de una carpeta o directamente a una carpeta de la barra lateral. Las notas vuelven a salir como Markdown o PDF, o directas a la impresora.
 
 ### Y además
 
@@ -113,7 +109,7 @@ En el primer inicio, Quiet.md busca tus bibliotecas de Obsidian, Logseq, iA Writ
 
 También puedes descargarla desde [Quiet.md](https://quiet.md/?lang=en). Todas las versiones y sus sumas SHA-256 están en [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
 
-En el primer arranque eliges el idioma, dónde guardar la biblioteca y el atajo de notas rápidas, y puedes copiar tus notas de Obsidian, Logseq, iA Writer o Typora. Una biblioteca vacía recibe la guía **Getting started**: un recorrido de diez minutos por las funciones principales. Nunca sobrescribe las notas que ya tengas.
+En el primer arranque, Quiet.md abre directamente una carpeta **Quiet Notes** en tus Documentos (o la carpeta `Quiet.md` que creó una versión anterior) con la guía **Getting started**: un recorrido de diez minutos por las funciones principales. Nunca sobrescribe las notas que ya tengas. Añade otras carpetas o trae notas de otras apps cuando quieras, desde el menú Archivo.
 
 ## Rendimiento
 

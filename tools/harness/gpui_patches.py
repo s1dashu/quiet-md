@@ -410,21 +410,6 @@ def shortcuts():
     compare("shortcuts", "0028", [], steps, library("keys", xml, extra), extra_check=check)
 
 
-def first_launch():
-    """0010: first launch replaces the onboarding view with the workspace in the same window;
-    afterwards the window is found as the workspace: ⌘Q right after typing saves the new
-    document through `app::quit`, which looks the window up with downcast::<Workspace>()."""
-    lib = work / "src" / "empty"
-    lib.mkdir(parents=True, exist_ok=True)
-    steps = ("shot o0\n" + "\n".join("key enter\nwait 600" for _ in range(8)) + "\nwait 1500\nshot o1\n"
-             # Keys reach the workspace once a click has focused it (both builds).
-             "click 66 67\nwait 800\nkey cmd-n\nwait 800\ntype FIRSTLAUNCH\nkey cmd-q\nwait 2000")
-    def check(folder):
-        found = [p for p in (folder / "lib").rglob("*.xml") if ".quiet" not in p.parts and "FIRSTLAUNCH" in p.read_text()]
-        return None if found else "the document typed before ⌘Q was not saved"
-    compare("first-launch", "0010", ["o1"], steps, lib, env={"QUIET_MD_ONBOARDING": "1"}, extra_check=check)
-
-
 def nested_deferred():
     """A deferred inside a deferred (#327): the board's canvas background picker opens from the main menu.
     GPUI 0.2 asserted "cannot call defer_draw during deferred drawing" and the app aborted."""
@@ -445,7 +430,7 @@ def nested_deferred():
 
 
 CASES = {"text": text_cases, "dark": dark_cjk, "home": home_rtl, "scrollbar": scrollbar, "table": wide_table,
-         "images": images, "home_images": home_images, "lists": lists, "shortcuts": shortcuts, "first_launch": first_launch,
+         "images": images, "home_images": home_images, "lists": lists, "shortcuts": shortcuts,
          "nested_deferred": nested_deferred}
 
 if __name__ == "__main__":

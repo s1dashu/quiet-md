@@ -3,7 +3,7 @@
 //! thread and hands everything back at once. The window waits up to `WAIT`
 //! for it before its first frame, so a small or already-read library opens
 //! as it always did; past that, sidebar and the page hold still until
-//! `SHOW_AFTER`, then skeleton rows and the onboarding's drifting light
+//! `SHOW_AFTER`, then skeleton rows and a drifting light
 //! show with how far it got, and fade out over what was found.
 //!
 //! One hand-back, not batches: rows coming in batches would reorder the
@@ -16,7 +16,7 @@
 
 use crate::settings::tr;
 use crate::store::{Entry, ListProgress, Store};
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
 use crate::design::color;
 use gpui::*;
 use std::sync::{Arc, atomic::Ordering};
@@ -216,7 +216,7 @@ pub fn progress_line(done: usize, total: usize) -> String {
     else { crate::localized_format!("正在载入 {} / {} 篇", "Loading {} of {} notes", grouped(done.min(total)), grouped(total)) }
 }
 
-/// What the page shows meanwhile: the onboarding's drifting light, the spinner,
+/// What the page shows meanwhile: a drifting light, the spinner,
 /// how far it got and a thin bar of it.
 pub fn note_layer(phase: Phase, cover: f32, t: f32, (done, total): (usize, usize)) -> Stateful<Div> {
     let bar = (total > 0).then(|| {
@@ -226,7 +226,7 @@ pub fn note_layer(phase: Phase, cover: f32, t: f32, (done, total): (usize, usize
     });
     div().id("library-loading").absolute().inset_0().opacity(cover).bg(color::background()).occlude()
         .child(div().absolute().inset_0().opacity(phase.content())
-            .child(canvas(|b, _, _| b, move |_, b, window, _| crate::onboarding::paint_backdrop(b, t, window)).absolute().inset_0())
+            .child(canvas(|b, _, _| b, move |_, b, window, _| paint_backdrop(b, t, window)).absolute().inset_0())
             .child(div().absolute().inset_0().flex().flex_col().items_center().justify_center().gap(px(14.))
                 .child(crate::ui::spinner(t, color::foreground()))
                 .child(div().text_size(px(15.)).line_height(px(22.)).font_weight(FontWeight::MEDIUM).text_color(color::foreground())
@@ -250,6 +250,63 @@ pub fn sidebar_rows(phase: Phase, t: f32) -> Div {
     }
     div().opacity(phase.cover()).child(list)
 }
+
+/// The loading layer's backdrop: soft light on a near-white page, frosted
+/// with grain: sky blue above, cloud and grass green below, each patch a blurred circle wandering on its
+/// own slow loop. Colours measured from the website's hillside picture
+/// (site/public/bg.png).
+pub(crate) fn paint_backdrop(b: Bounds<Pixels>, t: f32, window: &mut Window) {
+    use std::f32::consts::TAU;
+    let (x, y, w, h) = (f32::from(b.left()), f32::from(b.top()), f32::from(b.size.width), f32::from(b.size.height));
+    let dark = theme::dark();
+    window.paint_quad(fill(b, if dark { Theme::bg_body() } else { rgb(0xfdfdfd).into() }));
+    // Centre (shares of the window), diameter (share of the width), colour, strength, loop lengths in seconds.
+    // Laid out like the website's hillside: sky over the top half, a pale cloud at the left of the horizon, grass over the
+    // bottom third. Light washes of those colours, so the page stays bright.
+    const PATCHES: [(f32, f32, f32, u32, f32, f32, f32); 7] = [
+        (0.12, 0.08, 0.48, 0x4f97ea, 0.5, 23., 31.),
+        (0.50, 0.02, 0.46, 0x4793e6, 0.42, 37., 27.),
+        (0.86, 0.10, 0.46, 0x4f97ea, 0.5, 33., 25.),
+        (0.16, 0.60, 0.30, 0xc5dabd, 0.8, 41., 29.),
+        (0.10, 0.98, 0.50, 0xb1c78d, 0.7, 29., 19.),
+        (0.52, 1.04, 0.50, 0xb1c78d, 0.62, 31., 23.),
+        (0.92, 0.96, 0.50, 0x95b676, 0.55, 27., 35.),
+    ];
+    for (i, &(cx, cy, d, color, k, lx, ly)) in PATCHES.iter().enumerate() {
+        let ph = i as f32 * 1.7;
+        let cx = x + w * (cx + 0.08 * (TAU * t / lx + ph).sin());
+        let cy = y + h * (cy + 0.05 * (TAU * t / ly + ph).cos());
+        let d = w * d * (1. + 0.10 * (TAU * t / (lx + ly) + ph).sin());
+        let c = Hsla::from(rgb(color)).opacity(if dark { 0.16 } else { k });
+        window.paint_drop_shadows(Bounds::new(point(px(cx - d / 2.), px(cy - d / 2.)), size(px(d), px(d))), Corners::all(px(d / 2.)),
+            &[BoxShadow { color: c, offset: point(px(0.), px(0.)), blur_radius: px(d * 0.45), spread_radius: px(0.), inset: false }]);
+    }
+    // Grain: one tile of noise repeated, a texel per point.
+    let tile = GRAIN_N as f32;
+    let (mut ty, img) = (y, GRAIN.clone());
+    while ty < y + h {
+        let mut tx = x;
+        while tx < x + w {
+            let ib = Bounds::new(point(px(tx), px(ty)), size(px(tile), px(tile)));
+            let _ = window.paint_image(ib, ib, Corners::default(), img.clone(), 0, false);
+            tx += tile;
+        }
+        ty += tile;
+    }
+}
+
+const GRAIN_N: u32 = 320;
+/// Specks mostly lighter than what's under them, barely any darker, so the
+/// frost brightens the page instead of greying it (BGRA).
+static GRAIN: std::sync::LazyLock<std::sync::Arc<RenderImage>> = std::sync::LazyLock::new(|| {
+    let mut s: u32 = 0x9e37_79b9;
+    let buf = image::RgbaImage::from_fn(GRAIN_N, GRAIN_N, |_, _| {
+        s ^= s << 13; s ^= s >> 17; s ^= s << 5;
+        let v = (s >> 24) as f32 / 255. * 2. - 1.;
+        if v < 0. { image::Rgba([0, 0, 0, (-v * 9.) as u8]) } else { image::Rgba([255, 255, 255, (v * 70.) as u8]) }
+    });
+    std::sync::Arc::new(RenderImage::new(vec![image::Frame::new(buf)]))
+});
 
 #[cfg(test)]
 mod tests {

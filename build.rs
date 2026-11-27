@@ -61,7 +61,7 @@ END
 /// Files under assets/ the binary never reads: source art, the preview's dev
 /// icon (scripts/preview.sh), the Windows icon (linked as a resource below and
 /// used by the installer), themes (`include_str!` in src/themes.rs) and notes.
-const SKIP: &[&str] = &["branding/hamster-source.png", "branding/quiet-q/", "branding/app-icon-dev.png", "branding/app-icon.ico", "themes/", "onboarding/README.md"];
+const SKIP: &[&str] = &["branding/hamster-source.png", "branding/quiet-q/", "branding/app-icon-dev.png", "branding/app-icon.ico", "themes/"];
 
 fn embed(source: &str, output: &str, skip: &[&str]) {
     // Read at run time: a compile-time path goes stale when the checkout moves.

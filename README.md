@@ -73,11 +73,7 @@ The sidebar groups your top-level folders, and each one's page is its home: subf
 
 ### Bring your notes
 
-<p align="center">
-  <img src="docs/images/readme-import.webp" width="100%" alt="The first-launch screen of Quiet.md, offering to open an Obsidian vault it found, where it is.">
-</p>
-
-On first launch, Quiet.md looks for your Obsidian, Logseq, iA Writer and Typora libraries and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto a folder's page or straight into a sidebar folder; Import from Another App… also takes SiYuan workspaces. Notes go out again as Markdown or PDF, or straight to the printer.
+Import from Another App… (in the File menu) finds your Obsidian, Logseq, iA Writer and Typora libraries and SiYuan workspaces on this computer and copies them in, leaving the originals alone. Obsidian `[[wikilinks]]` keep working: click one to open the note it points to. Later, drag Markdown files and folders onto a folder's page or straight into a sidebar folder. Notes go out again as Markdown or PDF, or straight to the printer.
 
 ### Work with agents
 
@@ -118,7 +114,7 @@ The `quiet` command line tool lets an AI agent (Claude Code, Codex and others) r
 
 You can also download from [Quiet.md](https://quiet.md/?lang=en). Every release and its SHA-256 checksums are on [GitHub Releases](https://github.com/s1dashu/quiet-md/releases).
 
-On first launch, Quiet.md asks for the interface language, where to keep your library and the quick-note shortcut, and offers to copy in notes from Obsidian, Logseq, iA Writer or Typora. An empty library gets a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten.
+On first launch, Quiet.md opens straight into a **Quiet Notes** folder in your Documents (or the `Quiet.md` folder an earlier version made there) with a **Getting started** guide — a ten-minute tour of the main features. Existing notes are never overwritten. Add other folders or bring notes from other apps whenever you like, from the File menu.
 
 ## Use with AI agents
 
