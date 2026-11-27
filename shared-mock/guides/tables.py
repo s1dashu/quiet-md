@@ -6,6 +6,9 @@ usage: python3 shared-mock/guides/tables.py path/to/quiet
   src/07a-reading-list.sqlite, src/zh/07a-reading-list.sqlite
       the example: 20 books, one field of each type a 数据表 offers (关联 and
       查找引用 reach into another table, which a file of one table has not)
+  src/07b-guide-index.sqlite, src/zh/07b-guide-index.sqlite
+      a table of the guides themselves: each record's 笔记 cell points at its
+      guide, written `{{doc:key}}` here and made a path by build.py
   assets/tables/reading-week.sqlite, assets/tables/reading-week-zh.sqlite
       the small table embedded in the 数据表 guide (`<datatable src=…>`): its
       table and view names are written there too, keep them in step
@@ -13,7 +16,7 @@ usage: python3 shared-mock/guides/tables.py path/to/quiet
 They are binary files: build.py copies them as they are. The attachment a
 book carries is a file of the guides' assets (assets/reading/).
 """
-import json, shutil, subprocess, sys, tempfile
+import json, shutil, sqlite3, subprocess, sys, tempfile
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
@@ -103,6 +106,58 @@ reading(here / "src" / "zh" / "07a-reading-list.sqlite", "阅读清单", "全部
          "价格", "折扣", "已购买", "ISBN", "维基百科", "购于", "借给", "Email", "电话", "附件",
          "读书笔记", "编号", "添加时间", "最后更新时间"],
         ["未开始", "在读", "已读完", "放弃"], "¥", ZH)
+
+# The guides as records, their 笔记 field second: a key of build.py's KEYS per record.
+def index(out, title, view, names, folders, kinds, rows):
+    fields = [(names[0], "text"), (names[1], "note"), (names[2], "single_select", "--options", ",".join(folders)),
+              (names[3], "single_select", "--options", ",".join(kinds)), (names[4], "number"), (names[5], "number"),
+              (names[6], "checkbox"), (names[7], "multi_select")]
+    make(out, title, view, fields, [(r[0], "") + r[2:] for r in rows])
+    db = sqlite3.connect(out)
+    for (rid, topic), r in zip(db.execute(f'SELECT id, "{names[0]}" FROM "{title}" ORDER BY _order, id').fetchall(), rows):
+        assert topic == r[0]
+        db.execute(f'UPDATE "{title}" SET "{names[1]}" = ? WHERE id = ?', ("{{doc:%s}}" % r[1], rid))
+    # wide enough for a guide's title
+    ids = dict(db.execute("SELECT name, id FROM _fields").fetchall())
+    (vid, config), = db.execute("SELECT id, config FROM _views").fetchall()
+    config = json.loads(config)
+    config["widths"] = {str(ids[n]): w for n, w in zip(names, [160, 320, 140, 130, 90, 90, 80, 200])}
+    db.execute("UPDATE _views SET config = ? WHERE id = ?", (json.dumps(config, ensure_ascii=False, separators=(",", ":")), vid))
+    db.commit()
+    db.close()
+# topic, guide, folder, type, order, minutes, read, covers
+INDEX_EN = [
+    ("Start here", "welcome", "Home", "Document", 1, 4, "true", "Basics"),
+    ("Writing", "writing", "Documents", "Document", 2, 9, "", "Text"),
+    ("Tables and code", "tables", "Documents", "Document", 3, 8, "", "Tables, Code"),
+    ("Images and files", "media", "Documents", "Document", 4, 3, "", "Images, Files"),
+    ("Markdown", "markdown", "Markdown files", "Document", 5, 4, "", "Markdown"),
+    ("A Markdown file", "md-example", "Markdown files", "Markdown file", 6, 1, "", "Markdown"),
+    ("Boards", "boards", "Boards", "Document", 7, 8, "", "Boards"),
+    ("Databases", "data-tables", "Databases", "Document", 8, 3, "", "Databases"),
+    ("Organize and search", "organize", "Everyday use", "Document", 9, 7, "", "Folders, Search"),
+    ("Import and back up", "data", "Everyday use", "Document", 10, 5, "", "Import, Backup"),
+    ("Themes and shortcuts", "personalize", "Everyday use", "Document", 11, 4, "", "Themes, Shortcuts"),
+]
+INDEX_ZH = [
+    ("从这里开始", "welcome", "主页", "文档", 1, 4, "true", "入门"),
+    ("书写", "writing", "文档", "文档", 2, 9, "", "文字"),
+    ("表格与代码", "tables", "文档", "文档", 3, 8, "", "表格、代码"),
+    ("图片与附件", "media", "文档", "文档", 4, 3, "", "图片、附件"),
+    ("Markdown", "markdown", "Markdown 文件", "文档", 5, 4, "", "Markdown"),
+    ("一个 Markdown 文件", "md-example", "Markdown 文件", "Markdown 文件", 6, 1, "", "Markdown"),
+    ("画板", "boards", "画板", "文档", 7, 8, "", "画板"),
+    ("数据表", "data-tables", "数据表", "文档", 8, 3, "", "数据表"),
+    ("整理与查找", "organize", "日常使用", "文档", 9, 7, "", "文件夹、搜索"),
+    ("导入与备份", "data", "日常使用", "文档", 10, 5, "", "导入、备份"),
+    ("主题与快捷键", "personalize", "日常使用", "文档", 11, 4, "", "主题、快捷键"),
+]
+index(here / "src" / "07b-guide-index.sqlite", "Guide index", "All guides",
+      ["Topic", "Guide", "Folder", "Type", "Order", "Minutes", "Read", "Covers"],
+      ["Home", "Documents", "Markdown files", "Boards", "Databases", "Everyday use"], ["Document", "Markdown file"], INDEX_EN)
+index(here / "src" / "zh" / "07b-guide-index.sqlite", "指南目录", "全部",
+      ["主题", "指南", "文件夹", "类型", "顺序", "分钟", "已读", "内容"],
+      ["主页", "文档", "Markdown 文件", "画板", "数据表", "日常使用"], ["文档", "Markdown 文件"], INDEX_ZH)
 
 # The small table the 数据表 guide shows inside its page.
 make(here / "assets" / "tables" / "reading-week.sqlite", "This week", "All sessions",

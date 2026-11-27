@@ -12,6 +12,8 @@ those). Placeholders in the .xml ones:
   {{reminder-day:YYYY-MM-DD}}       whole-day reminder, notified 09:00 that day
   {{countdown:YYYY-MM-DD HH:MM}}    countdown block to that moment (blue)
   {{button:Action|url|text|color}}  inline button (OpenLink / DuplicatePage)
+A 数据表's 笔记 cell may hold {{doc:key}} too: it becomes the guide's path,
+relative to the table's folder, as a 笔记 cell holds it.
 Assets under guides/assets are copied to <out>/.assets/guides.
 
 `--lang zh` builds the Simplified Chinese guides from src/zh/*.xml (same file
@@ -26,7 +28,7 @@ relative to the file, and what the files cannot say in .quiet/meta/, as one
 device's shards. That device is DEVICE: the app seeds the library as this
 computer's (`guides.rs`), so a new library opens with nothing to upgrade.
 """
-import datetime as dt, hashlib, json, re, shutil, sys, time, uuid
+import datetime as dt, hashlib, json, re, shutil, sqlite3, sys, time, uuid
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
@@ -60,14 +62,15 @@ KEYS = {
     "06a-trip": ("board-trip", "boards-folder", False),
     "07-data-tables": ("data-tables", "data-tables-folder", False),
     "07a-reading-list": ("reading-list", "data-tables-folder", False),
+    "07b-guide-index": ("guide-index", "data-tables-folder", False),
     "08-organize": ("organize", "everyday", False),
     "09-data": ("data", "everyday", False),
     "10-personalize": ("personalize", "everyday", False),
 }
 # What is not a DocxXML document (a Markdown file, a 画板, a 数据表) is titled
 # by its file name: key -> title. Its source is copied as it is.
-NAMED = ({"md-example": "Markdown 示例", "board-trip": "规划一次旅行", "reading-list": "阅读清单"} if zh else
-         {"md-example": "Markdown example", "board-trip": "Plan a trip", "reading-list": "Reading list"})
+NAMED = ({"md-example": "Markdown 示例", "board-trip": "规划一次旅行", "reading-list": "阅读清单", "guide-index": "指南目录"} if zh else
+         {"md-example": "Markdown example", "board-trip": "Plan a trip", "reading-list": "Reading list", "guide-index": "Guide index"})
 ids = {k: str(uuid.uuid5(NS, k)) for k, _, _ in KEYS.values()}
 ids.update({k: str(uuid.uuid5(NS, k)) for k in FOLDERS})
 files = [p for p in sorted((here / "src" / ("zh" if zh else "")).iterdir()) if p.is_file() and not p.name.startswith(".")]
@@ -148,6 +151,17 @@ def fill(x):
 
 covers = set()
 
+def fill_notes(path):
+    """The 笔记 cells of the 数据表 at `path` that say {{doc:key}}: that guide's path from here_dir."""
+    db = sqlite3.connect(path)
+    for table, field in db.execute("SELECT table_name, name FROM _fields WHERE type = 'note'").fetchall():
+        for rid, v in db.execute(f'SELECT id, "{field}" FROM "{table}" WHERE "{field}" LIKE ?', ("{{%",)).fetchall():
+            k = re.fullmatch(r"\{\{doc:([a-z-]+)\}\}", v)
+            assert k and k.group(1) in paths and ext[k.group(1)] in (".xml", ".md"), f"{path.name}: {v} is not a document's"
+            db.execute(f'UPDATE "{table}" SET "{field}" = ? WHERE id = ?', (rel_path(here_dir, paths[k.group(1)]), rid))
+    db.commit()
+    db.close()
+
 if out.exists() and any(out.iterdir()):
     sys.exit(f"{out} is not empty")
 out.mkdir(parents=True, exist_ok=True)
@@ -164,7 +178,7 @@ for k, title in FOLDERS.items():
 for i, (k, parent, pinned) in enumerate(order):
     here_dir = paths[k].rpartition("/")[0]
     if ext[k] == ".xml": (out / paths[k]).write_text(fill(srcs[k]))
-    elif ext[k] == ".sqlite": (out / paths[k]).write_bytes(srcs[k])
+    elif ext[k] == ".sqlite": (out / paths[k]).write_bytes(srcs[k]); fill_notes(out / paths[k])
     else: (out / paths[k]).write_text(srcs[k])
     # Reading order is written out: TOP places the top level, and a folder's
     # pages are numbered in file order.

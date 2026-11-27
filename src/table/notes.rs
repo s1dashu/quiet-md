@@ -221,13 +221,13 @@ pub(crate) fn typing(v: &TableView, window: &Window, cx: &App) -> bool {
 /// its note shows in 记录详情, made first if the cell is empty.
 pub(crate) fn open_cell(v: &mut TableView, cell: CellId, at: Point<Pixels>, window: &mut Window, cx: &mut Context<TableView>) {
     refresh(v, cx);
-    // a table that got its 笔记 column before tables had folders moves into one now
-    let Some(h) = ensure_folder(v, cx) else { return };
+    if v.notes.place.is_none() { return }
     let got = v.state.read(cx).doc.base.table(v.table).and_then(|t| Some((t.record(cell.0)?.get(cell.1).clone(), t.title(t.record(cell.0)?))));
     let Some((val, title)) = got else { return };
     let id = match &val {
         Value::Text(href) => info(v, href).map(|n| n.id.clone()),
-        _ => make(v, &h, cell, &title, cx),
+        // only a new note needs the notes folder: a cell pointing at a document elsewhere makes none
+        _ => { let Some(h) = ensure_folder(v, cx) else { return }; make(v, &h, cell, &title, cx) }
     };
     record::open(v, cell.0, window, cx);
     match id {

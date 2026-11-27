@@ -232,6 +232,19 @@ mod tests {
         let links: Vec<_> = docs.iter().flat_map(|e| e.links.iter()).collect();
         assert!(!links.is_empty());
         for l in links { assert!(ids.contains(l.target.as_str()), "unresolved link {}", l.target); }
+        // So are the 数据表's 笔记 cells (the guide index's): each one a guide.
+        use fdl_core::table::{field, FieldType, Value};
+        let mut notes = 0;
+        for e in docs.iter().filter(|e| e.meta.kind == DocKind::Table) {
+            let base = fdl_core::table::sqlite::load(&store.file_path(&e.id).unwrap()).unwrap();
+            for t in &base.tables { for f in t.fields.iter().filter(|f| f.ty == FieldType::Note) { for r in &t.records {
+                let Value::Text(href) = r.get(f.id) else { continue };
+                let rel = field::note_rel(&e.meta.rel, href);
+                assert!(docs.iter().any(|d| Some(&d.meta.rel) == rel.as_ref() && d.meta.kind == DocKind::Doc), "{}: {href} is no guide", e.meta.rel);
+                notes += 1;
+            } } }
+        }
+        assert!(notes >= 10, "{notes} 笔记 cells");
         for e in docs.iter().filter(|e| !e.meta.named_by_file()) {
             let name = store.file_path(&e.id).unwrap().file_stem().unwrap().to_string_lossy().into_owned();
             assert_eq!(name, crate::store::file_name_for(&e.title), "build.py names {} differently", e.title);
