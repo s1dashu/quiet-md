@@ -107,3 +107,18 @@ pub fn block_grid(root: &std::path::Path, r: &TableRef) -> Vec<Vec<String>> {
 }
 #[cfg(target_family = "wasm")]
 pub fn block_grid(_root: &std::path::Path, _r: &TableRef) -> Vec<Vec<String>> { vec![] }
+
+/// `block_grid`'s header and first `rows` records, `cols` columns wide: what a card shows,
+/// without turning every cell of a table of thousands of records into text.
+#[cfg(not(target_family = "wasm"))]
+pub fn block_grid_head(root: &std::path::Path, r: &TableRef, rows: usize, cols: usize) -> Vec<Vec<String>> {
+    let Ok(base) = sqlite::load(&root.join(&r.src)) else { return vec![] };
+    let base = Doc::new(base).base;
+    let Some((t, v)) = shown(&base, r) else { return vec![] };
+    let records = query::run(&base, t, v).records;
+    let mut grid = csv::export_head(&base, t, v, &records[..records.len().min(rows)], cols);
+    grid.truncate(rows + 1);
+    grid
+}
+#[cfg(target_family = "wasm")]
+pub fn block_grid_head(_root: &std::path::Path, _r: &TableRef, _rows: usize, _cols: usize) -> Vec<Vec<String>> { vec![] }

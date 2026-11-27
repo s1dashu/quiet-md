@@ -139,8 +139,12 @@ pub fn import(base: &mut Base, name: &str, text: &str) -> Table {
 
 /// A view as a grid of text: the visible fields' names, then each of
 /// `records` (indexes into `t.records`, a query's result) as the cells show.
-pub fn export(base: &Base, t: &Table, view: &View, records: &[usize]) -> Vec<Vec<String>> {
-    let fields = t.visible_fields(view);
+pub fn export(base: &Base, t: &Table, view: &View, records: &[usize]) -> Vec<Vec<String>> { export_head(base, t, view, records, usize::MAX) }
+
+/// `export` of the first `cols` visible fields.
+pub fn export_head(base: &Base, t: &Table, view: &View, records: &[usize], cols: usize) -> Vec<Vec<String>> {
+    let mut fields = t.visible_fields(view);
+    fields.truncate(cols);
     let mut out = vec![fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>()];
     out.extend(records.iter().filter_map(|i| t.records.get(*i)).map(|r| fields.iter().map(|f| field::display_in(base, f, r.get(f.id))).collect()));
     out

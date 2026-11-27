@@ -75,13 +75,67 @@ fn table_srcs(blocks: &[crate::model::Block], out: &mut Vec<String>) {
     }
 }
 
-/// When the files in `srcs` (relative to the library) last changed, as one number.
+/// When the files in `srcs` (relative to the library) last changed, as one number; and
+/// which of their card grids have come in (`card_grid`), so a preview drawn before its
+/// grid was read is built again once it is.
 fn tables_time(srcs: &[String]) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = rustc_hash::FxHasher::default();
     let root = crate::store::Store::active_dir();
     for s in srcs { modified(&root.join(s)).hash(&mut h); }
+    if !srcs.is_empty() { GRIDS.with(|g| g.borrow().arrived).hash(&mut h); }
     h.finish()
+}
+
+/// The first rows and columns of the 数据库 shown on cards, read off the main thread: reading
+/// a table of 30,000 records took 100-400 ms, in the frame that first drew its card.
+/// By file, table and view; kept while the file's time stays.
+#[derive(Default)]
+struct Grids {
+    done: HashMap<(std::path::PathBuf, Option<String>, Option<String>), (Option<std::time::SystemTime>, Rc<Vec<Vec<String>>>)>,
+    /// Asked for this frame, not yet being read.
+    asked: Vec<(std::path::PathBuf, fdl_core::table::TableRef, Option<std::time::SystemTime>)>,
+    reading: std::collections::HashSet<(std::path::PathBuf, Option<String>, Option<String>)>,
+    /// Grids come in so far, for `tables_time`.
+    arrived: u64,
+}
+thread_local! { static GRIDS: std::cell::RefCell<Grids> = Default::default(); }
+
+/// A card's grid of the 数据库 `r` (header first, up to 8 records and 5 columns), or an
+/// empty one while it is read (`fetch_card_grids`); a grid of an older file time stands in meanwhile.
+fn card_grid(root: &std::path::Path, r: &fdl_core::table::TableRef) -> Rc<Vec<Vec<String>>> {
+    let path = root.join(&r.src);
+    let key = (path.clone(), r.table.clone(), r.view.clone());
+    let time = modified(&path);
+    GRIDS.with(|g| {
+        let mut g = g.borrow_mut();
+        let have = g.done.get(&key).map(|(t, grid)| (*t == time, grid.clone()));
+        if have.as_ref().is_none_or(|(fresh, _)| !fresh) && !g.reading.contains(&key) && !g.asked.iter().any(|(p, a, _)| *p == path && a.table == r.table && a.view == r.view) {
+            g.asked.push((path, r.clone(), time));
+        }
+        have.map(|(_, grid)| grid).unwrap_or_default()
+    })
+}
+
+/// Reads the grids `card_grid` was asked for this frame on the background executor, and
+/// draws the window again as each comes in.
+fn fetch_card_grids(cx: &mut Context<Workspace>) {
+    let asked = GRIDS.with(|g| { let mut g = g.borrow_mut(); let asked = std::mem::take(&mut g.asked); for (p, r, _) in &asked { g.reading.insert((p.clone(), r.table.clone(), r.view.clone())); } asked });
+    for (path, r, time) in asked {
+        let root = crate::store::Store::active_dir();
+        let read = cx.background_executor().spawn({ let r = r.clone(); async move { let _s = crate::devtools::span("card-grid-read"); fdl_core::table::block_grid_head(&root, &r, 8, 5) } });
+        cx.spawn(async move |this, cx| {
+            let grid = read.await;
+            GRIDS.with(|g| {
+                let mut g = g.borrow_mut();
+                let key = (path, r.table, r.view);
+                g.reading.remove(&key);
+                g.done.insert(key, (time, Rc::new(grid)));
+                g.arrived += 1;
+            });
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }).detach();
+    }
 }
 
 /// When `path` last changed, asked of the disk at most every 2 s: every card is drawn each
@@ -138,14 +192,14 @@ fn thumb_blocks(blocks: &[crate::model::Block], budget: &mut usize, depth: usize
                 // No wider than the page: a 1536 px picture would otherwise reserve its full height below a narrower drawing.
                 let (w, h) = if w > 690. { (690., h * 690. / w) } else { (w, h) };
                 if let BlockKind::Image { src, width, height, .. } = &mut kind {
-                    *src = path.map(|p| p.to_string_lossy().into_owned().into()).unwrap_or_default(); *width = Some(w); *height = Some(h);
+                    *src = path.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(); *width = Some(w); *height = Some(h);
                 }
                 kind
             }
             BlockKind::Raw { tag, .. } => BlockKind::Raw { tag: tag.clone(), xml: String::new() },
             // a 数据库 (a table file's card, or one in a page): its first rows and columns as a table, header first
             BlockKind::DataTable(r) => {
-                let grid = fdl_core::table::block_grid(&crate::store::Store::active_dir(), r);
+                let grid = card_grid(&crate::store::Store::active_dir(), r);
                 let (nr, nc) = (grid.len().min(9), grid.first().map_or(0, |h| h.len().min(5)));
                 if nr == 0 || nc == 0 { BlockKind::Table(crate::model::Table { col_widths: vec![], header_rows: 0, header_col: false, rows: vec![] }) } else {
                     let cell = |s: &str| crate::model::TableCell { blocks: vec![crate::model::Block::text(s)], ..crate::model::TableCell::empty() };
@@ -700,7 +754,7 @@ impl Workspace {
         }
         let mut budget = 32;
         let mut eqnos = HashMap::new();
-        let doc = self.store.load(e.note.as_deref().unwrap_or(&e.id));
+        let doc = { let _s = crate::devtools::span("thumb-load"); self.store.load(e.note.as_deref().unwrap_or(&e.id)) };
         let loaded = doc.as_ref().map(|doc| {
             let numbers = crate::editor::equation_numbers(doc);
             thumb_blocks(&doc.blocks, &mut budget, 0, &numbers, &mut eqnos)
@@ -905,7 +959,7 @@ impl Workspace {
         let card_h = col_w * (6. / 5.);
         let rows = entries.len().div_ceil(n);
         let grid = uniform_list("page-grid-area", rows, cx.processor(move |workspace, range: std::ops::Range<usize>, window, cx| {
-            range.map(|row| {
+            let cards: Vec<AnyElement> = range.map(|row| {
                 let start = row * n;
                 let end = (start + n).min(entries.len());
                 div().w_full().h(px(card_h + gap)).px(px(24.)).pb(px(gap))
@@ -916,7 +970,10 @@ impl Workspace {
                         else { workspace.render_doc_card(e, card_h, cx) };
                         workspace.card_motion(&e.id, card)
                     }))
-            }).collect()
+                    .into_any_element()
+            }).collect();
+            fetch_card_grids(cx);
+            cards
         }))
         // The last row's own 16 plus 32 more: 48 below the cards at the end,
         // clear of the window's rounded corner. (32: GPUI 0.2's uniform_list
