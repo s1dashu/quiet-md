@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant A as App
+    participant S as Server
+    U->>+A: 打开文档
+    A->>+S: GET /doc
+    loop Every minute
+        S->>S: Health check
+    end
+    alt is cached
+        S-->>A: 304 Not Modified
+    else is new
+        S-->>A: 200 OK with a rather long label that needs space
+    end
+    deactivate S
+    Note right of S: Server keeps the session
+    Note over U,A: The user waits
+    opt Offline
+        A-xS: retry
+    end
+    A-->>-U: 显示

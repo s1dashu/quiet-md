@@ -1,0 +1,22 @@
+sequenceDiagram
+    title Create and destroy
+    box Aqua Frontend
+    participant Alice
+    participant Bob
+    end
+    Alice->>Bob: Hello Bob, how are you ?
+    Bob->>Alice: Fine, thank you. And you?
+    create participant Carl
+    Alice->>Carl: Hi Carl!
+    create actor D as Donald
+    Carl->>D: Hi!
+    destroy Carl
+    Alice-xCarl: We are too many
+    rect rgb(191, 223, 255)
+    Bob->>Alice: Rect block
+    end
+    par Alice to Bob
+        Alice->>Bob: Hello guys!
+    and Alice to John
+        Alice->>Bob: Hello again
+    end

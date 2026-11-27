@@ -1137,7 +1137,7 @@ mod tests {
         assert_eq!(write_file(&parse_file(&out, "page", Some(base)), front_matter(&out).0, Some(base)), out);
     }
 
-    /// A ```mermaid fence is a Mermaid code block; either
+    /// A ```mermaid fence is a Mermaid code block (drawn as a diagram); either
     /// view saves back as the same fence.
     #[test]
     fn mermaid_fences_round_trip() {

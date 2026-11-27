@@ -221,7 +221,7 @@ DocxXML is Feishu/Lark's XML document format. The canonical representation of ev
 These constructs extend DocxXML. Other tools may treat them as unknown elements or attributes.
 
 - `<countdown duration start-time notify color timing/>` stores a countdown. Cloud countdowns are widgets outside DocxXML.
-- A Mermaid diagram is a code block, `<pre lang="mermaid"><code>…</code></pre>`, so its source survives in any tool and Markdown export writes a ```` ```mermaid ```` fence. Quiet.md shows it as a code block for now; `view="code"` (the block shows its code rather than a diagram) is read and written unchanged, for a future renderer.
+- A Mermaid diagram is a code block, `<pre lang="mermaid"><code>…</code></pre>`, so its source survives in any tool and Markdown export writes a ```` ```mermaid ```` fence. Quiet.md draws flowcharts and sequence diagrams and shows other kinds as code; `view="code"` keeps showing the code instead.
 - `<time … is-whole-day="true">` stores an all-day reminder. The model has `isWholeDay`, but the original XML has no equivalent attribute. Without it, a reminder at 23:59 local time also counts as all-day.
 - Local images and attachments use `path="…"` where the cloud uses `token` / `href`. A video or file is represented by `<figure><source path=… name=…/></figure>`.
 

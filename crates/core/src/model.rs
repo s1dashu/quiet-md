@@ -728,8 +728,7 @@ pub enum BlockKind {
     Ordered { seq: Option<u32> },
     Todo { done: bool },
     /// `show_code`: a Mermaid block shows its source instead of the diagram
-    /// (`view="code"`). Kept for a future renderer: the app draws no diagrams
-    /// yet, so every Mermaid block shows its code.
+    /// (`view="code"`; the diagram is the default, see src/mermaid.rs).
     Code { lang: String, caption: Option<String>, wrap: bool, show_code: bool },
     Quote,
     Callout {

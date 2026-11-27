@@ -1,0 +1,15 @@
+# Mermaid diagrams as SVG: flowcharts and sequence diagrams parsed, laid out
+# and drawn here, with no dependencies. Text is measured by the host.
+[package]
+name = "fdl_mermaid"
+version = "0.1.14"
+edition = "2024"
+description = "Mermaid diagrams drawn as SVG for Quiet.md"
+license = "MIT"
+readme = "../../README.md"
+authors = ["s1dashu"]
+
+[dependencies]
+
+[lints]
+workspace = true

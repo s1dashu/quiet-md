@@ -2,11 +2,13 @@
 
 Quiet.md is a single-process GPUI application with roughly 90,000 lines of Rust, including roughly 26,000 for whiteboards. A document is a tree of blocks in memory (`model.rs`) and a DocxXML file on disk (`docxml.rs`). The editor renders the tree as a virtualized list.
 
-The Cargo workspace contains three crates:
+The Cargo workspace contains four crates:
 
 - **`crates/core` (`fdl_core`, about 36,000 lines, including 20,000 for whiteboards)** contains the document model, DocxXML, editing and undo, the on-disk library, Markdown and HTML import, Markdown export, and whiteboard models and algorithms. It builds and tests independently of GPUI with `cargo test -p fdl_core`. The fuzzer lives here too.
 - **The root crate (`quiet_md`)** owns windows, views, rendering, menus and overlays. `main.rs` re-exports the core modules at the crate root, and `editor/mod.rs` re-exports `editor::core` and `editor::table_ops`. The application can therefore use paths such as `crate::model` and `super::core`.
 - **`crates/cli` (`quiet_cli`, the `quiet` binary)** is the library from the command line, for people and agents. Each command is one operation of `Session` (`session.rs`) with JSON in and out: documents and blocks there, 数据库 rows in `tables.rs`, boards in `boards.rs`, versions, the trash and import in `library.rs`. `quiet run` gives the same operations to a JavaScript script in an embedded QuickJS (`js.rs`, `prelude.js`) with no files or network; `quiet mcp` (`mcp.rs`) serves them as two MCP tools. Changes stay in memory until the command or script ends, then are written in one commit through `Store` (its write lock, versions and link rewriting); a file changed on disk in the meantime stops the commit. Edits go through `editor::Core`, as in the app. Block refs carry a fingerprint of the block (`#3~k7f2`) so a ref from an earlier read finds its block or fails. The agent skill lives at the top of the repository in `skills/quiet-md/` (installed with `npx skills add s1dashu/quiet-md`); its `references/guide.md` is compiled in and printed by `quiet guide`; `help.rs` holds each command's help. See [the CLI design](design/CLI.md).
+
+- **`crates/mermaid` (`fdl_mermaid`)** draws Mermaid flowcharts and sequence diagrams as plain SVG, with no dependencies: a parser per diagram kind (`flow.rs`, `seq.rs`), a layered layout for flowcharts (`layout.rs`, Sugiyama as dagre does it: doubled ranks for edge labels, barycenter ordering that keeps clusters together, x from difference constraints), and SVG written with presentation attributes only (`svg.rs`) for resvg. Colours and text widths come from the host; what it can't parse is an error with its line, never a panic. `cargo test -p fdl_mermaid` runs its tests and fuzzer.
 
 Dependencies flow from the application and the CLI to core. Within the workspace, core may reference only core modules.
 
@@ -150,6 +152,7 @@ Whiteboard and history modules in core:
 | `design/` | Quiet.md's design system (shadcn/ui: Nova's colours, Vega's geometry). `mod.rs` holds the tokens (neutral ramp, semantic colours with light and dark values, option colours, radii, sizes, type, the shadows' elevation ladder); `button`, `menu`, `field`, `control`, `badge`, `dialog`, `card`, `toast` (each window's stack of toasts) the components, all shown live in the 组件库 panel (`gallery/`, `quiet_md --components`). Used across the app's controls, menus and dialogs (`table/style.rs` forwards to it for the 数据库) |
 | `ui.rs` / `input.rs` | Shared menu shells and rows, white pill buttons, hints and single-line input |
 | `highlight.rs` | Code highlighting |
+| `mermaid.rs` | Mermaid code blocks drawn as diagrams by `fdl_mermaid` on a background thread, coloured from the Theme tokens, text measured by GPUI's resvg; cached in memory by source and theme. What it can't draw shows as code with a one-line note |
 | `assets.rs` | Embedded icons, fonts and cover gallery |
 | `fonts.rs` / `font_classes.rs` / `font_downloads.rs` | Installed families for the font settings and what each is (黑体, 宋体 …, scripts covered: read from the font files); fonts fetched on demand (the board's Xiaolai, downloadable document fonts). See [Downloadable fonts](FONTS.md). |
 | `devtools.rs` | Script driver compiled with `--features devtools`. See tools/harness/README.md. |

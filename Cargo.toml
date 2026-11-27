@@ -20,14 +20,16 @@ embed-xiaolai = []
 
 # `fdl_core` is the GPUI-free document engine; plain `cargo test` covers both.
 [workspace]
-members = ["crates/core", "crates/cli", "vendor/xim-ctext"]
+members = ["crates/core", "crates/cli", "crates/mermaid", "vendor/xim-ctext"]
 # vendor/zed holds path dependencies with self-contained manifests, not members.
 # vendor/xim-ctext is a member so its tests run (vendor/xim-ctext/README.md).
 exclude = ["vendor", "tools/vendor-sync"]
-default-members = [".", "crates/core", "crates/cli"]
+default-members = [".", "crates/core", "crates/cli", "crates/mermaid"]
 
 [dependencies]
 fdl_core = { path = "crates/core" }
+# Mermaid diagrams (src/mermaid.rs): our own renderer, no dependencies.
+fdl_mermaid = { path = "crates/mermaid" }
 anyhow = "1.0.104"
 async-lock = "3.4"
 dirs = "7.0.0"

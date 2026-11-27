@@ -1536,6 +1536,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fdl_mermaid"
+version = "0.1.14"
+
+[[package]]
 name = "fearless_simd"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4322,6 +4326,7 @@ dependencies = [
  "core-graphics 0.24.0",
  "dirs 7.0.0",
  "fdl_core",
+ "fdl_mermaid",
  "futures",
  "gpui",
  "gpui_apple",
