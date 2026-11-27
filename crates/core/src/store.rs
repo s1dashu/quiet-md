@@ -2107,9 +2107,14 @@ impl Store {
         // A library file's pictures are written relative to its folder too, never as absolute paths.
         let file = self.path(id);
         let dir = file.parent().filter(|_| base.is_none());
+        // Mentions as links relative to the file (a folder's with a closing `/`), as a DocxXML page writes them (#471).
+        let from = self.doc_dir(id);
+        let mention = |to: &str| self.index.get(to).filter(|m| !m.local() && !m.rel.is_empty())
+            .map(|m| format!("{}{}", layout::relative(&from, &m.rel), if m.folder.is_some() { "/" } else { "" }));
+        let mentions: Option<&dyn Fn(&str) -> Option<String>> = (base.is_none() && !self.flat).then_some(&mention);
         let out = crate::markdown::write_file_with(doc, front, &crate::markdown::Options {
             library_dir: Some(&self.top_dir), base: base.as_deref(), name: name.as_deref(), copied: copied.get(id), original: disk,
-            wiki: wiki.as_ref().map(|(d, v)| (d.as_path(), Some(v.as_path()))), dir, ..Default::default()
+            wiki: wiki.as_ref().map(|(d, v)| (d.as_path(), Some(v.as_path()))), dir, mentions, ..Default::default()
         });
         let bom = if disk.is_some_and(|d| d.starts_with('\u{feff}')) { "\u{feff}" } else { "" };
         (format!("{bom}{}", out.text), out.files)
@@ -6675,6 +6680,25 @@ mod tests {
         s.apply_file_history(&changes, false).unwrap();
         assert!(s.abs("新夹/乙.xml").fs_is_file() && !s.abs("乙.xml").fs_exists());
         assert!(crate::vfs::read_to_string(s.abs("丙.xml")).unwrap().contains("href=\"新夹/乙.xml\""));
+    }
+
+    /// #471: an `@` mention in a Markdown page is a link to the page or folder,
+    /// relative to the file, so it comes back from disk as a link, not as its title alone.
+    #[test]
+    fn markdown_mentions_stay_links() {
+        let lib = Lib::new("md-mention");
+        let mut s = lib.open();
+        let f = s.create_folder("命令 集", None).unwrap();
+        let g = s.create_folder("Bash", None).unwrap();
+        let a = s.create_from_in(&doc("甲 乙"), Some(&f)).unwrap();
+        let m = s.create_markdown_in(&doc("笔记"), "", Some(&g)).unwrap();
+        s.save(&m, &linking("笔记", &[(&f, "命令 集"), (&a, "甲 乙"), ("no-such-id", "别处")])).unwrap();
+        let text = crate::vfs::read_to_string(s.file_path(&m).unwrap()).unwrap();
+        assert!(text.contains("见 [命令 集](../命令%20集/)") && text.contains("见 [甲 乙](../命令%20集/甲%20乙.xml)"), "{text}");
+        assert!(text.contains("见 别处\n") || text.ends_with("见 别处\n"), "a mention of nothing keeps its title: {text}");
+        let back = s.load(&m).unwrap();
+        let links: Vec<Option<String>> = back.blocks.iter().flat_map(|b| b.text.spans().map(|(_, k)| k.link.clone())).flatten().map(Some).collect();
+        assert_eq!(links, [Some("../命令%20集/".to_string()), Some("../命令%20集/甲%20乙.xml".to_string())]);
     }
 
     /// 重命名 made off the window's thread (`src/tree_writes.rs`): a writer renames the folder

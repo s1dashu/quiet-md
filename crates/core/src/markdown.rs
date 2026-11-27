@@ -41,6 +41,10 @@ pub struct Options<'a> {
     /// Writing the file itself (not a copy to paste): what a reader would
     /// lose stays (`BLANK` for an empty paragraph, `hold_end`).
     pub file: bool,
+    /// A library file's `@` mentions: the link from the file to the page or
+    /// folder of that id (#471: written as the title alone they came back as
+    /// plain text); None, or no answer, keeps the title alone.
+    pub mentions: Option<&'a dyn Fn(&str) -> Option<String>>,
 }
 
 pub struct Export {
@@ -161,7 +165,7 @@ impl Writer<'_> {
     }
 
     fn block(&mut self, b: &Block, seq: u32) -> String {
-        let text = inline(&b.text, &mut |f| self.file_link(f));
+        let text = inline(&b.text, &mut |k| self.object_link(k));
         let text = if !self.opts.file { text } else if b.kind == BlockKind::Text && b.text.is_empty() { BLANK.into() } else if text == BLANK { format!("\\{BLANK}") } else { hold_end(text) };
         let nested = |w: &mut Self, head: String| -> String {
             if b.children.is_empty() {
@@ -202,7 +206,7 @@ impl Writer<'_> {
                 }
                 None => String::new(),
             },
-            BlockKind::Table(t) => table(t, &mut |f| self.file_link(f)),
+            BlockKind::Table(t) => table(t, &mut |k| self.object_link(k)),
             BlockKind::Grid | BlockKind::Column { .. } => self.blocks(&b.children),
             // An add-on block: Markdown has nothing for it.
             BlockKind::Countdown(_) => String::new(),
@@ -229,6 +233,15 @@ impl Writer<'_> {
                 (text, Some(link)) if crate::paste::link_ok(&link) => format!("[{}]({})", escape(if text.is_empty() { &link } else { &text }), link.replace(' ', "%20")),
                 (text, _) => escape(&text).replace('\n', "<br>"),
             },
+        }
+    }
+
+    /// Where an inline object links to: a file card's file, a mention's page.
+    fn object_link(&mut self, k: &InlineKind) -> Option<String> {
+        match k {
+            InlineKind::File(f) => self.file_link(f),
+            InlineKind::DocLink(l) => self.opts.mentions.and_then(|m| m(&l.id)),
+            _ => None,
         }
     }
 
@@ -657,7 +670,7 @@ pub fn write_file(doc: &Document, front: &str, base: Option<&Path>) -> String {
 /// `write_file` with the copies to make beside a 本机文件 (`Export::files`,
 /// relative to the file's folder).
 pub fn write_file_with(doc: &Document, front: &str, opts: &Options) -> Export {
-    let opts = Options { in_place: true, file: true, library_dir: opts.library_dir, base: opts.base, name: opts.name, copied: opts.copied, original: opts.original, wiki: opts.wiki, dir: opts.dir, ..Default::default() };
+    let opts = Options { in_place: true, file: true, library_dir: opts.library_dir, base: opts.base, name: opts.name, copied: opts.copied, original: opts.original, wiki: opts.wiki, dir: opts.dir, mentions: opts.mentions, ..Default::default() };
     let mut w = Writer { opts: &opts, files: vec![], generated: vec![], missing: 0 };
     let mut pieces = w.pieces(&doc.blocks);
     // Empty lines at the very end show nothing (the editor adds one for a click below the text).
@@ -816,7 +829,7 @@ fn match_pieces(old: &[&str], new: &[&str]) -> Vec<Option<usize>> {
     out
 }
 
-fn table(t: &Table, files: &mut impl FnMut(&FileBlock) -> Option<String>) -> String {
+fn table(t: &Table, files: &mut impl FnMut(&InlineKind) -> Option<String>) -> String {
     let cols = t.rows.iter().map(|r| r.len()).max().unwrap_or(0).max(1);
     let mut cell = |c: &TableCell| {
         let parts: Vec<String> = c.blocks.iter().map(|b| inline(&b.text, files)).filter(|s| !s.is_empty()).collect();
@@ -895,7 +908,7 @@ struct Md {
     math: bool,
 }
 
-fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) -> String {
+fn inline(t: &RichText, files: &mut impl FnMut(&InlineKind) -> Option<String>) -> String {
     // Merge runs that only differ in marks Markdown can't express (colors).
     let mut runs: Vec<(Md, String)> = vec![];
     let mut display_math = false;
@@ -920,7 +933,7 @@ fn inline(t: &RichText, files: &mut impl FnMut(&FileBlock) -> Option<String>) ->
                 None => t.text[r].to_string(),
             },
         };
-        let file_link = m.inline.as_ref().and_then(|obj| match &obj.kind { InlineKind::File(f) => files(f), _ => None });
+        let file_link = m.inline.as_ref().and_then(|obj| match &obj.kind { InlineKind::File(_) | InlineKind::DocLink(_) => files(&obj.kind), _ => None });
         let md = Md {
             bold: m.bold,
             italic: m.italic,

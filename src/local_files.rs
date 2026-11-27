@@ -154,6 +154,10 @@ impl Workspace {
             self.show_toast_kind(ToastKind::Error, tr("文件已移走或删除", "The file was moved or deleted"), cx);
             return;
         };
+        // A folder of the library (a Markdown page's `@` mention of one, #471) opens as its page.
+        let folder = path.fs_is_dir().then(|| self.entries.iter().find(|e| e.meta.folder.is_some()
+            && self.store.folder_dir(Some(&e.id)).and_then(|d| d.fs_canonicalize().ok()).is_some_and(|d| d == path)).map(|e| e.id.clone())).flatten();
+        if let Some(id) = folder { self.open_folder(&id, window, cx); return; }
         let existing = self.entries.iter().find(|e| self.store.file_path(&e.id)
             .is_some_and(|p| p.file_name() == path.file_name() && p.fs_canonicalize().is_ok_and(|p| p == path))).map(|e| e.id.clone());
         if existing.is_none() && !(is_markdown_path(&path) && path.fs_is_file()) {
