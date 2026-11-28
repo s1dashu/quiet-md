@@ -2231,13 +2231,18 @@ fn adopt_file(cached: &Path) -> Option<PathBuf> {
     store_image(&bytes, ext).ok()
 }
 
+/// Some image hosts refuse requests that don't look like a browser — 知乎's
+/// zhimg.com answers `curl/8.x` with 403 before it even looks at the path — so
+/// the fetch goes out with a browser's User-Agent.
+const BROWSER_UA: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 fn download(url: &str, dest: &Path) -> bool {
     if let Some(d) = dest.parent() {
         let _ = fdl_core::vfs::create_dir_all(d);
     }
     let tmp = dest.with_extension("part");
     let mut curl = std::process::Command::new("curl");
-    curl.args(["-fsSL", "--max-time", "60", "-o"])
+    curl.args(["-fsSL", "--max-time", "60", "-A", BROWSER_UA, "-o"])
         .arg(&tmp)
         .arg(url)
         .stdin(std::process::Stdio::null())
@@ -2452,7 +2457,7 @@ pub(crate) fn localize_images_in(assets: &Path, blocks: &mut Vec<Block>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{cap, clipboard_image_data, decode, decode_png, local_file, local_image_path, pasted_remote, BAD_DIMS};
+    use super::{cap, clipboard_image_data, decode, decode_png, download, local_file, local_image_path, pasted_remote, BAD_DIMS};
     use crate::model::{Block, BlockKind, RichText};
     use gpui::ImageFormat;
 
@@ -2474,6 +2479,38 @@ mod tests {
         let im = image::RgbImage::from_fn(w, h, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x + y) % 239) as u8]));
         image::DynamicImage::ImageRgb8(im).save_with_format(&p, image::ImageFormat::Jpeg).unwrap();
         p
+    }
+
+    /// Hosts that refuse non-browser agents (zhimg.com answers `curl/8.x`
+    /// with 403) must see a browser's User-Agent on the fetch; a served
+    /// picture comes back and lands in the cache.
+    #[test]
+    #[cfg(unix)]
+    fn downloads_go_out_with_a_browser_user_agent() {
+        use fdl_core::vfs::PathExt as _;
+        use std::io::{Read, Write};
+        let dir = std::env::temp_dir().join(format!("qmd-img-dl-{}", fdl_core::vfs::process_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = std::fs::read(photo(&dir, 8, 8)).unwrap();
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut req = [0u8; 2048];
+            let n = s.read(&mut req).unwrap_or(0);
+            let req = String::from_utf8_lossy(&req[..n]).to_ascii_lowercase();
+            let ua = req.lines().find(|l| l.starts_with("user-agent:")).unwrap_or_default().trim().to_string();
+            let _ = tx.send(ua);
+            let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+            let _ = s.write_all(&body);
+        });
+        let dest = dir.join("out");
+        assert!(download(&format!("http://127.0.0.1:{port}/x"), &dest));
+        let ua = rx.recv().unwrap();
+        assert!(ua.starts_with("user-agent: mozilla/5.0"), "got: {ua:?}");
+        assert!(dest.fs_is_file());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
