@@ -25,7 +25,11 @@ fn windows_resources() {
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let icon = root.join("assets/branding/app-icon.ico").to_string_lossy().replace('\\', "/");
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
-    let numbers = format!("{},0", version.replace('.', ","));
+    // FILEVERSION and PRODUCTVERSION take four numbers; a release candidate's
+    // `-rc.2` suffix belongs in the text fields below, since rc.exe rejects it.
+    let mut numbers: Vec<&str> = version.split('-').next().unwrap_or(&version).split('.').collect();
+    numbers.resize(4, "0");
+    let numbers = numbers.join(",");
     let rc = format!(r#"1 ICON "{icon}"
 1 VERSIONINFO
 FILEVERSION {numbers}
