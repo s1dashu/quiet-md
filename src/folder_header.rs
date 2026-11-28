@@ -88,7 +88,7 @@ impl Workspace {
     /// The sort rows, shared by the sort dropdown and 显示: the orders, then 升序 / 降序 for
     /// the automatic ones, then 文件夹优先.
     pub(crate) fn sort_rows(&self, mut menu: Popover, cx: &mut Context<Self>) -> Popover {
-        for (index, order) in [PageSort::Manual, PageSort::Visited, PageSort::Modified, PageSort::Created, PageSort::Title].into_iter().enumerate() {
+        for (index, order) in [PageSort::Manual, PageSort::Visited, PageSort::Modified, PageSort::Created, PageSort::Title, PageSort::Kind].into_iter().enumerate() {
             let g = SharedString::from(format!("page-order-{index}"));
             menu = menu.child(MenuItem::new(g).label(crate::settings::label(order.label())).checked(self.folder_page.sort == order)
                 .on_click(cx.listener(move |w, _, _, cx| { w.folder_page.view_menu = false; w.sort_by(order, cx) })));

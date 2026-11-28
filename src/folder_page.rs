@@ -426,10 +426,10 @@ impl SortDir {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PageSort { Manual, Visited, Modified, Created, Title }
+pub(crate) enum PageSort { Manual, Visited, Modified, Created, Title, Kind }
 impl PageSort {
-    fn key(self) -> &'static str { match self { Self::Manual => "manual", Self::Visited => "visited", Self::Modified => "modified", Self::Created => "created", Self::Title => "title" } }
-    fn of(key: &str) -> Self { match key { "manual" => Self::Manual, "modified" => Self::Modified, "created" => Self::Created, "title" => Self::Title, _ => Self::Visited } }
+    fn key(self) -> &'static str { match self { Self::Manual => "manual", Self::Visited => "visited", Self::Modified => "modified", Self::Created => "created", Self::Title => "title", Self::Kind => "kind" } }
+    fn of(key: &str) -> Self { match key { "manual" => Self::Manual, "modified" => Self::Modified, "created" => Self::Created, "title" => Self::Title, "kind" => Self::Kind, _ => Self::Visited } }
 }
 impl PageSort {
     fn label(self) -> &'static str {
@@ -439,10 +439,11 @@ impl PageSort {
             Self::Modified => "最近修改时间",
             Self::Created => "创建时间",
             Self::Title => "标题",
+            Self::Kind => crate::settings::tr("类型", "Kind"),
         }
     }
     /// The direction a column sorts by the first time it is picked.
-    fn default_dir(self) -> SortDir { if self == Self::Title { SortDir::Asc } else { SortDir::Desc } }
+    fn default_dir(self) -> SortDir { if matches!(self, Self::Title | Self::Kind) { SortDir::Asc } else { SortDir::Desc } }
     /// 手动排序 has no direction; the others do.
     fn directional(self) -> bool { self != Self::Manual }
 }
@@ -534,7 +535,7 @@ impl FolderPage {
             PageSort::Visited => Some(Col::Visited),
             PageSort::Modified => Some(Col::Modified),
             PageSort::Created => Some(Col::Created),
-            PageSort::Title | PageSort::Manual => None,
+            PageSort::Title | PageSort::Kind | PageSort::Manual => None,
         }
     }
 }
@@ -574,14 +575,58 @@ impl Order {
         }
         let asc = |o: std::cmp::Ordering| if self.dir == SortDir::Asc { o } else { o.reverse() };
         let order = match self.field {
-            PageSort::Title => asc(a.title.cmp(&b.title)),
+            PageSort::Title => asc(natural_cmp(&a.title, &b.title)),
             PageSort::Visited => asc(visited(a).cmp(&visited(b))),
             PageSort::Modified => asc(a.meta.modified.cmp(&b.meta.modified)),
             PageSort::Created => asc(a.meta.created.cmp(&b.meta.created)),
+            PageSort::Kind => asc(kind_class(a).cmp(&kind_class(b)).then_with(|| natural_cmp(&a.title, &b.title))),
             PageSort::Manual => std::cmp::Ordering::Equal,
         };
         let group = if self.folders_first { b.meta.folder.is_some().cmp(&a.meta.folder.is_some()) } else { std::cmp::Ordering::Equal };
         group.then(order).then_with(|| a.meta.place().cmp(&b.meta.place())).then_with(|| a.id.cmp(&b.id))
+    }
+}
+
+/// Titles compare the way people read them: case-blind, and 图2 before 图10.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut a = a.chars().peekable();
+    let mut b = b.chars().peekable();
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                // Compare digit runs as numbers without an integer conversion:
+                // leading zeroes go, then the longer run is the larger number.
+                let run = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut s = String::new();
+                    while let Some(c) = it.peek().copied().filter(|c| c.is_ascii_digit()) { s.push(c); it.next(); }
+                    s.trim_start_matches('0').to_string()
+                };
+                let (da, db) = (run(&mut a), run(&mut b));
+                let order = da.len().cmp(&db.len()).then_with(|| da.cmp(&db));
+                if order != Ordering::Equal { return order; }
+            }
+            (Some(x), Some(y)) => {
+                a.next();
+                b.next();
+                let order = x.to_lowercase().cmp(y.to_lowercase());
+                if order != Ordering::Equal { return order; }
+            }
+        }
+    }
+}
+
+/// 按类型: folders, documents, Markdown, 画板, then 数据表. Names order equals kinds.
+fn kind_class(e: &Entry) -> u8 {
+    use crate::store::DocKind;
+    match e.meta.kind {
+        _ if e.meta.folder.is_some() => 0,
+        DocKind::Doc => if e.meta.markdown { 2 } else { 1 },
+        DocKind::Board => 3,
+        DocKind::Table => 4,
     }
 }
 
@@ -1168,6 +1213,50 @@ mod sort_tests {
     }
 
     #[test]
+    fn titles_sort_naturally_and_without_case() {
+        let mut v = vec![
+            page("ten", "图10", 0, 0, 1, false),
+            page("upper", "Report 09", 0, 0, 2, false),
+            page("two", "图2", 0, 0, 3, false),
+            page("lower", "report 9", 0, 0, 4, false),
+        ];
+        sort_entries(&mut v, Order { field: PageSort::Title, dir: SortDir::Asc, folders_first: false });
+        // Equal folded titles keep their hand order.
+        assert_eq!(ids(&v), ["upper", "lower", "two", "ten"]);
+        sort_entries(&mut v, Order { field: PageSort::Title, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["ten", "two", "upper", "lower"]);
+    }
+
+    #[test]
+    fn kinds_group_then_sort_names() {
+        use crate::store::DocKind;
+        let mut folder = page("folder", "Same", 0, 0, 1, true);
+        let doc = page("doc", "Same", 0, 0, 2, false);
+        let mut md = page("md", "Same", 0, 0, 3, false);
+        let mut board = page("board", "Same", 0, 0, 4, false);
+        let mut table = page("table", "Same", 0, 0, 5, false);
+        md.meta.markdown = true;
+        board.meta.kind = DocKind::Board;
+        table.meta.kind = DocKind::Table;
+        // A folder's 正文 belongs with its folder, not with Markdown pages.
+        folder.meta.markdown = true;
+        let mut v = vec![table, board.clone(), md, doc, folder];
+        sort_entries(&mut v, Order { field: PageSort::Kind, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["folder", "doc", "md", "board", "table"]);
+        sort_entries(&mut v, Order { field: PageSort::Kind, dir: SortDir::Desc, folders_first: false });
+        assert_eq!(ids(&v), ["table", "board", "md", "doc", "folder"]);
+        // The same kind is alphabetical, not its hand order.
+        let other = page("board2", "图2", 0, 0, 0, false);
+        board.title = "图10".into();
+        let mut v = vec![board, other];
+        sort_entries(&mut v, Order { field: PageSort::Kind, dir: SortDir::Asc, folders_first: false });
+        assert_eq!(ids(&v), ["board2", "board"]);
+        assert_eq!(PageSort::of(PageSort::Kind.key()), PageSort::Kind);
+        assert_eq!(PageSort::Kind.default_dir(), SortDir::Asc);
+        assert!(PageSort::Kind.directional());
+    }
+
+    #[test]
     fn manual_order_is_the_sidebar_order() {
         let mut v = vec![
             page("a", "A", 10, 10, 2, false),
@@ -1214,7 +1303,7 @@ mod sort_tests {
             e
         };
         let mut v = vec![row("b", "Alpha", 2), row("a", "Zulu", 1), page("x", "Middle", 5, 5, 0, false)];
-        for field in [PageSort::Title, PageSort::Modified, PageSort::Manual] {
+        for field in [PageSort::Title, PageSort::Kind, PageSort::Modified, PageSort::Manual] {
             for dir in [SortDir::Asc, SortDir::Desc] {
                 sort_entries(&mut v, Order { field, dir, folders_first: false });
                 assert_eq!(ids(&v), ["top:a", "top:b", "x"]);

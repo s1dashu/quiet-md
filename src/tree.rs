@@ -616,6 +616,7 @@ mod tests {
         let mut seed = 7u64;
         let mut next = |n: u64| { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); (seed >> 33) % n };
         let orders = [None, Some(Order { field: PageSort::Title, dir: SortDir::Asc, folders_first: true }),
+            Some(Order { field: PageSort::Kind, dir: SortDir::Desc, folders_first: false }),
             Some(Order { field: PageSort::Modified, dir: SortDir::Desc, folders_first: false })];
         for round in 0..300 {
             let n = 1 + next(60) as usize;
