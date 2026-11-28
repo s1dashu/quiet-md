@@ -179,6 +179,8 @@ pub struct Editor {
     /// Window origin of the editor (last frame); overlays are placed relative
     /// to it.
     pub content_origin: Rc<Cell<Point<Pixels>>>,
+    /// The right-click menu as last painted (window coordinates), for the side its submenu takes.
+    pub ctx_panel: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Last-frame layout lookups the overlays were positioned from.
     pub probes: RefCell<Vec<(super::overlays::Probe, Option<Bounds<Pixels>>)>>,
     pub marked: Option<(BlockId, Range<usize>)>,
@@ -473,6 +475,7 @@ impl Editor {
             links: Default::default(),
             mention: None,
             content_origin: Rc::new(Cell::new(Point::default())),
+            ctx_panel: Rc::new(Cell::new(None)),
             probes: RefCell::new(vec![]),
             marked: None,
             dragging: false,
