@@ -102,6 +102,38 @@ impl Session {
     }
 }
 
+impl Session {
+    /// `quiet guide import`: this build's 开始指南 as a new folder (numbered when the name is
+    /// taken) at the top of the top-level folder `--in` names, else the one Quiet.md first put
+    /// them in (the default library), else the first; in `--lang zh|en`, else Quiet.md's language.
+    pub(crate) fn guide_import(&mut self, a: &Value) -> R<Value> {
+        let top = match arg(a, "folder") {
+            Some(spec) => match self.landing(Some(spec))? {
+                (top, None) => top,
+                _ => return Err(fail("usage", "the guide goes to the top of a top-level folder")).map_err(|f| f.hint("pass one of the folders `quiet ls` lists, e.g. --in Quiet.md")),
+            },
+            None => { let home = Store::legacy_dir(); match self.tops.folders.iter().find(|r| r.store.is_some() && r.path == home) { Some(r) => r.key.clone(), None => self.landing(None)?.0 } }
+        };
+        let chinese = match arg(a, "lang") {
+            Some("zh") => true,
+            Some("en") => false,
+            Some(l) => return Err(fail("usage", format!("no guide in {l:?}")).hint("--lang zh or --lang en")),
+            None => app_language_is_chinese(),
+        };
+        let name = fdl_core::guides::folder_name(chinese);
+        self.pending.push(Pending::ImportGuides { top: top.clone(), chinese });
+        Ok(json!({ "path": self.full_path(&top, name), "guide": if chinese { "zh" } else { "en" } }))
+    }
+}
+
+/// Quiet.md's interface language is 简体中文 (its preferences, as the app reads them):
+/// the guide it would import is the Chinese one.
+fn app_language_is_chinese() -> bool {
+    let prefs = [Store::settings_dir(), Store::legacy_dir().join(".quiet")].map(|d| d.join("preferences.json"));
+    let Some(p) = prefs.iter().find_map(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { return false };
+    match p.get("language").and_then(Value::as_str).filter(|l| !l.is_empty()) { Some(l) => l == "zh", None => p.get("english").and_then(Value::as_bool) == Some(false) }
+}
+
 enum FileKind { Markdown, DocxXml, Csv, Board }
 
 fn kind_of_file(p: &Path) -> R<FileKind> {

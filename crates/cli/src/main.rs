@@ -114,7 +114,7 @@ fn cells(a: &Args) -> R<Option<Value>> {
 }
 
 const WRITES: &[&str] = &["insert", "replace", "remove", "move", "set", "create", "mkdir", "rename", "mv", "trash", "pin", "unpin", "duplicate", "restore", "untrash", "import", "table_add", "table_update", "table_delete",
-    "table_field_add", "table_field_change", "table_field_delete", "table_view_add", "table_view_set", "table_view_rename", "table_view_delete", "table_new", "table_rename", "table_remove", "table_import", "board_add", "board_remove"];
+    "table_field_add", "table_field_change", "table_field_delete", "table_view_add", "table_view_set", "table_view_rename", "table_view_delete", "table_new", "table_rename", "table_remove", "table_import", "board_add", "board_remove", "guide_import"];
 
 /// `--where` (repeatable), `--any`, `--view`: which rows of a 数据表.
 fn rows_where(v: &mut Value, a: &Args) {
@@ -246,6 +246,8 @@ fn to_calls(cmd: &str, a: &mut Args, input: &mut Input) -> R<(Vec<(String, Value
         ("restore", _) => { with_doc(&mut v, false)?; v["version"] = json!(a.nth(1, "a version (from `quiet history DOC`)")?); "restore" }
         ("trash", _) => { if !a.pos.is_empty() { return Err(fail("usage", "`quiet trash` lists the trash; `quiet rm DOC` moves a document there")); } "trash_list" }
         ("untrash", _) => { v["name"] = json!(a.nth(0, "a title or id from `quiet trash`")?); "untrash" }
+        // 导入最新的开始指南, as Settings › About does in the app.
+        ("guide", _) => { put(&mut v, "folder", a.get("in")); put(&mut v, "lang", a.get("lang")); "guide_import" }
         ("import", _) => {
             if a.pos.is_empty() { return Err(fail("usage", "import needs files")); }
             let calls = a.pos.iter().map(|p| { let mut v = json!({ "path": p }); put(&mut v, "folder", a.get("in")); ("import".to_string(), v) }).collect();
@@ -349,7 +351,8 @@ pub fn execute(raw: Vec<String>, mut input: Input, out: &mut String) -> R<()> {
     let cmd = a.pos.remove(0);
     match cmd.as_str() {
         "help" => { *out += &help::of(a.pos.first().map(String::as_str))?; return Ok(()); }
-        "guide" | "skill" => { *out += GUIDE; return Ok(()); }
+        // `guide import`: a write like the others, below.
+        "guide" | "skill" if a.pos.first().map(String::as_str) != Some("import") => { *out += GUIDE; return Ok(()); }
         "version" => { *out += &format!("quiet {}\n", env!("CARGO_PKG_VERSION")); return Ok(()); }
         "telemetry" => { *out += &usage::command(a.pos.first().map(String::as_str))?; return Ok(()); }
         _ if a.has("help") => { *out += &help::of(Some(&cmd))?; return Ok(()); }

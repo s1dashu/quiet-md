@@ -870,3 +870,28 @@ fn pins_and_duplicates() {
     assert_eq!(entry(&lib, "Plan")["pinned"], true);
     assert!(entry(&lib, "Copy 2").is_object());
 }
+
+/// `quiet guide import` (设置 › 关于 › 导入最新的开始指南): a dry run writes nothing; then the
+/// guide in each language as a folder of its own, beside what is there, numbered the second
+/// time; its links all reach a page inside (`quiet check`); `quiet guide` still prints the guide.
+#[test]
+fn guide_import_makes_a_folder_of_its_own() {
+    let lib = library(&[("Plan", PLAN)]);
+    let dry = json(&lib, &["guide", "import", "--lang", "en", "--dry-run"]);
+    assert_eq!(dry["committed"], false);
+    assert!(!lib.join("Quiet.md Guide").exists());
+    for (lang, name) in [("en", "Quiet.md Guide"), ("zh", "Quiet.md 指南"), ("en", "Quiet.md Guide (2)")] {
+        let v = json(&lib, &["guide", "import", "--lang", lang]);
+        assert_eq!(v["changes"][0]["path"], name, "{v}");
+        assert!(lib.join(name).is_dir());
+    }
+    let ls = ok(&lib, &["ls"]);
+    assert!(ls.contains("Plan") && ls.contains("Quiet.md 指南/"), "{ls}");
+    assert!(ok(&lib, &["ls", "Quiet.md Guide (2)"]).contains("Welcome to Quiet.md"));
+    let check = json(&lib, &["check"]);
+    assert_eq!(check["issues"].as_array().map_or(0, Vec::len), 0, "{check}");
+    assert!(!quiet(&lib, &["guide", "import", "--lang", "fr"]).status.success());
+    assert!(!quiet(&lib, &["guide", "import", "--in", "Quiet.md Guide"]).status.success());
+    assert!(ok(&lib, &["guide"]).contains("# quiet"));
+    let _ = std::fs::remove_dir_all(&lib);
+}

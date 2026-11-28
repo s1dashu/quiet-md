@@ -893,6 +893,50 @@ impl Workspace {
         }).detach();
     }
 
+    /// 设置 › 关于 › 导入最新的开始指南: this build's guides as a new folder at the top of the
+    /// default top-level folder (the one the first launch put them in, `default_folder`), named
+    /// for the interface language and numbered when taken; written off the window's thread
+    /// on its own store as `import_siyuan` does, then shown in the sidebar with its first page
+    /// open. One step of the folders' history: 撤销 takes the whole folder back.
+    pub(crate) fn import_guides(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.store.file_task_busy() || self.file_history.busy { return; }
+        if self.after_tree_writes(move |w, window, cx| w.import_guides(window, cx)) { return; }
+        if !self.save_before(cx, move |w, window, cx| w.import_guides(window, cx)) { return; }
+        let row = self.default_folder();
+        let Some((key, mut writer)) = row.as_deref().and_then(|r| self.store.tree_writer(Some(r))) else { return self.show_toast_kind(ToastKind::Error, &crate::shared_store::no_folder().to_string(), cx) };
+        let Some(task_guard) = self.store.begin_file_task() else { return };
+        let files = crate::guides::import_files(crate::settings::lang() == crate::settings::Lang::Zh);
+        let name = crate::settings::tr("Quiet.md 指南", "Quiet.md Guide");
+        let task = cx.background_executor().spawn(async move {
+            let journal = writer.track_file_changes();
+            let done = writer.import_guides(&files, name);
+            let changes = journal.take();
+            (done, changes, Listed::of(key, writer))
+        });
+        self.show_toast_kind(ToastKind::Info, crate::settings::tr("正在导入…", "Importing…"), cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let (done, changes, listed) = task.await;
+            drop(task_guard);
+            let _ = this.update_in(cx, |w, window, cx| {
+                w.take_import(listed, cx);
+                match done {
+                    Ok(folder) => {
+                        w.remember_file_changes(changes, crate::settings::tr("导入开始指南", "Import the guide"));
+                        // 欢迎使用 Quiet.md: the folder's first page, as a first launch opens it.
+                        let first = w.level_entries(Some(&folder)).iter().find(|e| e.meta.folder.is_none()).map(|e| e.id.clone());
+                        w.reveal_in_tree(&folder);
+                        if let Some(id) = &first { w.reveal_in_tree(id); w.open(id, window, cx); }
+                        let title = w.entries.iter().find(|e| e.id == folder).map(|e| crate::settings::display_title(&e.title)).unwrap_or_else(|| name.to_string());
+                        w.show_toast_with(crate::design::Toast::new(ToastKind::Success, crate::localized_format!("已导入「{}」到「{}」", "Imported “{}” into “{}”", title, w.place_name(row.as_deref())))
+                            .description(crate::settings::tr("已有的指南和文档保持原样", "Your existing guides and documents stay as they were")), cx);
+                    }
+                    Err(e) => w.show_toast_with(crate::design::Toast::new(ToastKind::Error, crate::settings::tr("未能导入开始指南", "Couldn’t import the guide")).description(crate::settings::diagnostic(&e.to_string())), cx),
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
     /// After an import written off the window's thread, its file task let go (`open` waits while
     /// one runs): the window's library takes over what the writer read and wrote (`Store::adopt`),
     /// so opening a new page finds it, and the list the writer made there. Reading the library

@@ -94,6 +94,7 @@ quiet restore DOC VERSION    put DOC back as it was (undoable: the current text 
 quiet trash                  what is in the trash
 quiet untrash NAME           bring a document back
 quiet import FILE… [--in FOLDER]   .md/.txt, .xml, .csv/.tsv (as a 数据库), .excalidraw
+quiet guide import [--in FOLDER] [--lang zh|en]   Quiet.md's 开始指南 as a new folder
 
 quiet run [FILE|-] [-e CODE] [--timeout SECS]
 quiet call OP [JSON]         any operation by name, as run's lib calls it

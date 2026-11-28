@@ -32,6 +32,7 @@
 <tr><td><p>{{doc:data}}</p></td><td><p>导入、导出、打印、备份和迁移文档</p></td></tr>
 <tr><td><p>{{doc:personalize}}</p></td><td><p>主题、自定义 CSS、快捷键、快速笔记和界面语言</p></td></tr>
 </tbody></table>
+<p>Quiet.md 的新版本可能带来更新过的指南。在 设置 › 关于 中点“导入最新的开始指南”，会把它放进一个新文件夹，这些指南和你的文档保持不变。</p>
 <h1>值得记住的快捷键</h1>
 <table><colgroup><col width="210"/><col width="480"/></colgroup><tbody>
 <tr><td><p><code>⌘ N</code> / <code>⌘ J</code></p></td><td><p>新建文档 / 搜索文档</p></td></tr>

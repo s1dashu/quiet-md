@@ -577,6 +577,8 @@ mod folders;
 mod subdocs;
 #[path = "across.rs"]
 mod across;
+#[path = "guide_import.rs"]
+mod guide_import;
 pub use across::Place;
 
 #[derive(Serialize, Deserialize)]

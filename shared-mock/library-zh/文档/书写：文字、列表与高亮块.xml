@@ -71,7 +71,7 @@
 <ul><li>点击日期即可修改。可以加上具体时间，也可以设为全天。</li><li>可以选择在事件发生时提醒，也可以提前提醒。全天提醒在上午 9:00 发出。</li><li>一周内即将到来的日期显示为橙色，已过期的显示为红色，更晚的显示为蓝色。</li></ul>
 <callout emoji="🔔" background-color="light-yellow" border-color="yellow"><p>Quiet.md 需要保持运行才能发送提醒通知。退出应用后，提醒会暂停，直到再次打开应用。</p></callout>
 <h2>倒计时</h2><p>插入倒计时后，点击铅笔按钮设置时长或日期，用调色板修改颜色。下面这个示例倒数到元旦：</p>
-<countdown duration="2926141" start-time="1795795860000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
+<countdown duration="2858658" start-time="1795863343000" notify="true" color="#4E83FD" timing="date" date="2027-01-01" time="00:00"/>
 <p>还可以开启倒计时结束时的应用内提醒。</p>
 <h2>按钮</h2><p>按钮可以打开一个网址，或者为当前文档创建副本。在会议记录或日记这类可重复使用的模板里，创建副本按钮特别好用。</p>
 <p><button action="OpenLink" src="https://www.apple.com/macos/" background-color="light-blue">了解 macOS</button> <button action="DuplicatePage" background-color="light-green">为这篇指南创建副本</button></p><p>鼠标悬停在按钮上并点击编辑，可以修改它的文字、颜色和动作。</p>

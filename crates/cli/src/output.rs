@@ -169,7 +169,7 @@ pub fn text(op: &str, v: &Value) -> String {
         "table_delete" => o += &format!("deleted {} row(s){}\n", s(v, "deleted"), if list(v, "rows").count() > 0 { format!(": {}", list(v, "rows").filter_map(Value::as_str).collect::<Vec<_>>().join(", ")) } else { String::new() }),
         "board_add" => o += &format!("added {}\n", refs(&v["added"])),
         "board_remove" => o += &format!("removed {} element(s)\n", s(v, "removed")),
-        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" | "pin" | "unpin" | "duplicate" => {}
+        "create" | "mkdir" | "rename" | "mv" | "trash" | "restore" | "untrash" | "import" | "pin" | "unpin" | "duplicate" | "guide_import" => {}
         _ => o += &format!("{}\n", serde_json::to_string_pretty(v).unwrap_or_default()),
     }
     o

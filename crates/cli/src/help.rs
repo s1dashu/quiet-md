@@ -40,6 +40,7 @@ pub const HELP: &str = "quiet — read, search, edit and script a Quiet.md libra
   quiet call OP [JSON]                   any operation by name (what run's lib calls)
   quiet mcp                              serve these as MCP tools on stdio
   quiet guide                            the full guide for agents (script API included)
+  quiet guide import [--in FOLDER] [--lang zh|en]   the 开始指南 as a new folder
   quiet help COMMAND                     one command in detail
   quiet telemetry [on|off|status]        the anonymous daily usage counts
 
@@ -330,10 +331,22 @@ id. Nothing is counted while DO_NOT_TRACK or QUIET_NO_TELEMETRY is set, in CI,
 or while Settings › General › Anonymous usage statistics (设置 › 通用 › 匿名使用统计)
 is off in Quiet.md (untouched, it follows Check for updates automatically)."),
     (&["guide", "skill"], "quiet guide
+quiet guide import [--in FOLDER] [--lang zh|en]
 
 The full guide for agents: addressing, every command, the script API,
 examples. It matches this quiet; the agent skill (npx skills add
-s1dashu/quiet-md) carries the same guide as its reference."),
+s1dashu/quiet-md) carries the same guide as its reference.
+
+`guide import` is Settings › About › Import the latest guide (设置 › 关于 ›
+导入最新的开始指南): the Getting started guide (开始指南) that comes with this
+version, as a new folder at the top of a top-level folder: \"Quiet.md Guide\",
+or \"Quiet.md 指南\" in Chinese, numbered when the name is taken. Nothing there
+is overwritten; pictures the library already has under another file of the
+same name go to .assets/guides-2/ (and so on). --in picks the top-level folder
+(default: the one Quiet.md first put the guide in, else the first); --lang
+the guide's language (default: Quiet.md's, Chinese for 简体中文, else English).
+
+  quiet guide import --in Quiet.md --lang en"),
 ];
 
 pub fn of(cmd: Option<&str>) -> R<String> {

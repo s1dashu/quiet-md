@@ -397,6 +397,25 @@ pub fn rewrite_notes(path: &Path, f: impl Fn(&str) -> Option<String>) -> Result<
     Ok(changes.len())
 }
 
+/// Every text cell of the file's data tables that holds `from`, with `to` in its place: the
+/// pictures and attachments they name moved to another folder (导入开始指南 into
+/// `.assets/guides-2/`). Cells only, no stamps: the file is a copy being put in place.
+pub fn replace_text(path: &Path, from: &str, to: &str) -> Result<usize> {
+    let mut conn = open(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut n = 0;
+    for t in tables(&tx)?.into_iter().filter(|t| user_table(t)) {
+        let cols: Vec<String> = grid(&tx, &format!("PRAGMA table_info({})", q(&t))).iter().map(|r| text(&r[1])).collect();
+        for c in cols {
+            n += tx.execute(&format!("UPDATE {t} SET {c} = replace({c}, ?1, ?2) WHERE typeof({c}) = 'text' AND instr({c}, ?1) > 0", t = q(&t), c = q(&c)), params![from, to])?;
+        }
+    }
+    tx.commit()?;
+    // the old text gone from the file too, not left in its free pages
+    if n > 0 { conn.execute_batch("VACUUM")?; }
+    Ok(n)
+}
+
 /// Read the whole file. Lenient: the file may have been edited by another
 /// program, or never been ours — then every table that isn't SQLite's or
 /// `_`-prefixed is a data table, with field types guessed from its columns.

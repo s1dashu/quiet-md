@@ -1517,4 +1517,11 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("按标题重命名文件失败：{}", "Dosya başlığına göre yeniden adlandırılamadı: {}"),
     ("点侧栏顶部的「更新」安装", "Yüklemek için kenar çubuğunun üstündeki Güncelle'ye tıklayın"),
     ("Quiet.md {} 已发布", "Quiet.md {} yayımlandı"),
+    ("把这个版本的开始指南放进一个新文件夹，已有的指南和文档不变。", "Bu sürümün rehberini yeni bir klasöre koyar; mevcut rehberleriniz ve belgeleriniz olduğu gibi kalır."),
+    ("导入最新的开始指南", "En son rehberi içe aktar"),
+    ("Quiet.md 指南", "Quiet.md Rehberi"),
+    ("导入开始指南", "Rehberi içe aktar"),
+    ("已有的指南和文档保持原样", "Mevcut rehberleriniz ve belgeleriniz olduğu gibi kalır"),
+    ("未能导入开始指南", "Rehber içe aktarılamadı"),
+    ("已导入「{}」到「{}」", "“{}”, “{}” içine aktarıldı"),
 ];

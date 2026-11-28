@@ -75,6 +75,8 @@ pub(crate) enum Pending {
     Duplicate { id: String, title: String },
     Untrash { top: String, id: String, title: String },
     Import { top: String, path: PathBuf, folder: Option<String> },
+    /// 导入最新的开始指南: this build's guides as a new folder at `top`'s top.
+    ImportGuides { top: String, chinese: bool },
     RestoreTable { id: String, version: String },
 }
 
@@ -532,6 +534,7 @@ impl Session {
             "trash_list" => self.trash_list(),
             "untrash" => self.untrash(a),
             "import" => self.import(a),
+            "guide_import" => self.guide_import(a),
             "table_add" => self.table_add(a),
             "table_update" => self.table_update(a),
             "table_delete" => self.table_delete(a),
@@ -1047,6 +1050,12 @@ impl Session {
                     let rel = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
                     report.push(json!({ "path": self.full_path(&top, &rel), "action": "imported", "source": path.display().to_string() }));
                 }
+                Pending::ImportGuides { top, chinese } => {
+                    let files: Vec<_> = fdl_core::guides::files(chinese).into_iter().map(|(n, b)| (n, std::borrow::Cow::Borrowed(b))).collect();
+                    let id = self.lib(&top)?.import_guides(&files, fdl_core::guides::folder_name(chinese)).map_err(|e| fail("io", format!("{e:#}")))?;
+                    self.refresh();
+                    report.push(json!({ "path": self.entry_by_id(&id).map(|e| self.label(e)).unwrap_or_default(), "action": "imported the guide" }));
+                }
                 Pending::RestoreTable { id, version } => {
                     self.lib_of(&id)?.restore_version(&id, &version).map_err(|e| fail("io", format!("{e:#}")))?;
                     let path = self.entry_by_id(&id).map(|e| e.meta.rel.clone()).unwrap_or_default();
@@ -1078,6 +1087,7 @@ impl Session {
             Pending::Pin { id, on } => json!({ "path": rel(id), "action": if *on { "would pin" } else { "would unpin" } }),
             Pending::Duplicate { id, title } => json!({ "path": rel(id), "action": "would duplicate", "to": title }),
             Pending::Import { top, path, folder } => json!({ "path": path.display().to_string(), "action": "would import", "to": self.full_path(top, folder.as_deref().unwrap_or("")) }),
+            Pending::ImportGuides { top, chinese } => json!({ "path": self.full_path(top, fdl_core::guides::folder_name(*chinese)), "action": "would import the guide" }),
             Pending::RestoreTable { id, version } => json!({ "path": rel(id), "action": "would restore version", "to": version }),
         })
     }

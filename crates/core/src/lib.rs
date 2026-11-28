@@ -14,6 +14,7 @@ pub mod docxml;
 pub mod editor;
 pub mod emoji;
 pub mod file_ids;
+pub mod guides;
 pub mod lang;
 pub mod markdown;
 pub mod merge;

@@ -3,17 +3,10 @@ use fdl_core::vfs::PathExt as _;
 use std::path::Path;
 use fdl_core::vfs as fs;
 
-include!(concat!(env!("OUT_DIR"), "/guides.rs"));
-/// The Simplified Chinese guides (`build.py --lang zh`): documents and index
-/// only, the images are the English library's.
-mod zh { include!(concat!(env!("OUT_DIR"), "/guides_zh.rs")); }
-
-/// The guides for the interface language: Simplified Chinese gets the
-/// Chinese ones, every other language the English ones.
-fn files(chinese: bool) -> Vec<(&'static str, &'static [u8])> {
-    if !chinese { return FILES.to_vec(); }
-    zh::FILES.iter().chain(FILES.iter().filter(|(n, _)| n.starts_with(".assets/"))).copied().collect()
-}
+// The bundle is core's (`quiet guide import` brings it too).
+use fdl_core::guides::files;
+#[cfg(test)]
+use fdl_core::guides::{FILES, zh};
 
 /// Any entry but the lock file means an existing library, even if all
 /// documents were deleted (`.quiet/` keeps its index); a pending directory is
@@ -82,6 +75,15 @@ const WINDOWS_TEXT_ZH: &[(&str, &str)] = &[
 pub fn for_windows(xml: &str) -> String {
     let text = WINDOWS_TEXT.iter().chain(WINDOWS_TEXT_ZH).fold(xml.to_string(), |s, (mac, win)| s.replace(mac, win));
     crate::shortcuts::windows_keys(&text)
+}
+
+/// The guides for 导入最新的开始指南 (`Store::import_guides`), in Chinese or else
+/// English: the documents as `seed` writes them on this system.
+pub fn import_files(chinese: bool) -> Vec<(&'static str, std::borrow::Cow<'static, [u8]>)> {
+    files(chinese).into_iter().map(|(n, b)| match std::str::from_utf8(b) {
+        Ok(xml) if cfg!(target_os = "windows") && is_doc(n) => (n, std::borrow::Cow::Owned(for_windows(xml).into_bytes())),
+        _ => (n, std::borrow::Cow::Borrowed(b)),
+    }).collect()
 }
 
 /// The guides into a new library at `root`, in Chinese or else English.

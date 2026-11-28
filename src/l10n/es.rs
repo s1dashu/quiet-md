@@ -1506,4 +1506,11 @@ pub(super) const STRINGS: &[(&str, &str)] = &[
     ("按标题重命名文件失败：{}", "Error al renombrar el archivo según su título: {}"),
     ("点侧栏顶部的「更新」安装", "Haz clic en Actualizar, arriba en la barra lateral, para instalarla"),
     ("Quiet.md {} 已发布", "Quiet.md {} está disponible"),
+    ("把这个版本的开始指南放进一个新文件夹，已有的指南和文档不变。", "Pone la guía de esta versión en una carpeta nueva; tus guías y documentos actuales no cambian."),
+    ("导入最新的开始指南", "Importar la guía más reciente"),
+    ("Quiet.md 指南", "Guía de Quiet.md"),
+    ("导入开始指南", "Importar la guía"),
+    ("已有的指南和文档保持原样", "Tus guías y documentos actuales siguen igual"),
+    ("未能导入开始指南", "No se pudo importar la guía"),
+    ("已导入「{}」到「{}」", "Se importó «{}» en «{}»"),
 ];

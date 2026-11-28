@@ -1806,6 +1806,9 @@ impl Workspace {
             .child(div().text_size(px(theme::ui_font())).line_height(px(theme::ui_font() + 7.)).text_color(Theme::text_caption()).child(if cfg!(target_os = "macos") { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your Mac.") }
                 else { tr("本地优先的笔记应用：无需账号，文档就是你电脑上的文件。", "Local-first notes: no account, your documents are files on your computer.") })))
             .child(group("group-update", None, vec![update_row(cx).into_any_element()]))
+            // The guides of this version beside the ones there are (a first launch's, maybe older).
+            .child(group("group-guide", None, vec![row(tr("开始指南", "Getting started"), desc(tr("把这个版本的开始指南放进一个新文件夹，已有的指南和文档不变。", "Puts this version’s guide in a new folder; your existing guides and documents stay as they are.")),
+                button("import-guide", tr("导入最新的开始指南", "Import the latest guide")).on_click(cx.listener(|w, _, window, cx| w.import_guides(window, cx)))).into_any_element()]))
             .child(group("group-repo", None, vec![row(tr("项目主页", "Project page"), Some(REPO.trim_start_matches("https://").into()),
                 button("open-repo", tr("打开", "Open")).on_click(|_, _, cx| crate::editor::open_link(cx, REPO))).into_any_element()]))
             .into_any_element()
