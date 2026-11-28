@@ -296,12 +296,12 @@ impl Editor {
         if self.read_only {
             // Only the right-click menu's 复制 / 全选.
             if let Some(Menu::Ctx { pos, kind: kind @ CtxKind::ReadOnly { .. }, sub }) = self.menu.clone() {
-                out.extend(self.ctx_menu(pos, kind, sub, cx));
+                out.extend(self.ctx_menu(pos, kind, sub, window, cx));
             }
             return out;
         }
         let menu_el = match self.menu.clone() {
-            Some(Menu::Ctx { pos, kind, sub }) => self.ctx_menu(pos, kind, sub, cx),
+            Some(Menu::Ctx { pos, kind, sub }) => self.ctx_menu(pos, kind, sub, window, cx),
             Some(Menu::OrderedNumber { block, pos, edit, depth }) => self.ordered_number_menu(block, pos, edit, depth, cx),
             Some(Menu::Block { block, sub }) => self.block_menu(block, sub, cx),
             Some(Menu::Link { block, range, only_link }) => self.link_panel(block, range, only_link, window, cx),

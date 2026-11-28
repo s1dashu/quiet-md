@@ -19,9 +19,12 @@ use crate::model::BlockKind;
 use crate::design::menu::{PAD as MENU_PAD_Y, ROW_H as MENU_ROW_H, SEP_H};
 use crate::design::{MenuItem, Popover};
 use gpui::{prelude::FluentBuilder, *};
+use std::{cell::Cell, rc::Rc};
 
-/// How far a submenu sits right of its menu.
+/// How far a submenu sits beside its menu.
 const SUB_DX: f32 = 4.;
+/// The window margin the menu snaps to (`at`).
+const EDGE: f32 = 8.;
 
 /// The menu being built: rows and group rules, one child at a time.
 struct Panel {
@@ -29,8 +32,9 @@ struct Panel {
 }
 
 impl Panel {
-    fn new() -> Self {
-        Self { div: Popover::new("ctx-menu").menu().w(px(MENU_W)) }
+    /// Records where it is painted in `bounds`.
+    fn new(bounds: Rc<Cell<Option<Bounds<Pixels>>>>) -> Self {
+        Self { div: Popover::new("ctx-menu").menu().w(px(MENU_W)).child(canvas(move |b, _, _| bounds.set(Some(b)), |_, _, _, _| {}).absolute().inset_0()) }
     }
 
     fn push(mut self, el: impl IntoElement) -> Self {
@@ -48,9 +52,22 @@ impl Panel {
     }
 }
 
-/// A submenu panel, hung at `top` beside the main one.
-fn sub_menu(id: &'static str, top: f32) -> Popover {
-    Popover::new(id).menu().submenu().absolute().left(px(MENU_W + SUB_DX)).top(px(top)).w(px(MENU_W))
+/// A submenu panel, hung at `(left, top)` from the main one (`sub_place`).
+fn sub_menu(id: &'static str, (left, top): (f32, f32)) -> Popover {
+    Popover::new(id).menu().submenu().absolute().left(px(left)).top(px(top)).w(px(MENU_W))
+}
+
+/// Where a submenu of `rows` rows hangs from the menu as last painted at `panel` (window
+/// coordinates) in a `vw` × `vh` window, its top level with `row_y`: right of the menu, or left
+/// when only the left has room (whichever has more when neither does), then moved up or down to
+/// keep inside the window's margin. Not painted yet: right of it, at `row_y`.
+fn sub_place(panel: Option<Bounds<Pixels>>, row_y: f32, rows: usize, (vw, vh): (f32, f32)) -> (f32, f32) {
+    let Some(b) = panel else { return (MENU_W + SUB_DX, row_y) };
+    let (l, t, r) = (f32::from(b.left()), f32::from(b.top()), f32::from(b.right()));
+    let (room_r, room_l) = (vw - EDGE - r - SUB_DX, l - SUB_DX - EDGE);
+    let x = if room_r >= MENU_W || room_r >= room_l { f32::from(b.size.width) + SUB_DX } else { -(MENU_W + SUB_DX) };
+    let h = 2. * MENU_PAD_Y + rows as f32 * MENU_ROW_H;
+    (x, row_y.min(vh - EDGE - h - t).max(EDGE - t))
 }
 
 fn item(id: impl Into<ElementId>, icon_name: &str, label: impl Into<SharedString>) -> MenuItem {
@@ -130,8 +147,10 @@ fn turn_items() -> impl Iterator<Item = (usize, &'static TurnItem)> {
 
 impl Editor {
     /// The right-click menu at `pos` (page coordinates).
-    pub(super) fn ctx_menu(&self, pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub>, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let mut p = Panel::new();
+    pub(super) fn ctx_menu(&self, pos: Point<Pixels>, kind: CtxKind, sub: Option<CtxSub>, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let mut p = Panel::new(self.ctx_panel.clone());
+        let vp = window.viewport_size();
+        let place = |row_y: f32, rows: usize| sub_place(self.ctx_panel.get(), row_y, rows, (f32::from(vp.width), f32::from(vp.height)));
         // The caret menu's rows, top down: 粘贴 / 粘贴为纯文本 / 全选, a rule,
         // 插入, a rule, 转换为, 对齐, 上移块, 下移块. Each submenu hangs at its
         // own row, so these follow the same constants the panel is built from.
@@ -259,7 +278,7 @@ impl Editor {
         // The open submenu, hung beside the row that opened it.
         let sub_el: Option<AnyElement> = match (kind, sub) {
             (CtxKind::Caret | CtxKind::Title, Some(CtxSub::Insert)) => Some(
-                sub_menu("ctx-insert-sub", insert_y)
+                sub_menu("ctx-insert-sub", place(insert_y, if self.markdown { 3 } else { 4 }))
                     .child(fire_row(cx, "ctx-ins-link", "link", crate::settings::text("链接"), k::Link))
                     .child(fire_row(cx, "ctx-ins-table", "table", crate::settings::text("表格"), k::InsertTable))
                     .child(fire_row(cx, "ctx-ins-divider", "divider", crate::settings::text("分隔线"), k::InsertDivider))
@@ -270,7 +289,7 @@ impl Editor {
             (CtxKind::Caret, Some(CtxSub::Turn)) => {
                 // 正文 through 标题 3, lists, 引用, 代码块: 标题 4–9 and 高亮块
                 // stay in the handle menu, which can hold a whole grid.
-                let mut m = sub_menu("ctx-turn-sub", turn_y);
+                let mut m = sub_menu("ctx-turn-sub", place(turn_y, turn_items().count()));
                 for (i, it) in turn_items() {
                     let kind = (it.kind)();
                     m = m.child(act_row(cx, ("ctx-turn", i), it.icon, crate::settings::text(it.label), move |e, window, cx| {
@@ -280,7 +299,7 @@ impl Editor {
                 Some(m.into_any_element())
             }
             (CtxKind::Caret, Some(CtxSub::Align)) => Some(
-                sub_menu("ctx-align-sub", align_y)
+                sub_menu("ctx-align-sub", place(align_y, 3))
                     .child(fire_row(cx, "ctx-al-left", "align-left", crate::settings::text("左对齐"), k::AlignLeft))
                     .child(fire_row(cx, "ctx-al-center", "align-center", crate::settings::text("居中对齐"), k::AlignCenter))
                     .child(fire_row(cx, "ctx-al-right", "align-right", crate::settings::text("右对齐"), k::AlignRight))
@@ -300,7 +319,35 @@ impl Editor {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockKind, turn_items};
+    use super::{BlockKind, EDGE, MENU_PAD_Y, MENU_ROW_H, MENU_W, SUB_DX, sub_place, turn_items};
+    use gpui::{Bounds, point, px, size};
+
+    fn panel(x: f32, y: f32) -> Option<Bounds<gpui::Pixels>> { Some(Bounds::new(point(px(x), px(y)), size(px(MENU_W), px(300.)))) }
+
+    #[test]
+    fn submenu_hangs_right_while_it_fits_and_flips_left_near_the_right_edge() {
+        let vp = (1200., 800.);
+        assert_eq!(sub_place(panel(100., 100.), 40., 4, vp).0, MENU_W + SUB_DX);
+        // the menu snapped against the right edge: no room right of it
+        let right = sub_place(panel(1200. - EDGE - MENU_W, 100.), 40., 4, vp).0;
+        assert_eq!(right, -(MENU_W + SUB_DX));
+        // a window too narrow for either side: the side with more room
+        let narrow = (MENU_W * 2., 800.);
+        assert_eq!(sub_place(panel(EDGE, 100.), 40., 4, narrow).0, MENU_W + SUB_DX);
+        assert_eq!(sub_place(panel(MENU_W * 2. - EDGE - MENU_W, 100.), 40., 4, narrow).0, -(MENU_W + SUB_DX));
+        // not painted yet: right of it, level with its row
+        assert_eq!(sub_place(None, 40., 4, vp), (MENU_W + SUB_DX, 40.));
+    }
+
+    #[test]
+    fn submenu_moves_up_to_stay_inside_the_window() {
+        let (vh, rows) = (800., 9);
+        let h = 2. * MENU_PAD_Y + rows as f32 * MENU_ROW_H;
+        let (_, top) = sub_place(panel(100., vh - EDGE - 300.), 150., rows, (1200., vh));
+        assert_eq!(vh - EDGE - 300. + top + h, vh - EDGE);
+        // room enough: level with its row
+        assert_eq!(sub_place(panel(100., 50.), 150., rows, (1200., vh)).1, 150.);
+    }
 
     #[test]
     fn turn_into_leaves_deep_headings_and_callouts_to_the_handle_menu() {
