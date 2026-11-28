@@ -7,18 +7,24 @@
 //!   on desktop; iOS will bring its own (NSURLSession).
 //! - [`SyncRemote`]: what sync needs of a remote. [`GitHub`] is the real one,
 //!   [`FakeRemote`] an in-memory one for tests and UI work.
+//! - [`Gh`]: optional setup through an installed GitHub CLI: its login and
+//!   private repositories, without replacing the REST synchronization path.
 //! - [`engine`]: one [`sync`](engine::sync) of a folder against a remote.
 
 #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
 mod curl;
 pub mod engine;
 mod fake;
+#[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+mod gh;
 mod github;
 mod tar;
 
 #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
 pub use curl::CurlHttp;
 pub use fake::FakeRemote;
+#[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+pub use gh::{Gh, GhCommand, GhRepo, GhStatus, SystemGh};
 pub use github::GitHub;
 
 /// A commit's or blob's id: 40 hex digits.

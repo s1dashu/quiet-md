@@ -144,12 +144,16 @@
 - **合并全在本机**：基准 = 基准快照里上次同步时的内容，我方 = 磁盘，对方 = 远端最新内容，调同一个 `merge3`。所以 a 不需要 git 的合并驱动（2.6 只给 c 用）。
 - 历史是线性的：每次同步一个 commit，父提交是远端最新，从不改写已推送的提交。
 
-### 2.2 认证：第一期就做「登录 GitHub」
+### 2.2 认证：优先复用 gh，否则「登录 GitHub」
 
-- **OAuth 设备码流程**：应用显示一个 8 位码，同时打开 github.com/login/device，用户在浏览器里确认就行。不用复制 token，不用配回调地址。
+- **桌面端先检测 GitHub CLI（`gh`）**：`Gh::system()` 查 PATH 和常见安装目录，`status()` 区分未安装、未登录、可用了。已经登录时直接复用 gh 的账号和凭据，用户不用再来一次授权。
+- gh 的凭据仍由 gh 自己保管：每次连接通过 `gh auth token --hostname github.com` 取当前 token，交给原有 REST 客户端；不另存进 Quiet.md 的钥匙串、文档库或日志。同步仍然走 2.1 的 REST API，不在每次提交时调用 `gh`。
+- **装了 gh 但没登录**：设置里显示一步操作，请用户在终端运行 `gh auth login --hostname github.com --git-protocol https --web`，按提示在浏览器确认，回来后点「重试」。应用不启动一个需要交互终端的登录进程。
+- **没有 gh**：不要要求普通用户安装命令行工具，走下面的 OAuth 设备码流程。应用显示一个 8 位码，同时打开 github.com/login/device，用户在浏览器里确认就行。不用复制 token，不用配回调地址。
+- **仓库**：有 gh 时用 `gh repo list --json nameWithOwner,isPrivate,url` 列出可选仓库；新建则用 `gh repo create <名字> --private`，保证是私有仓库。没有 gh 时走下面的 GitHub App / 网页流程。
 - **注册成 GitHub App，不用 OAuth App**：GitHub App 可以只授权用户选中的仓库（权限：Contents 读写、Metadata 只读），token 8 小时过期，靠 refresh token 自动续期；OAuth App 要 `repo` 权限，等于能动用户所有仓库。设备码流程不需要 client secret，client id 可以直接内置。**需要我们先在 GitHub 上注册这个 App（待办，用户操作）。**
-- **新建仓库**：GitHub App 的用户 token 能不能直接替用户建私有仓库，要实测。不行就打开预填好的 `github.com/new?name=quiet-notes&visibility=private`，用户点一次「Create repository」，回来在列表里选中它。
-- **token 存系统钥匙串**：macOS 用 Keychain（通过已有的 `core-foundation`/`objc` 调 Security framework，不调 `security` 命令行，免得 token 出现在进程参数里）；Windows 用凭据管理器（已有的 `windows` crate 加 `Win32_Security_Credentials` 特性）；Linux 第一期存在本机数据目录、权限 0600 的文件里。绝不写进库里。
+- **没有 gh 时新建仓库**：GitHub App 的用户 token 能不能直接替用户建私有仓库，要实测。不行就打开预填好的 `github.com/new?name=quiet-notes&visibility=private`，用户点一次「Create repository」，回来在列表里选中它。
+- **设备码 / PAT 的 token 存系统钥匙串**：macOS 用 Keychain（通过已有的 `core-foundation`/`objc` 调 Security framework，不调 `security` 命令行，免得 token 出现在进程参数里）；Windows 用凭据管理器（已有的 `windows` crate 加 `Win32_Security_Credentials` 特性）；Linux 第一期存在本机数据目录、权限 0600 的文件里。绝不写进库里。
 - 调 curl 时，token 从 stdin 以配置的形式传入（`curl --config -`），不出现在命令行参数里。
 - 高级选项：可以改填 PAT（GitHub Enterprise，或者不想装 App 的人）；以后的 c 模式用系统 git 自己的凭据。
 
