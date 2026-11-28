@@ -424,14 +424,20 @@ fn public_key() -> Option<minisign_verify::PublicKey> {
     minisign_verify::PublicKey::decode(KEY.trim()).ok().or_else(|| minisign_verify::PublicKey::from_base64(KEY.trim()).ok())
 }
 
-/// `a` is a later version than `b` (dotted numbers; a missing part is 0).
+/// `a` is a later version than `b` (dotted numbers; a missing part is 0; a
+/// `-rc.1` suffix comes before the release it leads up to, and two candidates
+/// of the same release do not replace each other).
 pub(crate) fn newer(a: &str, b: &str) -> bool {
-    let parts = |v: &str| -> Option<Vec<u64>> { v.split('.').map(|p| p.parse().ok()).collect() };
-    let (Some(mut a), Some(mut b)) = (parts(a), parts(b)) else { return false };
+    let parts = |v: &str| -> Option<(Vec<u64>, bool)> {
+        let (numbers, suffix) = v.split_once('-').unwrap_or((v, ""));
+        let numbers = numbers.split('.').map(|p| p.parse().ok()).collect::<Option<Vec<u64>>>()?;
+        Some((numbers, suffix.is_empty()))
+    };
+    let (Some((mut a, a_released)), Some((mut b, b_released))) = (parts(a), parts(b)) else { return false };
     let n = a.len().max(b.len());
     a.resize(n, 0);
     b.resize(n, 0);
-    a > b
+    (a, a_released) > (b, b_released)
 }
 
 /// This copy can replace itself: an installed, release-signed build.
@@ -901,6 +907,13 @@ mod tests {
         assert!(!newer("0.1.3.0", "0.1.3"));
         assert!(!newer("0.1.2", "0.1.3"));
         assert!(!newer("0.1.x", "0.1.3"));
+        // A release candidate comes before the release it leads up to, and
+        // after the one before it.
+        assert!(!newer("0.1.15-rc.1", "0.1.15-rc.1"));
+        assert!(newer("0.1.15-rc.1", "0.1.14"));
+        assert!(!newer("0.1.15-rc.2", "0.1.15-rc.1"));
+        assert!(newer("0.1.15", "0.1.15-rc.1"));
+        assert!(!newer("0.1.15-rc.1", "0.1.15"));
     }
 
     // A throwaway key (not the release key) and its signature of b"quiet.md" as quiet-md-0.2.0-macos-arm64.zip.
